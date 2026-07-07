@@ -1,24 +1,24 @@
 { DatabaseMarker marker-core:mail:DatabaseMarker
   CommitSequence marker-core:mail:CommitSequence }
-[Record
- Observe
- Mark
- Commit]
-[Recorded
- Observed
- Marked
- Committed
- Rejected]
+[(Record RecordPayload)
+ (Observe ObservePayload)
+ (Mark MarkPayload)
+ (Commit CommitPayload)]
+[(Recorded RecordedPayload)
+ (Observed ObservedPayload)
+ (Marked MarkedPayload)
+ (Committed CommittedPayload)
+ (Rejected RejectedPayload)]
 {
-  Record Entry
-  Observe Query
-  Mark DatabaseMarker
-  Commit CommitSequence
-  Recorded RecordReceipt
-  Observed RecordSet
-  Marked DatabaseMarker
-  Committed CommitSequence
-  Rejected Rejection
+  RecordPayload Entry
+  ObservePayload Query
+  MarkPayload DatabaseMarker
+  CommitPayload CommitSequence
+  RecordedPayload RecordReceipt
+  ObservedPayload RecordSet
+  MarkedPayload DatabaseMarker
+  CommittedPayload CommitSequence
+  RejectedPayload Rejection
   Topic String
   Topics (Vector Topic)
   Description String

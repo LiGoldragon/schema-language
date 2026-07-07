@@ -882,6 +882,13 @@ impl TrueSchema {
                         variant_name: variant.name.as_str().to_owned(),
                     });
                 }
+                if let Some(payload_type) = variant.same_named_direct_payload_type() {
+                    return Err(SchemaError::SameNamedVariantPayload {
+                        enum_name: declaration.name.as_str().to_owned(),
+                        variant_name: variant.name.as_str().to_owned(),
+                        payload_type: payload_type.to_owned(),
+                    });
+                }
                 self.verify_reference_arities(payload)?;
             }
         }
@@ -2139,6 +2146,15 @@ impl EnumVariant {
     pub fn with_stream_relation(mut self, stream_relation: StreamRelation) -> Self {
         self.stream_relation = Some(stream_relation);
         self
+    }
+
+    pub(crate) fn same_named_direct_payload_type(&self) -> Option<&str> {
+        let payload_name = self.payload.as_ref()?.plain_name()?;
+        if payload_name.local_part() == self.name.local_part() {
+            Some(payload_name.local_part())
+        } else {
+            None
+        }
     }
 }
 

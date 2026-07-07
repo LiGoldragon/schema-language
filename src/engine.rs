@@ -91,6 +91,14 @@ pub enum SchemaError {
         enum_name: String,
         variant_name: String,
     },
+    #[error(
+        "same-named enum-variant payload {enum_name}::{variant_name}({payload_type}); direct variant payload type names must differ from their variant names"
+    )]
+    SameNamedVariantPayload {
+        enum_name: String,
+        variant_name: String,
+        payload_type: String,
+    },
     #[error("io error at {path}: {reason}")]
     Io { path: String, reason: String },
     #[error("malformed schema path: {path}")]

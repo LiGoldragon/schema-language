@@ -47,7 +47,7 @@ fn lowers_spirit_schema_into_ordered_schema() {
             .plain_name()
             .expect("plain payload")
             .as_str(),
-        "Record"
+        "RecordPayload"
     );
     assert_eq!(
         schema
@@ -56,10 +56,10 @@ fn lowers_spirit_schema_into_ordered_schema() {
             .map(|declaration| declaration.name().as_str())
             .collect::<Vec<_>>(),
         vec![
-            "Record",
-            "Observe",
-            "RecordAccepted",
-            "RecordsObserved",
+            "RecordPayload",
+            "ObservePayload",
+            "RecordAcceptedPayload",
+            "RecordsObservedPayload",
             "Topic",
             "Topics",
             "Description",
@@ -114,21 +114,35 @@ fn bare_reference_declarations_lower_to_newtypes() {
 }
 
 #[test]
-fn self_tagged_variant_form_equals_explicit_repetition() {
-    let compact_source =
-        std::fs::read_to_string("tests/fixtures/lowering/self-tagged-variant.schema")
-            .expect("read compact variant fixture");
-    let explicit_source =
-        std::fs::read_to_string("tests/fixtures/lowering/explicit-repeated-variant.schema")
-            .expect("read explicit repeated variant fixture");
-    let compact = SchemaEngine::default()
-        .lower_source(&compact_source, SchemaIdentity::new("example", "0.1.0"))
-        .expect("compact self-tagged variant lowers");
-    let explicit = SchemaEngine::default()
-        .lower_source(&explicit_source, SchemaIdentity::new("example", "0.1.0"))
-        .expect("explicit repetition lowers");
+fn same_named_direct_variant_payloads_are_rejected() {
+    for fixture_name in ["self-tagged-variant", "explicit-repeated-variant"] {
+        let source =
+            std::fs::read_to_string(format!("tests/fixtures/lowering/{fixture_name}.schema"))
+                .unwrap_or_else(|error| panic!("read {fixture_name} fixture: {error}"));
+        let error = SchemaEngine::default()
+            .lower_source(&source, SchemaIdentity::new("example", "0.1.0"))
+            .expect_err("same-name payload is rejected");
 
-    let variant = &root_enum(compact.input()).variants[0];
+        assert_eq!(
+            error,
+            schema_language::SchemaError::SameNamedVariantPayload {
+                enum_name: "Input".to_owned(),
+                variant_name: "Entry".to_owned(),
+                payload_type: "Entry".to_owned(),
+            },
+            "{fixture_name} should fail with the structural same-name payload error"
+        );
+    }
+}
+
+#[test]
+fn distinct_leaf_variant_payload_is_accepted() {
+    let source = "[(Entry EntryLeaf)] [] { Value String EntryLeaf { Value } }";
+    let schema = SchemaEngine::default()
+        .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
+        .expect("distinct leaf payload lowers");
+
+    let variant = &root_enum(schema.input()).variants[0];
     assert_eq!(variant.name.as_str(), "Entry");
     assert_eq!(
         variant
@@ -138,11 +152,7 @@ fn self_tagged_variant_form_equals_explicit_repetition() {
             .plain_name()
             .expect("plain payload")
             .as_str(),
-        "Entry"
-    );
-    assert_eq!(
-        variant.payload,
-        root_enum(explicit.input()).variants[0].payload
+        "EntryLeaf"
     );
 }
 
@@ -918,7 +928,9 @@ fn star_shorthand_derives_fields_and_data_variant_payloads_from_real_schema() {
     );
     assert_eq!(
         some_enum.variants[0].payload,
-        Some(TypeReference::Plain(Name::new("SomethingHoldingSomething")))
+        Some(TypeReference::Plain(Name::new(
+            "SomethingHoldingSomethingPayload"
+        )))
     );
     assert_eq!(some_enum.variants[1].payload, None);
     assert_eq!(some_enum.variants[2].payload, Some(TypeReference::String));

@@ -1,7 +1,11 @@
 {}
-[(Record { Topic Description }) (Select [(ByTopic { Topic }) (ByDescription { Description })])]
+[(Record RecordPayload) (Select SelectPayload)]
 []
 {
   Topic String
   Description String
+  RecordPayload { Topic Description }
+  ByTopicPayload { Topic }
+  ByDescriptionPayload { Description }
+  SelectPayload [(ByTopic ByTopicPayload) (ByDescription ByDescriptionPayload)]
 }

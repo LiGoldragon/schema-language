@@ -4,7 +4,7 @@ use schema_language::{
 };
 
 fn fixture_source() -> &'static str {
-    "{}\n[Record]\n[Recorded]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains (Vector Domain)\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents (Vector String)\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}"
+    "{}\n[(Record Entry)]\n[(Recorded Entry)]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains (Vector Domain)\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents (Vector String)\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}"
 }
 
 fn true_schema_fixture() -> TrueSchema {

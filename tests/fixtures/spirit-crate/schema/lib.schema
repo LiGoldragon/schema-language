@@ -1,10 +1,10 @@
-[Record Observe]
-[RecordAccepted RecordsObserved]
+[(Record RecordPayload) (Observe ObservePayload)]
+[(RecordAccepted RecordAcceptedPayload) (RecordsObserved RecordsObservedPayload)]
 {
-  Record Entry
-  Observe Query
-  RecordAccepted RecordIdentifier
-  RecordsObserved RecordSet
+  RecordPayload Entry
+  ObservePayload Query
+  RecordAcceptedPayload RecordIdentifier
+  RecordsObservedPayload RecordSet
   Topic String
   Topics (Vector Topic)
   Description String

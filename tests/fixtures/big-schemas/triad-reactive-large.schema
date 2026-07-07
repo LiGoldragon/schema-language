@@ -1,64 +1,64 @@
-[SignalIn
- NexusIn
- SemaIn
- Admin
+[(SignalIn SignalInPayload)
+ (NexusIn NexusInPayload)
+ (SemaIn SemaInPayload)
+ (Admin AdminPayload)
  Heartbeat]
-[SignalOut
- NexusOut
- SemaOut
- AdminOut
- Event
- Rejected]
+[(SignalOut SignalOutPayload)
+ (NexusOut NexusOutPayload)
+ (SemaOut SemaOutPayload)
+ (AdminOut AdminOutPayload)
+ (Event EventPayload)
+ (Rejected RejectedPayload)]
 {
-  SignalIn SignalRequest
-  NexusIn NexusRequest
-  SemaIn SemaRequest
-  Admin AdminRequest
-  SignalOut SignalReply
-  NexusOut NexusReply
-  SemaOut SemaReply
-  AdminOut AdminReply
-  Event RuntimeEvent
-  Rejected RejectedReply
+  SignalInPayload SignalRequest
+  NexusInPayload NexusRequest
+  SemaInPayload SemaRequest
+  AdminPayload AdminRequest
+  SignalOutPayload SignalReply
+  NexusOutPayload NexusReply
+  SemaOutPayload SemaReply
+  AdminOutPayload AdminReply
+  EventPayload RuntimeEvent
+  RejectedPayload RejectedReply
   CommitSequence Integer
   DatabaseDigest Integer
   ActorIdentifier String
   SocketPath String
-  SignalRequest [(RecordIntent) (ObserveIntent) (SubscribeIntent)]
-  SignalReply [(RecordAccepted) (ObservationReturned) (SubscriptionStarted)]
-  NexusRequest [(PushSignal) (PushSemaResult) ResolveMail ExpireMail]
-  NexusReply [(PushedToSema) (MailResolved) MailExpired]
-  SemaRequest [(WriteEntry) (ReadEntries) (OpenSubscription) (CloseSubscription)]
-  SemaReply [(EntryWritten) (EntriesRead) (SubscriptionOpened) (SubscriptionClosed)]
-  AdminRequest [Drain Pause Resume (Snapshot)]
-  AdminReply [Drained Paused Resumed (SnapshotReady)]
-  RuntimeEvent [(MailSent) (MessageAccepted) (MessageCommitted) (MessageFailed)]
+  SignalRequest [(RecordIntent RecordIntentPayload) (ObserveIntent ObserveIntentPayload) (SubscribeIntent SubscribeIntentPayload)]
+  SignalReply [(RecordAccepted RecordAcceptedPayload) (ObservationReturned ObservationReturnedPayload) (SubscriptionStarted SubscriptionStartedPayload)]
+  NexusRequest [(PushSignal PushSignalPayload) (PushSemaResult PushSemaResultPayload) ResolveMail ExpireMail]
+  NexusReply [(PushedToSema PushedToSemaPayload) (MailResolved MailResolvedPayload) MailExpired]
+  SemaRequest [(WriteEntry WriteEntryPayload) (ReadEntries ReadEntriesPayload) (OpenSubscription OpenSubscriptionPayload) (CloseSubscription CloseSubscriptionPayload)]
+  SemaReply [(EntryWritten EntryWrittenPayload) (EntriesRead EntriesReadPayload) (SubscriptionOpened SubscriptionOpenedPayload) (SubscriptionClosed SubscriptionClosedPayload)]
+  AdminRequest [Drain Pause Resume (Snapshot SnapshotPayload)]
+  AdminReply [Drained Paused Resumed (SnapshotReady SnapshotReadyPayload)]
+  RuntimeEvent [(MailSent MailSentPayload) (MessageAccepted MessageAcceptedPayload) (MessageCommitted MessageCommittedPayload) (MessageFailed MessageFailedPayload)]
   RejectedReply { RejectionReason }
   RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion InternalError]
-  RecordIntent { ActorIdentifier Entry }
-  ObserveIntent { Query }
-  SubscribeIntent { Query }
-  RecordAccepted { RecordIdentifier CommitSequence }
-  ObservationReturned { RecordSet }
-  SubscriptionStarted { SubscriptionToken }
-  PushSignal { SignalRequest }
-  PushSemaResult { SemaReply }
-  PushedToSema { SemaRequest }
-  MailResolved { SignalReply }
-  WriteEntry { Entry }
-  ReadEntries { Query }
-  OpenSubscription { Query }
-  CloseSubscription { SubscriptionToken }
-  EntryWritten { RecordIdentifier CommitSequence DatabaseDigest }
-  EntriesRead { RecordSet DatabaseDigest }
-  SubscriptionOpened { SubscriptionToken CommitSequence }
-  SubscriptionClosed { SubscriptionToken CommitSequence }
-  Snapshot { SocketPath }
-  SnapshotReady { SocketPath DatabaseDigest }
-  MailSent { SignalRequest }
-  MessageAccepted { SignalRequest }
-  MessageCommitted { CommitSequence }
-  MessageFailed { RejectionReason }
+  RecordIntentPayload { ActorIdentifier Entry }
+  ObserveIntentPayload { Query }
+  SubscribeIntentPayload { Query }
+  RecordAcceptedPayload { RecordIdentifier CommitSequence }
+  ObservationReturnedPayload { RecordSet }
+  SubscriptionStartedPayload { SubscriptionToken }
+  PushSignalPayload { SignalRequest }
+  PushSemaResultPayload { SemaReply }
+  PushedToSemaPayload { SemaRequest }
+  MailResolvedPayload { SignalReply }
+  WriteEntryPayload { Entry }
+  ReadEntriesPayload { Query }
+  OpenSubscriptionPayload { Query }
+  CloseSubscriptionPayload { SubscriptionToken }
+  EntryWrittenPayload { RecordIdentifier CommitSequence DatabaseDigest }
+  EntriesReadPayload { RecordSet DatabaseDigest }
+  SubscriptionOpenedPayload { SubscriptionToken CommitSequence }
+  SubscriptionClosedPayload { SubscriptionToken CommitSequence }
+  SnapshotPayload { SocketPath }
+  SnapshotReadyPayload { SocketPath DatabaseDigest }
+  MailSentPayload { SignalRequest }
+  MessageAcceptedPayload { SignalRequest }
+  MessageCommittedPayload { CommitSequence }
+  MessageFailedPayload { RejectionReason }
   Entry { Topics Kind Description Magnitude ActorIdentifier }
   Topic String
   Topics (Vector Topic)

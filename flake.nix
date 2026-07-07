@@ -53,7 +53,7 @@
             grep -R "design_example_schema_node_macro_call_is_tagged_data" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_user_declared_macros_extend_structural_and_named_slots" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_root_enum_uses_direct_variant_shapes" ${src}/tests/design_examples.rs >/dev/null
-            grep -R "design_example_same_name_payload_variant_uses_self_tagged_payload" ${src}/tests/design_examples.rs >/dev/null
+            grep -R "design_example_same_name_payload_variant_is_rejected" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_signal_nexus_and_sema_are_schema_declared_planes" ${src}/tests/design_examples.rs >/dev/null
             touch $out
           '';
@@ -169,7 +169,7 @@
             grep -R "macro_library_split_does_not_return_through_public_surface" ${src}/tests/operator_271_closed_claims.rs >/dev/null
             # Claim 4 — honest enum bodies CLOSED.
             grep -R "production_schema_sources_use_honest_enum_bodies" ${src}/tests/operator_271_closed_claims.rs >/dev/null
-            grep -R "spirit_min_input_enum_body_has_compact_root_variants" ${src}/tests/operator_271_closed_claims.rs >/dev/null
+            grep -R "spirit_min_input_enum_body_has_explicit_payload_variants" ${src}/tests/operator_271_closed_claims.rs >/dev/null
             # Claim 5 — SchemaSource plus semantic TrueSchema own the retired Asschema path.
             grep -R "schema_is_typed_data_with_named_field_accessors" ${src}/tests/operator_271_closed_claims.rs >/dev/null
             grep -R "schema_source_and_semantic_schema_round_trip_without_asschema_artifacts" ${src}/tests/operator_271_closed_claims.rs >/dev/null

@@ -1,30 +1,30 @@
-[Record
- Correct
- Observe
- Watch
- Unwatch
+[(Record RecordPayload)
+ (Correct CorrectPayload)
+ (Observe ObservePayload)
+ (Watch WatchPayload)
+ (Unwatch UnwatchPayload)
  Reindex
  Compact]
-[Recorded
- Corrected
- Observed
- Watching
- Unwatched
- Rejected
- Indexed]
+[(Recorded RecordedPayload)
+ (Corrected CorrectedPayload)
+ (Observed ObservedPayload)
+ (Watching WatchingPayload)
+ (Unwatched UnwatchedPayload)
+ (Rejected RejectedPayload)
+ (Indexed IndexedPayload)]
 {
-  Record Entry
-  Correct Correction
-  Observe Query
-  Watch WatchRequest
-  Unwatch SubscriptionToken
-  Recorded RecordReceipt
-  Corrected CorrectionReceipt
-  Observed RecordSet
-  Watching SubscriptionReceipt
-  Unwatched SubscriptionReceipt
-  Rejected Rejection
-  Indexed IndexReceipt
+  RecordPayload Entry
+  CorrectPayload Correction
+  ObservePayload Query
+  WatchPayload WatchRequest
+  UnwatchPayload SubscriptionToken
+  RecordedPayload RecordReceipt
+  CorrectedPayload CorrectionReceipt
+  ObservedPayload RecordSet
+  WatchingPayload SubscriptionReceipt
+  UnwatchedPayload SubscriptionReceipt
+  RejectedPayload Rejection
+  IndexedPayload IndexReceipt
   Topic String
   Topics (Vector Topic)
   Description String

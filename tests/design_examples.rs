@@ -443,35 +443,24 @@ fn design_example_root_enum_uses_direct_variant_shapes() {
     assert_eq!(variants, vec![("Record", Some("Entry")), ("Drop", None)]);
 }
 
-/// Illustrates: same-name payload variants use compact self-tagged data
-/// variants. The old star suffix is gone from authored schema.
+/// Illustrates: same-name payload variants are rejected because the
+/// variant and direct payload type collapse in text projection. Use a
+/// distinct payload type name such as `RecordLeaf` instead.
 #[test]
-fn design_example_same_name_payload_variant_uses_self_tagged_payload() {
+fn design_example_same_name_payload_variant_is_rejected() {
     let source = std::fs::read_to_string("tests/fixtures/design/same-name-payload-variant.schema")
         .expect("read same-name payload fixture");
-    let schema = SchemaEngine::default()
+    let error = SchemaEngine::default()
         .lower_source(&source, SchemaIdentity::new("example", "0.1.0"))
-        .expect("self-tagged same-name variants lower");
+        .expect_err("self-tagged same-name variants are rejected");
 
     assert_eq!(
-        root_enum(schema.input()).variants[0]
-            .payload
-            .as_ref()
-            .expect("record payload")
-            .plain_name()
-            .expect("plain payload")
-            .as_str(),
-        "Record",
-    );
-    assert_eq!(
-        root_enum(schema.output()).variants[0]
-            .payload
-            .as_ref()
-            .expect("recorded payload")
-            .plain_name()
-            .expect("plain payload")
-            .as_str(),
-        "Recorded",
+        error,
+        schema_language::SchemaError::SameNamedVariantPayload {
+            enum_name: "Input".to_owned(),
+            variant_name: "Record".to_owned(),
+            payload_type: "Record".to_owned(),
+        }
     );
 }
 

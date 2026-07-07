@@ -21,8 +21,8 @@ use schema_language::{
 };
 
 fn entry_schema_source() -> &'static str {
-    "[Record Observe]\n\
-     [RecordAccepted RecordsObserved]\n\
+    "[(Record Entry) (Observe Query)]\n\
+     [(RecordAccepted RecordIdentifier) (RecordsObserved RecordSet)]\n\
      {\n\
        Record Entry\n\
        Observe Query\n\

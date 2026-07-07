@@ -27,7 +27,7 @@ fn schema_source_artifact_round_trips_module_source_text() {
         "canonical schema source text should recover the same source object"
     );
     assert_eq!(
-        "{}\n[Record Observe]\n[RecordAccepted RecordsObserved]\n{\n  Record Entry\n  Observe Query\n  RecordAccepted RecordIdentifier\n  RecordsObserved RecordSet\n  Topic String\n  Topics (Vector Topic)\n  Description String\n  RecordIdentifier Integer\n  Entry { Topics Kind Description Magnitude }\n  Query { Topic Kind }\n  RecordSet (Vector Entry)\n  Kind [Decision Principle Correction Clarification Constraint]\n  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]\n}",
+        "{}\n[(Record RecordPayload) (Observe ObservePayload)]\n[(RecordAccepted RecordAcceptedPayload) (RecordsObserved RecordsObservedPayload)]\n{\n  RecordPayload Entry\n  ObservePayload Query\n  RecordAcceptedPayload RecordIdentifier\n  RecordsObservedPayload RecordSet\n  Topic String\n  Topics (Vector Topic)\n  Description String\n  RecordIdentifier Integer\n  Entry { Topics Kind Description Magnitude }\n  Query { Topic Kind }\n  RecordSet (Vector Entry)\n  Kind [Decision Principle Correction Clarification Constraint]\n  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]\n}",
         canonical,
         "source codec should write one canonical schema source surface"
     );
@@ -360,12 +360,12 @@ fn namespace_inline_enum_variant_declarations_are_public_payload_types() {
             .map(|declaration| (declaration.name().as_str(), declaration.visibility()))
             .collect::<Vec<_>>(),
         vec![
-            ("Craft", schema_language::Visibility::Public),
-            ("Information", schema_language::Visibility::Public),
             ("Domain", schema_language::Visibility::Public),
+            ("CraftLeaf", schema_language::Visibility::Public),
+            ("InformationLeaf", schema_language::Visibility::Public),
             ("Entry", schema_language::Visibility::Public),
         ],
-        "inline enum variants exposed through a public namespace enum must be public payload types"
+        "distinct enum-variant payload types exposed through a public namespace enum must be public payload types"
     );
     let Some(TypeDeclaration::Enum(domain)) = schema.type_named("Domain") else {
         panic!("Domain should lower to an enum");
@@ -386,14 +386,14 @@ fn namespace_inline_enum_variant_declarations_are_public_payload_types() {
             })
             .collect::<Vec<_>>(),
         vec![
-            ("Craft", Some("Craft")),
-            ("Information", Some("Information"))
+            ("Craft", Some("CraftLeaf")),
+            ("Information", Some("InformationLeaf"))
         ]
     );
 }
 
 #[test]
-fn root_header_bare_names_resolve_to_exported_namespace_payloads() {
+fn root_header_explicit_names_resolve_to_exported_namespace_payloads() {
     let source = source_codec_fixture("root-header-bare-names");
     let artifact = SchemaSourceArtifact::from_schema_text(&source).expect("schema source decodes");
     let schema = artifact
@@ -415,7 +415,7 @@ fn root_header_bare_names_resolve_to_exported_namespace_payloads() {
             .as_ref()
             .and_then(schema_language::TypeReference::plain_name)
             .map(schema_language::Name::as_str),
-        Some("Lookup")
+        Some("RecordIdentifier")
     );
     assert_eq!(input.variants[1].name.as_str(), "Count");
     assert_eq!(
@@ -424,14 +424,14 @@ fn root_header_bare_names_resolve_to_exported_namespace_payloads() {
             .as_ref()
             .and_then(schema_language::TypeReference::plain_name)
             .map(schema_language::Name::as_str),
-        Some("Count")
+        Some("Query")
     );
     assert!(
         schema.type_named("Lookup").is_some(),
         "root header should resolve through the exported namespace object"
     );
     let Some(TypeDeclaration::Newtype(lookup)) = schema.type_named("Lookup") else {
-        panic!("bare namespace binding should lower to a newtype");
+        panic!("namespace binding should lower to a newtype");
     };
     assert_eq!(
         lookup
@@ -455,12 +455,12 @@ fn root_header_inline_declarations_are_exported_namespace_payloads() {
         .expect("schema source lowers");
 
     assert!(
-        schema.type_named("Lookup").is_some(),
-        "inline root declaration should enter the exported namespace"
+        schema.type_named("LookupPayload").is_some(),
+        "root payload declaration should enter the exported namespace"
     );
     assert!(
-        schema.type_named("Count").is_some(),
-        "second inline root declaration should enter the exported namespace"
+        schema.type_named("CountPayload").is_some(),
+        "second root payload declaration should enter the exported namespace"
     );
     assert_eq!(
         schema
@@ -472,7 +472,7 @@ fn root_header_inline_declarations_are_exported_namespace_payloads() {
             .as_ref()
             .and_then(schema_language::TypeReference::plain_name)
             .map(schema_language::Name::as_str),
-        Some("Lookup")
+        Some("LookupPayload")
     );
     assert_eq!(
         schema
@@ -484,8 +484,8 @@ fn root_header_inline_declarations_are_exported_namespace_payloads() {
             ("RecordIdentifier", schema_language::Visibility::Public),
             ("Query", schema_language::Visibility::Public),
             ("Topic", schema_language::Visibility::Public),
-            ("Lookup", schema_language::Visibility::Public),
-            ("Count", schema_language::Visibility::Public),
+            ("LookupPayload", schema_language::Visibility::Public),
+            ("CountPayload", schema_language::Visibility::Public),
         ]
     );
 }
@@ -511,15 +511,15 @@ fn root_payload_field_declarations_are_exported_namespace_types() {
         vec![
             ("Topic", schema_language::Visibility::Public),
             ("Description", schema_language::Visibility::Public),
-            ("Record", schema_language::Visibility::Public),
+            ("RecordPayload", schema_language::Visibility::Public),
         ]
     );
     let Some(TypeDeclaration::Newtype(topic)) = schema.type_named("Topic") else {
         panic!("Topic should lower to a public newtype");
     };
     assert_eq!(topic.reference, schema_language::TypeReference::String);
-    let Some(TypeDeclaration::Struct(record)) = schema.type_named("Record") else {
-        panic!("Record should lower to a public struct");
+    let Some(TypeDeclaration::Struct(record)) = schema.type_named("RecordPayload") else {
+        panic!("RecordPayload should lower to a public struct");
     };
     assert_eq!(
         record
@@ -563,14 +563,14 @@ fn later_inline_payloads_resolve_root_payload_field_declarations() {
         vec![
             ("Topic", schema_language::Visibility::Public),
             ("Description", schema_language::Visibility::Public),
-            ("Record", schema_language::Visibility::Public),
-            ("ByTopic", schema_language::Visibility::Private),
-            ("ByDescription", schema_language::Visibility::Private),
-            ("Select", schema_language::Visibility::Public),
+            ("RecordPayload", schema_language::Visibility::Public),
+            ("ByTopicPayload", schema_language::Visibility::Public),
+            ("ByDescriptionPayload", schema_language::Visibility::Public),
+            ("SelectPayload", schema_language::Visibility::Public),
         ]
     );
-    let Some(TypeDeclaration::Newtype(by_topic)) = schema.type_named("ByTopic") else {
-        panic!("ByTopic should lower to a private newtype helper");
+    let Some(TypeDeclaration::Newtype(by_topic)) = schema.type_named("ByTopicPayload") else {
+        panic!("ByTopicPayload should lower to a public newtype helper");
     };
     assert_eq!(
         by_topic
@@ -820,8 +820,10 @@ fn source_enum_variants_are_typed_structural_macro_nodes() {
     assert_eq!(input_variants[2].name().as_str(), "Inline");
     assert_eq!(
         input_variants[2].payload(),
-        None,
-        "inline declaration payload is not a reference at the source layer"
+        Some(&schema_language::SourceReference::Plain(
+            schema_language::Name::new("InlinePayload")
+        )),
+        "distinct payload declarations are ordinary references at the source layer"
     );
 
     let schema = artifact
@@ -853,13 +855,13 @@ fn source_enum_variants_are_typed_structural_macro_nodes() {
         vec![
             ("Reserved", None),
             ("Record", Some("Entry")),
-            ("Inline", Some("Inline")),
+            ("Inline", Some("InlinePayload")),
         ],
         "lowering happens after structural variant selection"
     );
     assert!(
-        schema.type_named("Inline").is_some(),
-        "inline structural payload is exported as the variant's same-named type"
+        schema.type_named("InlinePayload").is_some(),
+        "structural payload is exported as a distinct payload type"
     );
 }
 

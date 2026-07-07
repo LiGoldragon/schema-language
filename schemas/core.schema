@@ -6,7 +6,8 @@
   BuiltinMacroShapes (Vector MacroShape)
   BuiltinMacroOutputs (Vector MacroOutputKind)
   BuiltinMacroDefinitions (Vector MacroLibrarySourceEntry)
-  MacroLibrarySourceEntry [(SchemaMacro)]
+  MacroLibrarySourceEntry [(SchemaMacro SchemaMacroPayload)]
+  SchemaMacroPayload SchemaMacro
   SchemaMacro { MacroName MacroPosition MacroPattern MacroTemplate }
   MacroName String
   MacroPattern MacroPatternObject

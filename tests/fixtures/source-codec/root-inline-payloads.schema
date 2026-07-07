@@ -1,8 +1,10 @@
 {}
-[(Lookup { RecordIdentifier }) (Count { Query })]
+[(Lookup LookupPayload) (Count CountPayload)]
 []
 {
   RecordIdentifier Integer
   Query { Topic }
   Topic String
+  LookupPayload { RecordIdentifier }
+  CountPayload { Query }
 }

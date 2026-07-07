@@ -1,6 +1,6 @@
 {}
-[Lookup Count]
-[Found Counted]
+[(Lookup RecordIdentifier) (Count Query)]
+[(Found Entry) (Counted Integer)]
 {
   Lookup RecordIdentifier
   Count Query

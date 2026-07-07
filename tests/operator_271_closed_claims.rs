@@ -201,7 +201,7 @@ fn production_schema_sources_use_honest_enum_bodies() {
 /// `[Record Observe]` shape. The namespace defines those payload objects one
 /// level below the root header.
 #[test]
-fn spirit_min_input_enum_body_has_compact_root_variants() {
+fn spirit_min_input_enum_body_has_explicit_payload_variants() {
     let source = include_str!("../schemas/spirit-min.schema");
     let document = Document::parse(source).expect("spirit-min.schema parses as NOTA");
     let root_objects = document.root_objects();
@@ -223,8 +223,8 @@ fn spirit_min_input_enum_body_has_compact_root_variants() {
         "input is a SquareBracket enum-body vector"
     );
 
-    // Root payloads are exported namespace objects, so every input root entry
-    // is the compact bare operation name.
+    // Root payloads use explicit, distinct payload type names so same-named
+    // variant payloads cannot collapse in projection.
     assert!(
         !variants.is_empty(),
         "input vector contains at least one variant"
@@ -232,9 +232,12 @@ fn spirit_min_input_enum_body_has_compact_root_variants() {
     let names = variants
         .iter()
         .map(|variant| match variant {
-            Block::Atom(atom) => atom.text(),
+            Block::Delimited { root_objects, .. } => root_objects
+                .first()
+                .and_then(Block::demote_to_string)
+                .expect("spirit-min input variant starts with an operation name"),
             _ => panic!(
-                "every spirit-min input variant must be a bare operation name; got {variant:?}"
+                "every spirit-min input variant must carry an explicit payload type; got {variant:?}"
             ),
         })
         .collect::<Vec<_>>();
