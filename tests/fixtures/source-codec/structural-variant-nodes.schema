@@ -1,0 +1,7 @@
+{}
+[Reserved (Record Entry) (Inline { Topic })]
+[]
+{
+  Entry { Topic }
+  Topic String
+}

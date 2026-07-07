@@ -1,0 +1,35 @@
+{ DatabaseMarker marker-core:mail:DatabaseMarker
+  CommitSequence marker-core:mail:CommitSequence }
+[Record
+ Observe
+ Mark
+ Commit]
+[Recorded
+ Observed
+ Marked
+ Committed
+ Rejected]
+{
+  Record Entry
+  Observe Query
+  Mark DatabaseMarker
+  Commit CommitSequence
+  Recorded RecordReceipt
+  Observed RecordSet
+  Marked DatabaseMarker
+  Committed CommitSequence
+  Rejected Rejection
+  Topic String
+  Topics (Vector Topic)
+  Description String
+  AgentName String
+  RecordIdentifier Integer
+  Rejection { Description }
+  Limit (Optional Integer)
+  Entries (Vector Entry)
+  ByTopic (Map Topic RecordIdentifier)
+  Entry { Topics Description AgentName DatabaseMarker }
+  Query { Topics Limit }
+  RecordReceipt { RecordIdentifier DatabaseMarker CommitSequence }
+  RecordSet { Entries ByTopic }
+}

@@ -1,0 +1,9 @@
+{}
+[]
+[]
+{
+  Topic String
+  RecordIdentifier Integer
+  ByTopic (Map Topic RecordIdentifier)
+  Entry { RecordIdentifier ByTopic }
+}

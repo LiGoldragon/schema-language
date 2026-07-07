@@ -1,0 +1,7 @@
+[]
+[]
+{
+  CommitSequence Integer
+  StateDigest Integer
+  DatabaseMarker { CommitSequence StateDigest }
+}

@@ -1,0 +1,7 @@
+{}
+[(Record { Topic Description }) (Select [(ByTopic { Topic }) (ByDescription { Description })])]
+[]
+{
+  Topic String
+  Description String
+}

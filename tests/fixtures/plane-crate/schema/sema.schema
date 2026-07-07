@@ -1,0 +1,7 @@
+[(Record Entry)]
+[(Recorded Receipt)]
+{
+  Topic String
+  Entry { Topic }
+  Receipt Integer
+}

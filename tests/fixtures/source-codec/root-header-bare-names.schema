@@ -1,0 +1,13 @@
+{}
+[Lookup Count]
+[Found Counted]
+{
+  Lookup RecordIdentifier
+  Count Query
+  Found Entry
+  Counted Integer
+  RecordIdentifier Integer
+  Query { Topic }
+  Topic String
+  Entry { Topic }
+}

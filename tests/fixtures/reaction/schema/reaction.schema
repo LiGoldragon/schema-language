@@ -1,0 +1,7 @@
+{}
+[]
+[]
+{
+  (| Work Event WriteDone ReadDone EffectDone |) [(SignalArrived Event) (SemaWriteCompleted WriteDone) (SemaReadCompleted ReadDone) (EffectCompleted EffectDone)]
+  (| Action Reply Write Read Effect Continuation |) [(ReplyToSignal Reply) (CommandSemaWrite Write) (CommandSemaRead Read) (CommandEffect Effect) (Continue Continuation)]
+}

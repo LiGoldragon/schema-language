@@ -1,0 +1,7 @@
+{}
+[]
+[]
+{
+  Domain [(Information [Database]) (Technology [(Hardware [Networking]) (Software [(Distributed [Networking]) (Data [DatabaseSystems])])])]
+}
+[(Equivalence [(Technology Hardware Networking) (Technology Software Distributed Networking)]) (Equivalence [(Information Database) (Technology Software Data DatabaseSystems)])]

@@ -1,0 +1,54 @@
+[Record
+ Correct
+ Observe
+ Watch
+ Unwatch
+ Reindex
+ Compact]
+[Recorded
+ Corrected
+ Observed
+ Watching
+ Unwatched
+ Rejected
+ Indexed]
+{
+  Record Entry
+  Correct Correction
+  Observe Query
+  Watch WatchRequest
+  Unwatch SubscriptionToken
+  Recorded RecordReceipt
+  Corrected CorrectionReceipt
+  Observed RecordSet
+  Watching SubscriptionReceipt
+  Unwatched SubscriptionReceipt
+  Rejected Rejection
+  Indexed IndexReceipt
+  Topic String
+  Topics (Vector Topic)
+  Description String
+  AgentName String
+  Timestamp Integer
+  RecordIdentifier Integer
+  SubscriptionToken Integer
+  CommitSequence Integer
+  DatabaseDigest Integer
+  Kinds (Vector Kind)
+  Limit (Optional Integer)
+  Records (Vector Entry)
+  ByTopic (Map Topic RecordIdentifier)
+  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
+  Kind [Decision Principle Correction Clarification Constraint Observation Question]
+  RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion]
+  Entry { Topics Kind Description Magnitude AgentName Timestamp }
+  Correction { RecordIdentifier Description Magnitude AgentName Timestamp }
+  Query { Topics Kinds Limit }
+  WatchRequest { Topics Kinds AgentName }
+  RecordReceipt { RecordIdentifier CommitSequence DatabaseDigest }
+  CorrectionReceipt { RecordIdentifier CommitSequence DatabaseDigest }
+  RecordSet { Records ByTopic }
+  SubscriptionReceipt { SubscriptionToken CommitSequence }
+  Rejection { RejectionReason Description }
+  IndexReceipt { CommitSequence DatabaseDigest }
+}

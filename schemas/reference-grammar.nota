@@ -1,0 +1,12 @@
+;; The canonical parenthesis-reference dispatch precedence, as data.
+;;
+;; schema-language-cc decodes + validates this grammar and GENERATES schema-language's real
+;; parenthesis resolver (src/reference_resolver_generated.rs) from it, in
+;; declared precedence order: each Builtin head first (Vector/Optional/ScopeOf
+;; one type argument, Map two, Bytes one Atom leaf), then the registry rung
+;; (DeclaredMacro) and the generic catch-all (Application) — both of which map
+;; to schema-language's from_macro_or_application tail.
+;;
+;; Edit this grammar + regenerate (SCHEMA_UPDATE_RESOLVER=1 cargo build);
+;; never hand-edit the generated resolver.
+(ReferenceGrammar (Builtin Vector 1) (Builtin Optional 1) (Builtin ScopeOf 1) (Builtin Map 2) (Builtin Bytes Atom) DeclaredMacro Application)

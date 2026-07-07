@@ -1,0 +1,6 @@
+{}
+[]
+[]
+{
+  NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.Node } Boolean) ] |}
+}

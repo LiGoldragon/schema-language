@@ -1,0 +1,26 @@
+[]
+[]
+{
+  CoreSchema { BuiltinMacroPositions BuiltinMacroShapes BuiltinMacroOutputs BuiltinMacroDefinitions }
+  BuiltinMacroPositions (Vector MacroPosition)
+  BuiltinMacroShapes (Vector MacroShape)
+  BuiltinMacroOutputs (Vector MacroOutputKind)
+  BuiltinMacroDefinitions (Vector MacroLibrarySourceEntry)
+  MacroLibrarySourceEntry [(SchemaMacro)]
+  SchemaMacro { MacroName MacroPosition MacroPattern MacroTemplate }
+  MacroName String
+  MacroPattern MacroPatternObject
+  MacroPatternObjects (Vector MacroPatternObject)
+  MacroPatternObject [(Capture MacroCaptureName) (RestCapture MacroCaptureName) (Atom MacroAtom) (Delimited MacroPatternDelimited)]
+  MacroPatternDelimited { MacroDelimiter MacroPatternObjects }
+  MacroTemplate MacroTemplateObject
+  MacroTemplateObjects (Vector MacroTemplateObject)
+  MacroTemplateObject [(Capture MacroCaptureName) (RestCapture MacroCaptureName) (Atom MacroAtom) (Delimited MacroTemplateDelimited)]
+  MacroTemplateDelimited { MacroDelimiter MacroTemplateObjects }
+  MacroCaptureName String
+  MacroAtom String
+  MacroDelimiter [SquareBracket Brace Parenthesis PipeParenthesis PipeBrace]
+  MacroPosition [RootImports RootInput RootOutput RootNamespace NamespaceDeclaration StructFields EnumVariants TypeReference]
+  MacroShape [BraceMap ParenthesisEnum SquareStruct KeyValueDeclaration VariantDefinition Symbol]
+  MacroOutputKind [Imports RootEnum Types Type Fields Variants Reference References AssembledSchema]
+}

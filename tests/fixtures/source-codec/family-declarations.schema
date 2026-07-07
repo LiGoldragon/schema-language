@@ -1,0 +1,15 @@
+{}
+[(Record Entry) (Observe Query)]
+[Recorded (Rejected Rejection)]
+{
+  Topic String
+  Body String
+  Note String
+  Reason String
+  Entry { Topic Body }
+  Observation { Note }
+  Query { Topic }
+  Rejection { Reason }
+  EntryFamily (Family { record.Entry table.entries key.Domain })
+  ObservationFamily (Family { record.Observation table.observations key.Identified })
+}

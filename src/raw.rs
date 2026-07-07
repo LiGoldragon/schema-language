@@ -1,0 +1,299 @@
+use std::path::Path;
+
+use nota::{Block, Delimiter, Document};
+
+use crate::{Name, SchemaError, macros::SchemaBlockExt};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RawSchemaFile {
+    root_name: Name,
+    datatypes: RawDatatypeMap,
+}
+
+impl RawSchemaFile {
+    pub fn from_path_and_source(path: impl AsRef<Path>, source: &str) -> Result<Self, SchemaError> {
+        let root_name = RawSchemaFileName::from_path(path.as_ref())?.to_name();
+        let document = Document::parse(source)?;
+        RawSchemaDocument::new(&document).read(root_name)
+    }
+
+    pub fn root_name(&self) -> &Name {
+        &self.root_name
+    }
+
+    pub fn datatypes(&self) -> &RawDatatypeMap {
+        &self.datatypes
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RawDatatypeMap {
+    entries: Vec<RawDatatypeEntry>,
+}
+
+impl RawDatatypeMap {
+    pub fn from_blocks(objects: &[Block]) -> Result<Self, SchemaError> {
+        if objects.len() % 2 != 0 {
+            return Err(SchemaError::ExpectedEvenMapEntries {
+                found: objects.len(),
+            });
+        }
+        let mut entries = Vec::new();
+        for pair in objects.chunks_exact(2) {
+            entries.push(RawDatatypeEntry {
+                name: pair[0].schema_name()?,
+                datatype: RawNotaDatatype::from_block(&pair[1])?,
+            });
+        }
+        Ok(Self { entries })
+    }
+
+    pub fn entries(&self) -> &[RawDatatypeEntry] {
+        &self.entries
+    }
+
+    pub fn datatype_named(&self, name: &str) -> Option<&RawNotaDatatype> {
+        self.entries
+            .iter()
+            .find(|entry| entry.name.as_str() == name)
+            .map(RawDatatypeEntry::datatype)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RawDatatypeEntry {
+    name: Name,
+    datatype: RawNotaDatatype,
+}
+
+impl RawDatatypeEntry {
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn datatype(&self) -> &RawNotaDatatype {
+        &self.datatype
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RawNotaDatatype {
+    Atom(String),
+    Text(String),
+    Record(RawNotaSequence),
+    Vector(RawNotaSequence),
+    KeyValue(RawDatatypeMap),
+    PipeParenthesis(RawNotaSequence),
+    PipeBrace(RawNotaSequence),
+}
+
+impl RawNotaDatatype {
+    pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
+        match block {
+            Block::Atom(atom) => Ok(Self::Atom(atom.text().to_owned())),
+            Block::PipeText(text) => Ok(Self::Text(text.text.clone())),
+            Block::Delimited {
+                delimiter: Delimiter::Parenthesis,
+                root_objects,
+                ..
+            } => Ok(Self::Record(RawNotaSequence::from_blocks(root_objects)?)),
+            Block::Delimited {
+                delimiter: Delimiter::SquareBracket,
+                root_objects,
+                ..
+            } => Ok(Self::Vector(RawNotaSequence::from_blocks(root_objects)?)),
+            Block::Delimited {
+                delimiter: Delimiter::Brace,
+                root_objects,
+                ..
+            } => Ok(Self::KeyValue(RawDatatypeMap::from_blocks(root_objects)?)),
+            Block::Delimited {
+                delimiter: Delimiter::PipeParenthesis,
+                root_objects,
+                ..
+            } => Ok(Self::PipeParenthesis(RawNotaSequence::from_blocks(
+                root_objects,
+            )?)),
+            Block::Delimited {
+                delimiter: Delimiter::PipeBrace,
+                root_objects,
+                ..
+            } => Ok(Self::PipeBrace(RawNotaSequence::from_blocks(root_objects)?)),
+        }
+    }
+
+    pub fn as_atom(&self) -> Option<&str> {
+        match self {
+            Self::Atom(text) => Some(text),
+            Self::Text(_)
+            | Self::Record(_)
+            | Self::Vector(_)
+            | Self::KeyValue(_)
+            | Self::PipeParenthesis(_)
+            | Self::PipeBrace(_) => None,
+        }
+    }
+
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Atom(_)
+            | Self::Record(_)
+            | Self::Vector(_)
+            | Self::KeyValue(_)
+            | Self::PipeParenthesis(_)
+            | Self::PipeBrace(_) => None,
+        }
+    }
+
+    pub fn as_record(&self) -> Option<&RawNotaSequence> {
+        match self {
+            Self::Record(sequence) => Some(sequence),
+            Self::Atom(_)
+            | Self::Text(_)
+            | Self::Vector(_)
+            | Self::KeyValue(_)
+            | Self::PipeParenthesis(_)
+            | Self::PipeBrace(_) => None,
+        }
+    }
+
+    pub fn as_vector(&self) -> Option<&RawNotaSequence> {
+        match self {
+            Self::Vector(sequence) => Some(sequence),
+            Self::Atom(_)
+            | Self::Text(_)
+            | Self::Record(_)
+            | Self::KeyValue(_)
+            | Self::PipeParenthesis(_)
+            | Self::PipeBrace(_) => None,
+        }
+    }
+
+    pub fn as_key_value(&self) -> Option<&RawDatatypeMap> {
+        match self {
+            Self::KeyValue(map) => Some(map),
+            Self::Atom(_)
+            | Self::Text(_)
+            | Self::Record(_)
+            | Self::Vector(_)
+            | Self::PipeParenthesis(_)
+            | Self::PipeBrace(_) => None,
+        }
+    }
+
+    pub fn as_pipe_parenthesis(&self) -> Option<&RawNotaSequence> {
+        match self {
+            Self::PipeParenthesis(sequence) => Some(sequence),
+            Self::Atom(_)
+            | Self::Text(_)
+            | Self::Record(_)
+            | Self::Vector(_)
+            | Self::KeyValue(_)
+            | Self::PipeBrace(_) => None,
+        }
+    }
+
+    pub fn as_pipe_brace(&self) -> Option<&RawNotaSequence> {
+        match self {
+            Self::PipeBrace(sequence) => Some(sequence),
+            Self::Atom(_)
+            | Self::Text(_)
+            | Self::Record(_)
+            | Self::Vector(_)
+            | Self::KeyValue(_)
+            | Self::PipeParenthesis(_) => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RawNotaSequence {
+    items: Vec<RawNotaDatatype>,
+}
+
+impl RawNotaSequence {
+    pub fn from_blocks(objects: &[Block]) -> Result<Self, SchemaError> {
+        let mut items = Vec::new();
+        for object in objects {
+            items.push(RawNotaDatatype::from_block(object)?);
+        }
+        Ok(Self { items })
+    }
+
+    pub fn items(&self) -> &[RawNotaDatatype] {
+        &self.items
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RawSchemaDocument<'document> {
+    document: &'document Document,
+}
+
+impl<'document> RawSchemaDocument<'document> {
+    fn new(document: &'document Document) -> Self {
+        Self { document }
+    }
+
+    fn read(&self, root_name: Name) -> Result<RawSchemaFile, SchemaError> {
+        if self.document.holds_root_objects() != 1 {
+            return Err(SchemaError::ExpectedRootObjectCount {
+                expected: "one root key-value datatype map",
+                found: self.document.holds_root_objects(),
+            });
+        }
+        let root = self.document.root_object_at(0).expect("root count checked");
+        let Block::Delimited {
+            delimiter: Delimiter::Brace,
+            root_objects,
+            ..
+        } = root
+        else {
+            return Err(SchemaError::ExpectedDelimiter {
+                expected: "root key-value datatype map",
+            });
+        };
+        Ok(RawSchemaFile {
+            root_name,
+            datatypes: RawDatatypeMap::from_blocks(root_objects)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RawSchemaFileName {
+    stem: String,
+}
+
+impl RawSchemaFileName {
+    fn from_path(path: &Path) -> Result<Self, SchemaError> {
+        let stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| SchemaError::MalformedSchemaPath {
+                path: path.display().to_string(),
+            })?;
+        Ok(Self {
+            stem: stem.to_owned(),
+        })
+    }
+
+    fn to_name(&self) -> Name {
+        let mut output = String::new();
+        let mut upper_next = true;
+        for character in self.stem.chars() {
+            if character.is_ascii_alphanumeric() {
+                if upper_next {
+                    output.push(character.to_ascii_uppercase());
+                    upper_next = false;
+                } else {
+                    output.push(character);
+                }
+            } else {
+                upper_next = true;
+            }
+        }
+        Name::new(output)
+    }
+}
