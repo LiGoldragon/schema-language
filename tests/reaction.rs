@@ -192,15 +192,25 @@ fn frame_declarations_close_over_their_binders() {
         let closure = reaction
             .family_closure(head)
             .unwrap_or_else(|error| panic!("{head} closes over its binders: {error:?}"));
-        let names = closure
+        let declaration_names = closure
             .declarations()
             .iter()
             .map(|declaration| declaration.name().as_str().to_owned())
             .collect::<Vec<_>>();
+        let generic_names = closure
+            .generics()
+            .iter()
+            .map(|definition| definition.name().as_str().to_owned())
+            .collect::<Vec<_>>();
         assert_eq!(
-            names,
+            declaration_names,
+            Vec::<String>::new(),
+            "{head} pulls in no ordinary declarations — binders are parameters"
+        );
+        assert_eq!(
+            generic_names,
             [head],
-            "{head} pulls in no extra declarations — binders are parameters"
+            "{head} itself is the reachable generic"
         );
     }
 }

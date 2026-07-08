@@ -95,6 +95,7 @@ fn family_record_closure_hashes_through_the_content_identity_surface() {
 fn family_record_must_resolve_to_a_declared_type() {
     let source = "\
 {}
+{}
 [(Record Entry)]
 [Recorded]
 {
@@ -118,6 +119,7 @@ fn family_record_must_resolve_to_a_declared_type() {
 fn duplicate_family_names_are_a_typed_error() {
     let source = "\
 {}
+{}
 [(Record Entry)]
 [Recorded]
 {
@@ -140,6 +142,7 @@ fn duplicate_family_names_are_a_typed_error() {
 #[test]
 fn duplicate_family_tables_are_a_typed_error() {
     let source = "\
+{}
 {}
 [(Record Entry) (Observe Query)]
 [Recorded]
@@ -165,6 +168,7 @@ fn duplicate_family_tables_are_a_typed_error() {
 #[test]
 fn family_key_kind_is_a_closed_structural_choice() {
     let source = "\
+{}
 {}
 [(Record Entry)]
 [Recorded]

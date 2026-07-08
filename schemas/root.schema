@@ -1,22 +1,30 @@
+{}
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 []
 []
 {
   TrueSchema { Input Output Namespace }
-  Imports (Vector ImportDeclaration)
-  Namespace (Vector Declaration)
+  Imports Vector.ImportDeclaration
+  Namespace Vector.Declaration
   ImportDeclaration { Name TypeReference }
   Declaration [(Public NamedTypeDeclaration) (Private NamedTypeDeclaration)]
   NamedTypeDeclaration { Name TypeDeclaration }
   TypeDeclaration [(Struct StructDeclaration) (Enum EnumDeclaration) (Newtype NewtypeDeclaration)]
   StructDeclaration { Name StructFieldMap }
   NewtypeDeclaration { Name TypeReference }
-  StructFieldMap (Vector FieldDeclaration)
+  StructFieldMap Vector.FieldDeclaration
   FieldDeclaration { Name TypeReference }
   EnumDeclaration { Name Variants }
-  Variants (Vector VariantDeclaration)
+  Variants Vector.VariantDeclaration
   VariantDeclaration { Name Payload }
   Payload [Unit (Carries TypeReference)]
-  TypeReference [String Integer Boolean Path (Plain Name) (Vector TypeReference) (Map TypeReferencePair) (Optional TypeReference)]
+  TypeReference [String Integer Boolean Path (Plain Name) Vector.TypeReference (Map TypeReferencePair) Optional.TypeReference]
   TypeReferencePair { key.TypeReference value.TypeReference }
   Name String
 }

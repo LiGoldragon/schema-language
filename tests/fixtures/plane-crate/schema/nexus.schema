@@ -1,4 +1,4 @@
-{ SignalInput plane-crate:signal:Input SignalOutput plane-crate:signal:Output }
+{ SignalInput plane-crate:signal:Input SignalOutput plane-crate:signal:Output }{}
 [(SignalArrived SignalInput)]
 [(ReplyToSignal SignalOutput)]
 {

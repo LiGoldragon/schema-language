@@ -27,7 +27,7 @@ fn schema_source_artifact_round_trips_module_source_text() {
         "canonical schema source text should recover the same source object"
     );
     assert_eq!(
-        "{}\n[(Record RecordPayload) (Observe ObservePayload)]\n[(RecordAccepted RecordAcceptedPayload) (RecordsObserved RecordsObservedPayload)]\n{\n  RecordPayload Entry\n  ObservePayload Query\n  RecordAcceptedPayload RecordIdentifier\n  RecordsObservedPayload RecordSet\n  Topic String\n  Topics (Vector Topic)\n  Description String\n  RecordIdentifier Integer\n  Entry { Topics Kind Description Magnitude }\n  Query { Topic Kind }\n  RecordSet (Vector Entry)\n  Kind [Decision Principle Correction Clarification Constraint]\n  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]\n}",
+        "{}\n{\n  Vector Vector\n  Optional Optional\n  ScopeOf ScopeOf\n  Map Map\n  Bytes FixedBytes\n}\n[(Record RecordPayload) (Observe ObservePayload)]\n[(RecordAccepted RecordAcceptedPayload) (RecordsObserved RecordsObservedPayload)]\n{\n  RecordPayload Entry\n  ObservePayload Query\n  RecordAcceptedPayload RecordIdentifier\n  RecordsObservedPayload RecordSet\n  Topic String\n  Topics Vector.Topic\n  Description String\n  RecordIdentifier Integer\n  Entry { Topics Kind Description Magnitude }\n  Query { Topic Kind }\n  RecordSet Vector.Entry\n  Kind [Decision Principle Correction Clarification Constraint]\n  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]\n}",
         canonical,
         "source codec should write one canonical schema source surface"
     );
@@ -96,7 +96,7 @@ fn reheaded_source_declarations_round_trip_help_forms() {
     assert_eq!(decoded.to_schema_text(), encoded);
     assert_eq!(
         encoded,
-        "(Record { Entry Justification })\n(Kind [Decision Principle])\n(Domains (Vector Domain))\n(Version)"
+        "(Record { Entry Justification })\n(Kind [Decision Principle])\n(Domains Vector.Domain)\n(Version)"
     );
 }
 
@@ -129,7 +129,7 @@ fn schema_source_reference_fields_lower_to_canonical_field_names() {
 
 #[test]
 fn schema_source_explicit_structural_fields_round_trip() {
-    let source = "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.(Vector Topic) Limit.(Optional Integer) }\n}";
+    let source = "{}\n{\n  Vector Vector\n  Optional Optional\n}\n[]\n[]\n{\n  Topic String\n  Query { topics.Vector.Topic archived.Vector.Topic limit.Optional.Integer fallback.Optional.Integer }\n}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("schema source decodes");
     let canonical = artifact.to_schema_text();
     let recovered = SchemaSourceArtifact::from_schema_text(&canonical)
@@ -147,15 +147,17 @@ fn schema_source_explicit_structural_fields_round_trip() {
 
     assert_eq!(
         canonical,
-        "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.(Vector Topic) Limit.(Optional Integer) }\n}"
+        "{}\n{\n  Vector Vector\n  Optional Optional\n}\n[]\n[]\n{\n  Topic String\n  Query { topics.Vector.Topic archived.Vector.Topic limit.Optional.Integer fallback.Optional.Integer }\n}"
     );
     assert_eq!(query.fields[0].name.as_str(), "topics");
-    assert_eq!(query.fields[1].name.as_str(), "limit");
+    assert_eq!(query.fields[1].name.as_str(), "archived");
+    assert_eq!(query.fields[2].name.as_str(), "limit");
+    assert_eq!(query.fields[3].name.as_str(), "fallback");
 }
 
 #[test]
 fn schema_source_exposes_one_level_help_projection_inputs() {
-    let source = "{}\n[(Record { Entry Justification })]\n[RecordAccepted]\n{\n  Entry { Domains Kind Description }\n  Domains (Vector Domain)\n  Description String\n  Kind [Decision Principle]\n  RecordIdentifier String\n}";
+    let source = "{}\n{\n  Vector Vector\n}\n[(Record { Entry Justification })]\n[RecordAccepted]\n{\n  Entry { Domains Kind Description }\n  Domains Vector.Domain\n  Description String\n  Kind [Decision Principle]\n  RecordIdentifier String\n}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("schema source decodes");
     let input = artifact
         .source()
@@ -189,7 +191,7 @@ fn schema_source_exposes_one_level_help_projection_inputs() {
         panic!("Domains should expose its reference body");
     };
 
-    assert_eq!(reference.to_schema_text(), "(Vector Domain)");
+    assert_eq!(reference.to_schema_text(), "Vector.Domain");
 }
 
 #[test]
@@ -614,8 +616,7 @@ fn duplicate_inline_and_namespace_declarations_are_errors() {
     assert!(
         matches!(
             error,
-            SchemaError::MalformedSchemaNode { ref found }
-                if found.contains("retired struct field syntax topic")
+            SchemaError::RetiredStructFieldSyntax { ref found } if found == "topic"
         ),
         "got {error:?}"
     );
@@ -644,7 +645,7 @@ fn duplicate_inline_declarations_are_errors() {
 
 #[test]
 fn redundant_dot_field_roles_are_errors() {
-    let source = "{}\n[]\n[]\n{\n  Topic String\n  Entry { topic.Topic }\n}";
+    let source = "{}\n{}\n[]\n[]\n{\n  Topic String\n  Entry { topic.Topic }\n}";
     let error = SchemaSourceArtifact::from_schema_text(source)
         .expect_err("redundant explicit field role should fail before lowering");
     let rendered = error.to_string();
@@ -866,32 +867,16 @@ fn source_enum_variants_are_typed_structural_macro_nodes() {
 }
 
 #[test]
-fn source_enum_variant_reports_structural_macro_expected_shapes() {
+fn source_enum_variant_rejects_ungrouped_multi_object_payload() {
     let source = source_codec_fixture("unsupported-three-object-variant");
     let error = SchemaSourceArtifact::from_schema_text(&source)
         .expect_err("three-object variant signature is not a supported structural case");
 
-    let SchemaError::UnsupportedMacroNodeStructure {
-        position,
-        expected,
-        found,
-    } = error
-    else {
-        panic!("expected structural macro-node error, got {error:?}");
-    };
-
-    assert_eq!(position, "SourceVariantSignature");
-    assert_eq!(found, "parenthesis");
     assert!(
-        expected.iter().any(|case| case.contains("Unit")),
-        "diagnostic names the unit structural case"
-    );
-    assert!(
-        expected.iter().any(|case| case.contains("Data")),
-        "diagnostic names the data structural case"
-    );
-    assert!(
-        expected.iter().any(|case| case.contains("Streaming")),
-        "diagnostic names the streaming structural case"
+        matches!(
+            error,
+            SchemaError::ExpectedSyntaxReference { ref found } if found == "Entry Extra"
+        ),
+        "expected ungrouped multi-object payload to be rejected as a reference, got {error:?}"
     );
 }

@@ -1,5 +1,12 @@
 { DatabaseMarker marker-core:mail:DatabaseMarker
   CommitSequence marker-core:mail:CommitSequence }
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 [(Record RecordPayload)
  (Observe ObservePayload)
  (Mark MarkPayload)
@@ -20,14 +27,14 @@
   CommittedPayload CommitSequence
   RejectedPayload Rejection
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Description String
   AgentName String
   RecordIdentifier Integer
   Rejection { Description }
-  Limit (Optional Integer)
-  Entries (Vector Entry)
-  ByTopic (Map Topic RecordIdentifier)
+  Limit Optional.Integer
+  Entries Vector.Entry
+  ByTopic Map.(Topic RecordIdentifier)
   Entry { Topics Description AgentName DatabaseMarker }
   Query { Topics Limit }
   RecordReceipt { RecordIdentifier DatabaseMarker CommitSequence }

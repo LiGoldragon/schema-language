@@ -20,6 +20,7 @@ impl IdentityFixture {
     }
 
     const BASE: &'static str = "\
+{}
 [(Record Entry)]
 [(Recorded Receipt) (Rejected Rejection)]
 {
@@ -38,6 +39,8 @@ impl IdentityFixture {
     /// BASE re-spelled with different whitespace and `;;` comments —
     /// the same semantic schema in a different textual coat.
     const REFORMATTED: &'static str = "\
+;; generics
+{}
 ;; the input root
 [ (Record Entry) ]
 ;; the output root
@@ -59,6 +62,7 @@ impl IdentityFixture {
     /// BASE with `Magnitude` — two reference hops below `Entry` —
     /// changed from `Integer` to `String`.
     const DEEP_CHANGE: &'static str = "\
+{}
 [(Record Entry)]
 [(Recorded Receipt) (Rejected Rejection)]
 {
@@ -76,6 +80,7 @@ impl IdentityFixture {
 
     /// BASE with only `Unrelated` — unreachable from `Entry` — changed.
     const UNRELATED_CHANGE: &'static str = "\
+{}
 [(Record Entry)]
 [(Recorded Receipt) (Rejected Rejection)]
 {

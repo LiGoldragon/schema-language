@@ -149,8 +149,8 @@ where
         .1
 }
 
-/// Every parenthesised reference token the renderer emits must parse back
-/// through schema's own reference reader.
+/// Every source-reference token the renderer emits must parse back through
+/// schema's own reference reader.
 fn round_trips_as_reference(text: &str) {
     let block = NotaSource::new(text)
         .parse_root()
@@ -186,7 +186,7 @@ fn domain_match_partial_renders_enum_name_with_payload_reference() {
     // its inner `DomainScopes` newtype name.
     let rendered = InstanceSchemaText::new(&schema).aligned();
     assert_eq!(rendered, "(DomainMatch DomainScopes)");
-    round_trips_as_reference("(DomainMatch DomainScopes)");
+    round_trips_as_reference("DomainScopes");
 }
 
 #[test]
@@ -194,12 +194,12 @@ fn empty_domains_still_names_its_element_type() {
     let schema = schema_of::<Domains>("[]");
     // Aligned: the newtype wrapper name.
     assert_eq!(InstanceSchemaText::new(&schema).aligned(), "Domains");
-    // Expanded: the newtype name plus the (Vector Domain) container reference.
+    // Expanded: the newtype name plus the Vector.Domain container reference.
     assert_eq!(
         InstanceSchemaText::new(&schema).expanded(),
-        "(Domains (Vector Domain))"
+        "(Domains Vector.Domain)"
     );
-    round_trips_as_reference("(Vector Domain)");
+    round_trips_as_reference("Vector.Domain");
 }
 
 #[test]
@@ -224,5 +224,5 @@ fn certainty_newtype_renders_wrapper_then_magnitude() {
         InstanceSchemaText::new(&schema).expanded(),
         "(Certainty Magnitude)"
     );
-    round_trips_as_reference("(Certainty Magnitude)");
+    round_trips_as_reference("Magnitude");
 }

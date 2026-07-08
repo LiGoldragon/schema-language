@@ -1,21 +1,29 @@
+{}
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 []
 []
 {
   CoreSchema { BuiltinMacroPositions BuiltinMacroShapes BuiltinMacroOutputs BuiltinMacroDefinitions }
-  BuiltinMacroPositions (Vector MacroPosition)
-  BuiltinMacroShapes (Vector MacroShape)
-  BuiltinMacroOutputs (Vector MacroOutputKind)
-  BuiltinMacroDefinitions (Vector MacroLibrarySourceEntry)
+  BuiltinMacroPositions Vector.MacroPosition
+  BuiltinMacroShapes Vector.MacroShape
+  BuiltinMacroOutputs Vector.MacroOutputKind
+  BuiltinMacroDefinitions Vector.MacroLibrarySourceEntry
   MacroLibrarySourceEntry [(SchemaMacro SchemaMacroPayload)]
   SchemaMacroPayload SchemaMacro
   SchemaMacro { MacroName MacroPosition MacroPattern MacroTemplate }
   MacroName String
   MacroPattern MacroPatternObject
-  MacroPatternObjects (Vector MacroPatternObject)
+  MacroPatternObjects Vector.MacroPatternObject
   MacroPatternObject [(Capture MacroCaptureName) (RestCapture MacroCaptureName) (Atom MacroAtom) (Delimited MacroPatternDelimited)]
   MacroPatternDelimited { MacroDelimiter MacroPatternObjects }
   MacroTemplate MacroTemplateObject
-  MacroTemplateObjects (Vector MacroTemplateObject)
+  MacroTemplateObjects Vector.MacroTemplateObject
   MacroTemplateObject [(Capture MacroCaptureName) (RestCapture MacroCaptureName) (Atom MacroAtom) (Delimited MacroTemplateDelimited)]
   MacroTemplateDelimited { MacroDelimiter MacroTemplateObjects }
   MacroCaptureName String

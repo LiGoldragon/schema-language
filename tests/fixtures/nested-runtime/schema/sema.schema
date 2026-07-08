@@ -1,6 +1,6 @@
 {
   Observation nested-signal:lib:Observation
-}
+}{}
 [(Observe Observation)]
 [(Observed Observation)]
 {

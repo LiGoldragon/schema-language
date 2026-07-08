@@ -1,3 +1,11 @@
+{}
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 [(Record RecordPayload)
  (Correct CorrectPayload)
  (Observe ObservePayload)
@@ -26,7 +34,7 @@
   RejectedPayload Rejection
   IndexedPayload IndexReceipt
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Description String
   AgentName String
   Timestamp Integer
@@ -34,10 +42,10 @@
   SubscriptionToken Integer
   CommitSequence Integer
   DatabaseDigest Integer
-  Kinds (Vector Kind)
-  Limit (Optional Integer)
-  Records (Vector Entry)
-  ByTopic (Map Topic RecordIdentifier)
+  Kinds Vector.Kind
+  Limit Optional.Integer
+  Records Vector.Entry
+  ByTopic Map.(Topic RecordIdentifier)
   Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
   Kind [Decision Principle Correction Clarification Constraint Observation Question]
   RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion]

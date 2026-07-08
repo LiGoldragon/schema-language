@@ -2778,15 +2778,12 @@ impl NotaEncode for TypeReference {
     }
 }
 
-/// `TypeReference` is itself a structural-macro node so the application
-/// form's variable-arity tail (`Vec<TypeReference>`, via nota's blanket
-/// `StructuralMacroNode for Vec<Item>`) can decode each argument back through
-/// the full reference grammar. Decode delegates to [`Self::from_block`] (which
-/// owns the built-in-head fast path and the application seam), and encode is
-/// the source-grammar projection — a bare PascalCase atom for a leaf, a
-/// headed parenthesis for every composite. This is the source-facing grammar
-/// projection, distinct from the canonical-only `NotaEncode`/`NotaDecode`
-/// machine codec above.
+/// `TypeReference` is itself a structural-macro node so typed reference
+/// slots can decode the source-facing dotted grammar directly. A leaf is a
+/// bare atom, unary invocation is `Head.Argument`, and multi-argument
+/// invocation keeps the arguments as a grouped positional record such as
+/// `Map.(Key Value)`. This is distinct from the canonical-only
+/// `NotaEncode`/`NotaDecode` machine codec above.
 impl nota::StructuralMacroNode for TypeReference {
     type Error = SchemaError;
 
@@ -2804,18 +2801,15 @@ impl nota::StructuralMacroNode for TypeReference {
     fn from_structural_block(
         block: &Block,
     ) -> Result<Self, nota::StructuralMacroError<Self::Error>> {
-        Self::from_block(block).map_err(nota::StructuralMacroError::MatchedNode)
+        TypeReferenceStructuralReader::from_block_slice(std::slice::from_ref(block))
+            .map_err(nota::StructuralMacroError::MatchedNode)
     }
 
     fn from_structural_candidate(
         candidate: nota::MacroCandidate<'_>,
     ) -> Result<Self, nota::StructuralMacroError<Self::Error>> {
-        match candidate.blocks() {
-            [block] => Self::from_structural_block(block),
-            blocks => Err(nota::StructuralMacroError::ExpectedSingleRoot {
-                found: blocks.len(),
-            }),
-        }
+        TypeReferenceStructuralReader::from_block_references(candidate.blocks().to_vec())
+            .map_err(nota::StructuralMacroError::MatchedNode)
     }
 
     fn to_structural_nota(&self) -> String {
@@ -2828,40 +2822,281 @@ impl nota::StructuralMacroNode for TypeReference {
             Self::FixedBytes(width) => format!("Bytes.{width}"),
             Self::Plain(name) => name.to_nota(),
             Self::Vector(reference) => {
-                format!("Vector.{}", reference.to_structural_nota())
+                Self::structural_invocation_nota(&Name::new("Vector"), &[reference.as_ref()])
             }
             Self::Map(key, value) => {
-                format!(
-                    "Map.{}.{}",
-                    key.to_structural_nota(),
-                    value.to_structural_nota()
-                )
+                Self::structural_invocation_nota(&Name::new("Map"), &[key.as_ref(), value.as_ref()])
             }
             Self::Optional(reference) => {
-                format!("Optional.{}", reference.to_structural_nota())
+                Self::structural_invocation_nota(&Name::new("Optional"), &[reference.as_ref()])
             }
             Self::ScopeOf(reference) => {
-                format!("ScopeOf.{}", reference.to_structural_nota())
+                Self::structural_invocation_nota(&Name::new("ScopeOf"), &[reference.as_ref()])
             }
             Self::Application { head, arguments } => {
-                let tail = arguments
-                    .iter()
-                    .map(Self::to_structural_nota)
-                    .collect::<Vec<_>>();
-                if tail.is_empty() {
-                    head.name().to_nota()
-                } else {
-                    let mut segments = Vec::with_capacity(tail.len() + 1);
-                    segments.push(head.name().to_nota());
-                    segments.extend(tail);
-                    segments.join(".")
-                }
+                Self::structural_invocation_nota(head.name(), &arguments.iter().collect::<Vec<_>>())
             }
         }
     }
 }
 
+struct TypeReferenceStructuralReader<'block> {
+    blocks: Vec<&'block Block>,
+    cursor: usize,
+}
+
+impl<'block> TypeReferenceStructuralReader<'block> {
+    fn from_block_slice(blocks: &'block [Block]) -> Result<TypeReference, SchemaError> {
+        Self::from_block_references(blocks.iter().collect())
+    }
+
+    fn from_block_references(blocks: Vec<&'block Block>) -> Result<TypeReference, SchemaError> {
+        let mut reader = Self::new(blocks);
+        let reference = reader.read_reference()?;
+        reader.expect_finished()?;
+        Ok(reference)
+    }
+
+    fn new(blocks: Vec<&'block Block>) -> Self {
+        Self { blocks, cursor: 0 }
+    }
+
+    fn read_reference(&mut self) -> Result<TypeReference, SchemaError> {
+        let Some(block) = self.blocks.get(self.cursor) else {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: "dotted type reference",
+                expected: "a reference atom or dotted argument group",
+                found: 0,
+            });
+        };
+        match block {
+            Block::Atom(atom) => {
+                self.cursor += 1;
+                self.read_atom_text(atom.text())
+            }
+            _ => Err(SchemaError::ExpectedSyntaxReference {
+                found: block.reemit_fallback(),
+            }),
+        }
+    }
+
+    fn read_atom_text(&mut self, text: &str) -> Result<TypeReference, SchemaError> {
+        let Some(prefix) = text.strip_suffix('.') else {
+            return TypeReferenceDottedInvocation::new(text).without_group();
+        };
+        let Some(arguments_block) = self.blocks.get(self.cursor) else {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: "dotted type reference invocation",
+                expected: "a parenthesized argument group after the trailing dot",
+                found: 1,
+            });
+        };
+        self.cursor += 1;
+        let arguments = Self::arguments_from_block(arguments_block)?;
+        TypeReferenceDottedInvocation::new(prefix).with_group(arguments)
+    }
+
+    fn arguments_from_block(block: &'block Block) -> Result<Vec<TypeReference>, SchemaError> {
+        let body = NotaBody::from_delimited(block, Delimiter::Parenthesis, "type arguments")?;
+        let mut reader = Self::new(body.root_objects().iter().collect());
+        let mut arguments = Vec::new();
+        while !reader.is_finished() {
+            arguments.push(reader.read_reference()?);
+        }
+        Ok(arguments)
+    }
+
+    fn is_finished(&self) -> bool {
+        self.cursor >= self.blocks.len()
+    }
+
+    fn expect_finished(&self) -> Result<(), SchemaError> {
+        if self.is_finished() {
+            return Ok(());
+        }
+        Err(SchemaError::ExpectedSyntaxReferenceArity {
+            form: "dotted type reference",
+            expected: "one complete reference",
+            found: self.blocks.len() - self.cursor,
+        })
+    }
+}
+
+struct TypeReferenceDottedInvocation<'text> {
+    text: &'text str,
+}
+
+impl<'text> TypeReferenceDottedInvocation<'text> {
+    fn new(text: &'text str) -> Self {
+        Self { text }
+    }
+
+    fn without_group(&self) -> Result<TypeReference, SchemaError> {
+        let segments = self.segments()?;
+        Self::nest_unary(&segments)
+    }
+
+    fn with_group(&self, arguments: Vec<TypeReference>) -> Result<TypeReference, SchemaError> {
+        let segments = self.segments()?;
+        Self::nest_grouped(&segments, arguments)
+    }
+
+    fn segments(&self) -> Result<Vec<Name>, SchemaError> {
+        if self.text.is_empty() {
+            return Err(SchemaError::ExpectedSyntaxReference {
+                found: "empty dotted type reference head".to_owned(),
+            });
+        }
+        let mut segments = Vec::new();
+        for segment in self.text.split('.') {
+            if segment.is_empty() {
+                return Err(SchemaError::ExpectedSyntaxReference {
+                    found: self.text.to_owned(),
+                });
+            }
+            segments.push(Name::new(segment));
+        }
+        Ok(segments)
+    }
+
+    fn nest_unary(segments: &[Name]) -> Result<TypeReference, SchemaError> {
+        let Some((head, tail)) = segments.split_first() else {
+            return Err(SchemaError::ExpectedSyntaxReference {
+                found: "empty dotted type reference head".to_owned(),
+            });
+        };
+        if tail.is_empty() {
+            return Ok(TypeReference::from_name(head.clone()));
+        }
+        Self::resolve_invocation(head.clone(), vec![Self::nest_unary(tail)?])
+    }
+
+    fn nest_grouped(
+        segments: &[Name],
+        arguments: Vec<TypeReference>,
+    ) -> Result<TypeReference, SchemaError> {
+        let Some((head, tail)) = segments.split_first() else {
+            return Err(SchemaError::ExpectedSyntaxReference {
+                found: "empty dotted type reference head".to_owned(),
+            });
+        };
+        if tail.is_empty() {
+            return Self::resolve_invocation(head.clone(), arguments);
+        }
+        Self::resolve_invocation(head.clone(), vec![Self::nest_grouped(tail, arguments)?])
+    }
+
+    fn resolve_invocation(
+        head: Name,
+        arguments: Vec<TypeReference>,
+    ) -> Result<TypeReference, SchemaError> {
+        match ReferenceHead::classify(head.as_str()) {
+            Some(ReferenceHead::Vector) => Self::resolve_unary_builtin(head, arguments)
+                .map(|argument| TypeReference::Vector(Box::new(argument))),
+            Some(ReferenceHead::Optional) => Self::resolve_unary_builtin(head, arguments)
+                .map(|argument| TypeReference::Optional(Box::new(argument))),
+            Some(ReferenceHead::ScopeOf) => Self::resolve_unary_builtin(head, arguments)
+                .map(|argument| TypeReference::ScopeOf(Box::new(argument))),
+            Some(ReferenceHead::Map) => Self::resolve_map(head, arguments),
+            Some(ReferenceHead::Bytes) => Self::resolve_fixed_bytes(head, arguments),
+            None => Ok(TypeReference::Application {
+                head: ApplicationHead::Local(head),
+                arguments,
+            }),
+        }
+    }
+
+    fn resolve_unary_builtin(
+        head: Name,
+        arguments: Vec<TypeReference>,
+    ) -> Result<TypeReference, SchemaError> {
+        let [argument]: [TypeReference; 1] =
+            arguments.try_into().map_err(|arguments: Vec<_>| {
+                SchemaError::GenericArityMismatch {
+                    head: head.as_str().to_owned(),
+                    expected: 1,
+                    found: arguments.len(),
+                }
+            })?;
+        Ok(argument)
+    }
+
+    fn resolve_map(
+        head: Name,
+        arguments: Vec<TypeReference>,
+    ) -> Result<TypeReference, SchemaError> {
+        let [key, value]: [TypeReference; 2] =
+            arguments.try_into().map_err(|arguments: Vec<_>| {
+                SchemaError::GenericArityMismatch {
+                    head: head.as_str().to_owned(),
+                    expected: 2,
+                    found: arguments.len(),
+                }
+            })?;
+        Ok(TypeReference::Map(Box::new(key), Box::new(value)))
+    }
+
+    fn resolve_fixed_bytes(
+        head: Name,
+        arguments: Vec<TypeReference>,
+    ) -> Result<TypeReference, SchemaError> {
+        let [width]: [TypeReference; 1] = arguments.try_into().map_err(|arguments: Vec<_>| {
+            SchemaError::GenericArityMismatch {
+                head: head.as_str().to_owned(),
+                expected: 1,
+                found: arguments.len(),
+            }
+        })?;
+        let TypeReference::Plain(width) = width else {
+            return Err(SchemaError::ExpectedSyntaxReference {
+                found: head.to_nota(),
+            });
+        };
+        width
+            .as_str()
+            .parse::<u64>()
+            .map(TypeReference::FixedBytes)
+            .map_err(|_| SchemaError::ExpectedSyntaxReference {
+                found: format!("{}.{}", head.to_nota(), width.to_nota()),
+            })
+    }
+}
+
 impl TypeReference {
+    fn structural_invocation_nota(head: &Name, arguments: &[&TypeReference]) -> String {
+        match arguments {
+            [argument] if !argument.needs_group_as_single_structural_argument() => {
+                format!("{}.{}", head.to_nota(), argument.to_structural_nota())
+            }
+            [argument] => format!("{}.({})", head.to_nota(), argument.to_structural_nota()),
+            _ => {
+                let argument_text = arguments
+                    .iter()
+                    .map(|argument| argument.to_structural_nota())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{}.({argument_text})", head.to_nota())
+            }
+        }
+    }
+
+    fn needs_group_as_single_structural_argument(&self) -> bool {
+        match self {
+            Self::Map(..) => true,
+            Self::Application { arguments, .. } => arguments.len() != 1,
+            Self::String
+            | Self::Integer
+            | Self::Boolean
+            | Self::Path
+            | Self::Bytes
+            | Self::FixedBytes(_)
+            | Self::Plain(_)
+            | Self::Vector(_)
+            | Self::Optional(_)
+            | Self::ScopeOf(_) => false,
+        }
+    }
+
     /// Construct a reference from a schema name. Reserved scalar names
     /// become scalar leaves; every other name remains a declared-name
     /// leaf.

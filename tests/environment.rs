@@ -50,7 +50,7 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
     let fixture = FixturePackage::new();
     fixture.write_schema(
         "lib",
-        "{ Shared fixture-crate:shared:Shared }\n[(UseShared Shared)]\n[]\n{\n  UseShared Shared\n}\n[(Equivalence [UseShared Shared])]\n",
+        "{ Shared fixture-crate:shared:Shared }\n{}\n[(UseShared Shared)]\n[]\n{\n  UseShared Shared\n}\n[(Equivalence [UseShared Shared])]\n",
     );
     fixture.write_schema("shared", "{}\n[]\n[]\n{\n  Shared String\n}\n");
     fixture.write_schema("ignored", "{}\n[]\n[]\n{\n  Ignored String\n}\n");
@@ -80,6 +80,7 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             .collect::<Vec<_>>(),
         vec![
             SchemaRootBlockKind::Imports,
+            SchemaRootBlockKind::Generics,
             SchemaRootBlockKind::Input,
             SchemaRootBlockKind::Output,
             SchemaRootBlockKind::Namespace,
@@ -97,7 +98,7 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             .range()
             .start()
             .line(),
-        4
+        5
     );
     assert_eq!(
         module
@@ -109,6 +110,7 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
         vec![
             SchemaNodeType::Module,
             SchemaNodeType::Imports,
+            SchemaNodeType::Generics,
             SchemaNodeType::InputRoot,
             SchemaNodeType::OutputRoot,
             SchemaNodeType::Namespace,
@@ -122,7 +124,7 @@ fn environment_round_trips_canonical_source_and_resolves_package_imports() {
     let fixture = FixturePackage::new();
     fixture.write_schema(
         "lib",
-        "{ Shared fixture-crate:shared:Shared }\n[(UseShared Shared)]\n[]\n{\n  UseShared Shared\n}\n",
+        "{ Shared fixture-crate:shared:Shared }\n{}\n[(UseShared Shared)]\n[]\n{\n  UseShared Shared\n}\n",
     );
     fixture.write_schema("shared", "{}\n[]\n[]\n{\n  Shared String\n}\n");
 

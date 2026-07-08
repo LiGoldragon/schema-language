@@ -1,3 +1,11 @@
+{}
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 [(SignalIn SignalInPayload)
  (NexusIn NexusInPayload)
  (SemaIn SemaInPayload)
@@ -61,16 +69,16 @@
   MessageFailedPayload { RejectionReason }
   Entry { Topics Kind Description Magnitude ActorIdentifier }
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Description String
   Kind [Decision Principle Correction Clarification Constraint Observation Question]
   Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
-  Kinds (Vector Kind)
-  Limit (Optional Integer)
+  Kinds Vector.Kind
+  Limit Optional.Integer
   Query { Topics Kinds Limit }
   RecordIdentifier Integer
   SubscriptionToken Integer
-  Records (Vector Entry)
-  ByTopic (Map Topic RecordIdentifier)
+  Records Vector.Entry
+  ByTopic Map.(Topic RecordIdentifier)
   RecordSet { Records ByTopic }
 }

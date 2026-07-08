@@ -207,8 +207,8 @@ fn spirit_min_input_enum_body_has_explicit_payload_variants() {
     let root_objects = document.root_objects();
 
     let input = root_objects
-        .first()
-        .expect("spirit-min schema starts with an input enum-body vector");
+        .get(2)
+        .expect("spirit-min schema carries input after the imports and generics roots");
     let Block::Delimited {
         delimiter,
         root_objects: variants,

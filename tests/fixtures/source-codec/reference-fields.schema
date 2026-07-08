@@ -1,9 +1,16 @@
 {}
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 []
 []
 {
   Topic String
   RecordIdentifier Integer
-  ByTopic (Map Topic RecordIdentifier)
+  ByTopic Map.(Topic RecordIdentifier)
   Entry { RecordIdentifier ByTopic }
 }

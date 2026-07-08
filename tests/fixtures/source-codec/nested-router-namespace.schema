@@ -1,4 +1,11 @@
 {}
+{
+  Vector Vector
+  Optional Optional
+  ScopeOf ScopeOf
+  Map Map
+  Bytes FixedBytes
+}
 [(Deliver router:routed_object:Envelope)]
 []
 {
@@ -6,7 +13,7 @@
   ContractName String
   ContractOperation String
   ContractPayloadSize Integer
-  ContractPayloadOctets (Vector Integer)
+  ContractPayloadOctets Vector.Integer
   router:routed_object {
     Destination ActorIdentifier
     Contract ContractName

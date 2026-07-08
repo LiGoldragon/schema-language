@@ -200,18 +200,28 @@ struct SchemaRootBlockSummarySet {
 
 impl SchemaRootBlockSummarySet {
     fn from_document(document: &Document) -> Self {
-        let first_is_imports = document
+        let first_two_are_braces = document
             .root_object_at(0)
-            .is_some_and(|block| block.is_delimited_with(Delimiter::Brace));
+            .is_some_and(|block| block.is_delimited_with(Delimiter::Brace))
+            && document
+                .root_object_at(1)
+                .is_some_and(|block| block.is_delimited_with(Delimiter::Brace));
+        let imports_present = first_two_are_braces && document.holds_root_objects() >= 5;
         let mut blocks = Vec::new();
-        if first_is_imports {
+        if imports_present {
             blocks.extend(SchemaRootBlockSummary::from_document_block(
                 document,
                 0,
                 SchemaRootBlockKind::Imports,
             ));
         }
-        let input_index = if first_is_imports { 1 } else { 0 };
+        let generics_index = if imports_present { 1 } else { 0 };
+        blocks.extend(SchemaRootBlockSummary::from_document_block(
+            document,
+            generics_index,
+            SchemaRootBlockKind::Generics,
+        ));
+        let input_index = generics_index + 1;
         blocks.extend(SchemaRootBlockSummary::from_document_block(
             document,
             input_index,
@@ -277,6 +287,7 @@ impl SchemaRootBlockSummary {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SchemaRootBlockKind {
     Imports,
+    Generics,
     Input,
     Output,
     Namespace,
@@ -287,6 +298,7 @@ pub enum SchemaRootBlockKind {
 pub enum SchemaNodeType {
     Module,
     Imports,
+    Generics,
     InputRoot,
     OutputRoot,
     Namespace,
@@ -297,6 +309,7 @@ impl SchemaNodeType {
     fn from_root_block_kind(kind: SchemaRootBlockKind) -> Self {
         match kind {
             SchemaRootBlockKind::Imports => Self::Imports,
+            SchemaRootBlockKind::Generics => Self::Generics,
             SchemaRootBlockKind::Input => Self::InputRoot,
             SchemaRootBlockKind::Output => Self::OutputRoot,
             SchemaRootBlockKind::Namespace => Self::Namespace,

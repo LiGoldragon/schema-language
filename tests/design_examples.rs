@@ -22,11 +22,14 @@ fn root_enum(root: &Root) -> &EnumDeclaration {
     root.as_enum().expect("root is the enum-body form")
 }
 
+const BUILTIN_GENERIC_ROWS: &str =
+    "Vector Vector Optional Optional ScopeOf ScopeOf Map Map Bytes FixedBytes";
+
 /// Illustrates: a schema document is positional. The common no-import
-/// form has exactly 3 root values (input enum body, output enum body,
-/// namespace). A leading import map makes the 4-root form.
+/// form has exactly 4 root values (generics, input enum body, output enum
+/// body, namespace). Leading import and generic maps make the 5-root form.
 #[test]
-fn design_example_schema_document_has_three_roots_or_four_with_imports() {
+fn design_example_schema_document_has_four_roots_or_five_with_imports() {
     let too_few = "[] []";
     let error = SchemaEngine::default()
         .lower_source(too_few, SchemaIdentity::new("example", "0.1.0"))
@@ -34,29 +37,29 @@ fn design_example_schema_document_has_three_roots_or_four_with_imports() {
     assert_eq!(
         error,
         SchemaError::ExpectedRootObjectCount {
-            expected: "3 root values (input output namespace) or 4 with leading imports",
+            expected: "generics, input, output, and namespace roots, with optional leading imports",
             found: 2,
         }
     );
 
-    let too_many = "{} [] [] {} {}";
+    let too_many = "{} [] [] {} {} {}";
     let error = SchemaEngine::default()
         .lower_source(too_many, SchemaIdentity::new("example", "0.1.0"))
-        .expect_err("five root objects should fail");
+        .expect_err("six root objects should fail");
     assert_eq!(
         error,
         SchemaError::ExpectedRootObjectCount {
-            expected: "3 root values (input output namespace) or 4 with leading imports",
-            found: 5,
+            expected: "at most one trailing relations root",
+            found: 2,
         }
     );
 
     SchemaEngine::default()
-        .lower_source("[] [] {}", SchemaIdentity::new("example", "0.1.0"))
-        .expect("three-root no-import schema lowers");
-    SchemaEngine::default()
         .lower_source("{} [] [] {}", SchemaIdentity::new("example", "0.1.0"))
-        .expect("four-root import schema lowers");
+        .expect("four-root no-import schema lowers");
+    SchemaEngine::default()
+        .lower_source("{} {} [] [] {}", SchemaIdentity::new("example", "0.1.0"))
+        .expect("five-root import schema lowers");
 }
 
 /// Illustrates: the schema namespace is an honest brace key/value map.
@@ -69,7 +72,7 @@ fn design_example_schema_document_has_three_roots_or_four_with_imports() {
 /// the pair-style positive path.
 #[test]
 fn design_example_namespace_brace_contains_key_value_declarations() {
-    let source = "[] [] { Topic String Kind [Decision Constraint] }";
+    let source = "{} [] [] { Topic String Kind [Decision Constraint] }";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("key/value namespace lowers");
@@ -131,11 +134,12 @@ fn design_example_type_reference_macro_captures_use_dollar_sigils() {
         registry.register_box(schema_macro);
     }
     let engine = SchemaEngine::with_registry(registry);
-    let source = "[] [] { Topic String Topics (Bag Topic) }";
+    let source =
+        format!("{{ {BUILTIN_GENERIC_ROWS} }} [] [] {{ Topic String Topics (Bag Topic) }}");
     let mut context = MacroContext::default();
     engine
         .lower_source_with_context(
-            source,
+            &source,
             SchemaIdentity::new("example", "0.1.0"),
             &mut context,
         )
@@ -231,7 +235,7 @@ fn design_example_default_engine_uses_strict_structural_macros() {
         "legacy pipe declaration macro is loadable data, not default syntax"
     );
 
-    let source = "[] [] { Topic String }";
+    let source = "{} [] [] { Topic String }";
     let mut context = MacroContext::default();
     SchemaEngine::default()
         .lower_source_with_context(
@@ -269,7 +273,7 @@ fn design_example_default_engine_uses_strict_structural_macros() {
 /// triage.
 #[test]
 fn design_example_schema_lowering_records_source_structure_header() {
-    let source = "[(Record Entry)] [Accepted] { Value String Entry { Value } }";
+    let source = "{} [(Record Entry)] [Accepted] { Value String Entry { Value } }";
     let mut context = MacroContext::default();
     SchemaEngine::default()
         .lower_source_with_context(
@@ -292,13 +296,13 @@ fn design_example_schema_lowering_records_source_structure_header() {
     assert_eq!(
         observed,
         vec![
-            (StructureShape::Document, 3),
+            (StructureShape::Document, 4),
+            (StructureShape::Brace, 0),
             (StructureShape::SquareBracket, 1),
             (StructureShape::Parenthesis, 2),
             (StructureShape::SquareBracket, 1),
             (StructureShape::Atom, 0),
             (StructureShape::Brace, 4),
-            (StructureShape::Atom, 0),
             (StructureShape::Unknown, 15),
         ],
     );
@@ -420,7 +424,7 @@ fn design_example_schema_node_macro_call_is_tagged_data() {
 /// unit variants use bare symbols.
 #[test]
 fn design_example_root_enum_uses_direct_variant_shapes() {
-    let source = "[(Record Entry) Drop] [] {}";
+    let source = "{} [(Record Entry) Drop] [] {}";
 
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
@@ -483,11 +487,10 @@ fn design_example_user_declared_macros_extend_structural_and_named_slots() {
         registry.register_box(schema_macro);
     }
     let engine = SchemaEngine::with_registry(registry);
+    let source =
+        format!("{{ {BUILTIN_GENERIC_ROWS} }} [] [] {{ Topic String Topics (Bag Topic) }}");
     let schema = engine
-        .lower_source(
-            "[] [] { Topic String Topics (Bag Topic) }",
-            SchemaIdentity::new("example", "0.1.0"),
-        )
+        .lower_source(&source, SchemaIdentity::new("example", "0.1.0"))
         .expect("schema lowers through user macros");
 
     let TypeDeclaration::Newtype(topic) = schema.type_named("Topic").expect("topic type") else {
@@ -513,6 +516,7 @@ fn design_example_user_declared_macros_extend_structural_and_named_slots() {
 #[test]
 fn design_example_signal_nexus_and_sema_are_schema_declared_planes() {
     let source = "
+        { Vector Vector }
         [(Record Entry) (Observe Query)]
         [(RecordAccepted RecordIdentifier) (RecordsObserved RecordSet)]
         {
@@ -524,7 +528,7 @@ fn design_example_signal_nexus_and_sema_are_schema_declared_planes() {
           RecordIdentifier Integer
           Entry { Topic }
           Query { Topic }
-          RecordSet (Vector Entry)
+          RecordSet Vector.Entry
         }
     ";
     let schema = SchemaEngine::default()

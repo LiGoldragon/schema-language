@@ -458,10 +458,12 @@ impl SchemaEngine {
     /// document and its `SchemaSource` cannot lower to different schemas.
     ///
     /// The document entry point keeps its own *entry contract*, narrower
-    /// than the source archive's: it accepts 4 roots (generics input output
-    /// namespace) or 5 with leading imports, and rejects the trailing
-    /// relations form. Within that contract the `SchemaSource` it builds
-    /// carries no relations, so the single lowering is well-defined.
+    /// than the source archive's: it accepts the generics/input/output/
+    /// namespace sequence, with optional leading imports, and rejects the
+    /// trailing relations form. Root applications may consume grouped
+    /// argument blocks, so raw root-object count is not fixed. Within that
+    /// contract the `SchemaSource` it builds carries no relations, so the
+    /// single lowering is well-defined.
     pub fn lower_document_with_resolver(
         &self,
         document: &Document,
@@ -471,9 +473,9 @@ impl SchemaEngine {
     ) -> Result<TrueSchema, SchemaError> {
         context.remember_structure_header(document.structure_header());
 
-        if !matches!(document.holds_root_objects(), 4 | 5) {
+        if document.holds_root_objects() < 4 {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "4 root values (generics input output namespace) or 5 with leading imports",
+                expected: "generics, input, output, and namespace roots, with optional leading imports",
                 found: document.holds_root_objects(),
             });
         }
@@ -490,9 +492,9 @@ impl SchemaEngine {
         let source = SchemaSource::from_document(&expanded)?;
         // The document entry path admits imports + generics + input/output/namespace
         // only; a trailing relations block is a source-archive-only form.
-        // `from_document` would read a non-brace 4th-or-later root as
-        // relations, so reject any relations the reparse produced rather
-        // than silently widening the document contract.
+        // `from_document` would read a post-namespace root as relations, so
+        // reject any relations the reparse produced rather than silently
+        // widening the document contract.
         if !source.relations().is_empty() {
             return Err(SchemaError::ExpectedRootObjectCount {
                 expected: "4 root values (generics input output namespace) or 5 with leading imports",

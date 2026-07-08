@@ -9,8 +9,8 @@
   Map Map
   Bytes FixedBytes
 }
-Work.SignalInput.SemaWriteOutput.SemaReadOutput.EffectOutcome
-Action.SignalOutput.SemaWriteSet.SemaReadInput.EffectCommand.Work.SignalInput.SemaWriteOutput.SemaReadOutput.EffectOutcome
+Work.(SignalInput SemaWriteOutput SemaReadOutput EffectOutcome)
+Action.(SignalOutput SemaWriteSet SemaReadInput EffectCommand Work.(SignalInput SemaWriteOutput SemaReadOutput EffectOutcome))
 {
   SignalInput String
   SignalOutput String

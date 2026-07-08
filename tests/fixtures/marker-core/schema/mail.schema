@@ -3,4 +3,7 @@
 }
 []
 []
-{}
+{
+  CommitSequence Integer
+  StateDigest Integer
+}

@@ -21,7 +21,8 @@ use schema_language::{
 };
 
 fn entry_schema_source() -> &'static str {
-    "[(Record Entry) (Observe Query)]\n\
+    "{ Vector Vector }\n\
+     [(Record Entry) (Observe Query)]\n\
      [(RecordAccepted RecordIdentifier) (RecordsObserved RecordSet)]\n\
      {\n\
        Record Entry\n\
@@ -33,7 +34,7 @@ fn entry_schema_source() -> &'static str {
        RecordIdentifier Integer\n\
        Entry { Topic Description Kind }\n\
        Query { Topic Kind }\n\
-       RecordSet (Vector Entry)\n\
+       RecordSet Vector.Entry\n\
        Kind [Decision Principle Correction Clarification Constraint]\n\
      }\n"
 }

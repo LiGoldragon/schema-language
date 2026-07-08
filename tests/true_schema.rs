@@ -4,7 +4,7 @@ use schema_language::{
 };
 
 fn fixture_source() -> &'static str {
-    "{}\n[(Record Entry)]\n[(Recorded Entry)]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains (Vector Domain)\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents (Vector String)\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}"
+    "{}\n{\n  Vector Vector\n}\n[(Record Entry)]\n[(Recorded Entry)]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains Vector.Domain\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents Vector.String\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}"
 }
 
 fn true_schema_fixture() -> TrueSchema {
@@ -69,7 +69,7 @@ fn true_schema_canonical_schema_text_round_trips_product_components() {
 fn product_components_accept_implicit_unique_types() {
     let true_schema = SchemaEngine::default()
         .lower_true_schema_source(
-            "[]\n[]\n{ Topic String Description String Entry { Topic Description } }",
+            "{}\n{}\n[]\n[]\n{ Topic String Description String Entry { Topic Description } }",
             SchemaIdentity::new("components:implicit", "0.1.0"),
         )
         .expect("implicit unique product components are valid");
@@ -87,7 +87,7 @@ fn product_components_accept_implicit_unique_types() {
 fn product_components_accept_duplicate_types_with_explicit_identities() {
     let true_schema = SchemaEngine::default()
         .lower_true_schema_source(
-            "[]\n[]\n{ Time Integer TimeRange { start.Time end.Time } }",
+            "{}\n{}\n[]\n[]\n{ Time Integer TimeRange { start.Time end.Time } }",
             SchemaIdentity::new("components:duplicate", "0.1.0"),
         )
         .expect("duplicate product components with explicit identities are valid");
@@ -114,7 +114,7 @@ fn product_components_accept_duplicate_types_with_explicit_identities() {
 fn product_components_reject_redundant_explicit_derived_identity() {
     let error = SchemaEngine::default()
         .lower_true_schema_source(
-            "[]\n[]\n{ Domains (Vector String) Entry { domains.Domains } }",
+            "{}\n{ Vector Vector }\n[]\n[]\n{ Domains Vector.String Entry { domains.Domains } }",
             SchemaIdentity::new("components:redundant", "0.1.0"),
         )
         .expect_err("derived explicit field identity is redundant");
@@ -132,7 +132,7 @@ fn product_components_reject_redundant_explicit_derived_identity() {
 fn product_components_reject_explicit_identity_on_unique_type() {
     let error = SchemaEngine::default()
         .lower_true_schema_source(
-            "[]\n[]\n{ EntryKind [Belief Principle] Entry { kind.EntryKind } }",
+            "{}\n{}\n[]\n[]\n{ EntryKind [Belief Principle] Entry { kind.EntryKind } }",
             SchemaIdentity::new("components:unique-explicit", "0.1.0"),
         )
         .expect_err("explicit field on unique product component is invalid");
@@ -150,7 +150,7 @@ fn product_components_reject_explicit_identity_on_unique_type() {
 fn product_components_reject_repeated_bare_type_components() {
     let error = SchemaEngine::default()
         .lower_true_schema_source(
-            "[]\n[]\n{ Time Integer TimeRange { Time Time } }",
+            "{}\n{}\n[]\n[]\n{ Time Integer TimeRange { Time Time } }",
             SchemaIdentity::new("components:repeated-bare", "0.1.0"),
         )
         .expect_err("repeated bare product components are ambiguous");
@@ -167,7 +167,7 @@ fn product_components_reject_repeated_bare_type_components() {
 fn product_components_reject_duplicate_explicit_identities_for_one_type() {
     let error = SchemaEngine::default()
         .lower_true_schema_source(
-            "[]\n[]\n{ Time Integer TimeRange { start.Time start.Time } }",
+            "{}\n{}\n[]\n[]\n{ Time Integer TimeRange { start.Time start.Time } }",
             SchemaIdentity::new("components:duplicate-explicit", "0.1.0"),
         )
         .expect_err("duplicate explicit product component identities are invalid");
