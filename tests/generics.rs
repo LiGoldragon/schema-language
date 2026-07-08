@@ -36,9 +36,19 @@ fn lower(namespace: &str) -> schema_language::TrueSchema {
     try_lower(namespace).expect("schema lowers")
 }
 
+const BUILTIN_GENERIC_ROWS: &str =
+    "Vector Vector Optional Optional ScopeOf ScopeOf Map Map Bytes FixedBytes";
+
 fn try_lower(namespace: &str) -> Result<schema_language::TrueSchema, SchemaError> {
+    try_lower_with_generics("", namespace)
+}
+
+fn try_lower_with_generics(
+    generics: &str,
+    namespace: &str,
+) -> Result<schema_language::TrueSchema, SchemaError> {
     SchemaEngine::default().lower_source(
-        &format!("[] [] {{ {namespace} }}"),
+        &format!("{{ {BUILTIN_GENERIC_ROWS} {generics} }} [] [] {{ {namespace} }}"),
         SchemaIdentity::new("generics:lib", "0.1.0"),
     )
 }
@@ -59,7 +69,7 @@ fn single_reference<'schema>(
 
 #[test]
 fn multi_argument_application_lowers_to_application() {
-    let schema = lower("Alpha String Beta String Holder (Foo Alpha Beta)");
+    let schema = lower("Alpha String Beta String Holder Foo.Alpha.Beta");
     assert_eq!(
         single_reference(&schema, "Holder"),
         &TypeReference::Application {
@@ -107,7 +117,7 @@ fn application_round_trips_through_canonical_nota_codec() {
 #[test]
 fn builtin_heads_still_lower_to_their_variants() {
     let schema = lower(
-        "Key String Value String VectorField (Vector Value) OptionalField (Optional Value) MapField (Map Key Value)",
+        "Key String Value String VectorField Vector.Value OptionalField Optional.Value MapField Map.Key.Value",
     );
     assert_eq!(
         single_reference(&schema, "VectorField"),
@@ -128,10 +138,10 @@ fn builtin_heads_still_lower_to_their_variants() {
 
 #[test]
 fn builtin_head_wins_over_broad_application_form() {
-    // `(Vector Value)` matches the broad `(Foo A …)` shape too (Vector is a
+    // `Vector.Value` matches the broad `(Foo A …)` shape too (Vector is a
     // PascalCase head), but the built-in fast path is dispatched first, so it
     // must NOT lower to an application named `Vector`.
-    let schema = lower("Value String Field (Vector Value)");
+    let schema = lower("Value String Field Vector.Value");
     let reference = single_reference(&schema, "Field");
     assert!(
         matches!(reference, TypeReference::Vector(_)),
@@ -147,7 +157,7 @@ fn builtin_head_wins_over_broad_application_form() {
 
 #[test]
 fn dropped_vec_alias_no_longer_lowers_to_vector() {
-    let schema = lower("Service String Cluster (Vec Service)");
+    let schema = lower("Service String Cluster Vec.Service");
     let reference = single_reference(&schema, "Cluster");
     assert!(
         !matches!(reference, TypeReference::Vector(_)),
@@ -209,16 +219,18 @@ fn closure_over_imported_generic_head_records_the_import() {
 // (decision O8).
 // ----------------------------------------------------------------------
 
-fn declaration_parameters<'schema>(
+fn generic_parameters<'schema>(
     schema: &'schema schema_language::TrueSchema,
     name: &str,
 ) -> &'schema [Name] {
     schema
-        .namespace()
-        .iter()
-        .find(|declaration| declaration.name().as_str() == name)
-        .expect("declaration present")
-        .parameters()
+        .generic_named(name)
+        .and_then(|definition| definition.frame_body().map(|(parameters, _)| parameters))
+        .expect("frame generic present")
+}
+
+fn plane_generic() -> &'static str {
+    "Plane (Frame [Input Output] [(Entered Input) (Left Output)])"
 }
 
 // (a) A parameterized declaration whose body uses its parameters as Plain
@@ -227,27 +239,17 @@ fn declaration_parameters<'schema>(
 
 #[test]
 fn parameterized_declaration_resolves_its_parameters_as_binders() {
-    let schema = lower("(| Plane Input Output |) { Input Output }");
+    let schema = try_lower_with_generics(plane_generic(), "").expect("schema lowers");
 
-    // The binders are recorded on the declaration, in order.
     assert_eq!(
-        declaration_parameters(&schema, "Plane"),
+        generic_parameters(&schema, "Plane"),
         &[Name::new("Input"), Name::new("Output")],
     );
 
-    // The closure walk reaches `Input` and `Output` as Plain field
-    // references. Without binder scope this is a FamilyReferenceNotFound;
-    // with it, the walk succeeds and pulls in no extra declarations — a
-    // binder is a type-parameter, not a declared type.
     let closure = schema
         .family_closure("Plane")
-        .expect("parameterized declaration closes over its binders, not undeclared names");
-    let names = closure
-        .declarations()
-        .iter()
-        .map(|declaration| declaration.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(names, ["Plane"]);
+        .expect("generic frame closes over its binders, not undeclared names");
+    assert_eq!(closure.generics()[0].name().as_str(), "Plane");
 }
 
 // (b) An Application supplying the WRONG argument count to a resolved
@@ -256,7 +258,7 @@ fn parameterized_declaration_resolves_its_parameters_as_binders() {
 
 #[test]
 fn application_with_wrong_argument_count_is_an_arity_error_at_lowering() {
-    let error = try_lower("(| Plane Input Output |) { Input Output } Holder (Plane String)")
+    let error = try_lower_with_generics(plane_generic(), "Holder Plane.String")
         .expect_err("one argument against a two-parameter head must fail at lowering");
     assert_eq!(
         error,
@@ -273,7 +275,8 @@ fn application_with_wrong_argument_count_is_an_arity_error_at_lowering() {
 
 #[test]
 fn application_with_correct_argument_count_lowers() {
-    let schema = lower("(| Plane Input Output |) { Input Output } Holder (Plane String Integer)");
+    let schema = try_lower_with_generics(plane_generic(), "Holder Plane.String.Integer")
+        .expect("schema lowers");
     assert_eq!(
         single_reference(&schema, "Holder"),
         &TypeReference::Application {
@@ -292,7 +295,7 @@ fn application_with_correct_argument_count_lowers() {
 fn declared_parameterized_head_wins_over_unresolved_application() {
     // The declared head's arity binds — a wrong count is rejected.
     assert_eq!(
-        try_lower("(| Plane Input Output |) { Input Output } Holder (Plane String)")
+        try_lower_with_generics(plane_generic(), "Holder Plane.String")
             .expect_err("declared head is consulted, so its arity binds"),
         SchemaError::GenericArityMismatch {
             head: "Plane".to_owned(),
@@ -304,7 +307,7 @@ fn declared_parameterized_head_wins_over_unresolved_application() {
     // An UNDECLARED head fixes no arity, so the same single-argument
     // application is an ordinary unresolved generic application — proving
     // the declared head, not the broad form, governed the case above.
-    let schema = lower("Holder (Foo String)");
+    let schema = lower("Holder Foo.String");
     assert_eq!(
         single_reference(&schema, "Holder"),
         &TypeReference::Application {
@@ -321,12 +324,12 @@ fn declared_parameterized_head_wins_over_unresolved_application() {
 
 #[test]
 fn parameterized_head_round_trips_through_the_source_codec() {
-    let source = "{}\n[]\n[]\n{\n  (| Plane Input Output |) { Input Output }\n}";
+    let source = "{}\n{ Plane (Frame [Input Output] [(Entered Input) (Left Output)]) }\n[]\n[]\n{}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let canonical = artifact.to_schema_text();
     assert!(
-        canonical.contains("(|Plane Input Output|) { Input Output }"),
-        "the parameterized head must project back to source text, got {canonical}",
+        canonical.contains("Plane (Frame [Input Output] [(Entered Input) (Left Output)])"),
+        "the frame generic must project back to source text, got {canonical}",
     );
     let recovered =
         SchemaSourceArtifact::from_schema_text(&canonical).expect("canonical source decodes");
@@ -340,7 +343,7 @@ fn parameterized_head_round_trips_through_the_source_codec() {
         )
         .expect("source endpoint lowers the parameterized declaration");
     assert_eq!(
-        declaration_parameters(&schema, "Plane"),
+        generic_parameters(&schema, "Plane"),
         &[Name::new("Input"), Name::new("Output")],
     );
 }
@@ -351,8 +354,7 @@ fn parameterized_head_round_trips_through_the_source_codec() {
 
 #[test]
 fn source_codec_path_also_validates_application_arity() {
-    let source =
-        "{}\n[]\n[]\n{\n  (| Plane Input Output |) { Input Output }\n  Holder (Plane String)\n}";
+    let source = "{}\n{ Plane (Frame [Input Output] [(Entered Input) (Left Output)]) }\n[]\n[]\n{ Holder Plane.String }";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let error = artifact
         .source()
@@ -387,8 +389,8 @@ fn source_codec_path_also_validates_application_arity() {
 /// head's arity (4) matches the application's argument count.
 fn application_root_source(read_output: &str) -> String {
     format!(
-        "(Work SignalInput SemaWriteOutput {read_output} EffectOutcome) [] {{ \
-         (| Work In WriteOut ReadOut Outcome |) {{ In WriteOut ReadOut Outcome }} \
+        "{{ Work (Frame [In WriteOut ReadOut Outcome] [(SignalArrived In) (SemaWriteCompleted WriteOut) (SemaReadCompleted ReadOut) (EffectCompleted Outcome)]) }} \
+         Work.SignalInput.SemaWriteOutput.{read_output}.EffectOutcome [] {{ \
          SignalInput String \
          SemaWriteOutput Boolean \
          SemaReadOutput Integer \
@@ -474,14 +476,13 @@ fn root_position_application_lowers_to_root_application() {
         closure.root_application().is_some(),
         "the closure carries the applied reference for an application root",
     );
-    // The walk reached the head declaration and every argument declaration.
+    assert_eq!(closure.generics()[0].name().as_str(), "Work");
     let names = closure
         .declarations()
         .iter()
         .map(|declaration| declaration.name().as_str().to_owned())
         .collect::<Vec<_>>();
     for reached in [
-        "Work",
         "SignalInput",
         "SemaWriteOutput",
         "SemaReadOutput",
@@ -501,7 +502,7 @@ fn root_position_application_lowers_to_root_application() {
 fn enum_body_root_still_lowers_to_root_enum() {
     let schema = SchemaEngine::default()
         .lower_source(
-            "[(Record Entry)] [(Recorded Receipt)] { Topic String Ok Boolean Entry { Topic } Receipt { Ok } }",
+            "{} [(Record Entry)] [(Recorded Receipt)] { Topic String Ok Boolean Entry { Topic } Receipt { Ok } }",
             SchemaIdentity::new("enum-root:lib", "0.1.0"),
         )
         .expect("enum-body root schema lowers");

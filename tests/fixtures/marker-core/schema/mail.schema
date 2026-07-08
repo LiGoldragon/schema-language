@@ -1,7 +1,6 @@
-[]
-[]
 {
-  CommitSequence Integer
-  StateDigest Integer
-  DatabaseMarker { CommitSequence StateDigest }
+  DatabaseMarker (Frame [Topic] [(Marked Topic)])
 }
+[]
+[]
+{}

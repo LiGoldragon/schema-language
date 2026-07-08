@@ -461,10 +461,140 @@ impl From<&RootApplication> for TypeReference {
     Eq,
     PartialEq,
 )]
+pub struct GenericDefinition {
+    name: Name,
+    builtin: GenericBuiltin,
+}
+
+impl GenericDefinition {
+    pub fn new(name: Name, builtin: GenericBuiltin) -> Self {
+        Self { name, builtin }
+    }
+
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn builtin(&self) -> &GenericBuiltin {
+        &self.builtin
+    }
+
+    pub fn parameter_count(&self) -> usize {
+        self.builtin.parameter_count()
+    }
+
+    pub fn frame_body(&self) -> Option<(&[Name], &[EnumVariant])> {
+        self.builtin.frame_body()
+    }
+
+    pub fn to_schema_text(&self) -> String {
+        format!("{} {}", self.name.to_nota(), self.builtin.to_schema_text())
+    }
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub enum GenericBuiltin {
+    Vector,
+    Optional,
+    ScopeOf,
+    Map,
+    FixedBytes,
+    Frame(GenericFrame),
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub struct GenericFrame {
+    parameters: Vec<Name>,
+    variants: Vec<EnumVariant>,
+}
+
+impl GenericFrame {
+    pub fn new(parameters: Vec<Name>, variants: Vec<EnumVariant>) -> Self {
+        Self {
+            parameters,
+            variants,
+        }
+    }
+
+    pub fn parameters(&self) -> &[Name] {
+        &self.parameters
+    }
+
+    pub fn variants(&self) -> &[EnumVariant] {
+        &self.variants
+    }
+}
+
+impl GenericBuiltin {
+    pub fn parameter_count(&self) -> usize {
+        match self {
+            Self::Vector | Self::Optional | Self::ScopeOf | Self::FixedBytes => 1,
+            Self::Map => 2,
+            Self::Frame(frame) => frame.parameters().len(),
+        }
+    }
+
+    pub fn frame_body(&self) -> Option<(&[Name], &[EnumVariant])> {
+        match self {
+            Self::Frame(frame) => Some((frame.parameters(), frame.variants())),
+            Self::Vector | Self::Optional | Self::ScopeOf | Self::Map | Self::FixedBytes => None,
+        }
+    }
+
+    pub fn to_schema_text(&self) -> String {
+        match self {
+            Self::Vector => "Vector".to_owned(),
+            Self::Optional => "Optional".to_owned(),
+            Self::ScopeOf => "ScopeOf".to_owned(),
+            Self::Map => "Map".to_owned(),
+            Self::FixedBytes => "FixedBytes".to_owned(),
+            Self::Frame(frame) => {
+                let parameter_text =
+                    Delimiter::SquareBracket.wrap(frame.parameters().iter().map(Name::to_nota));
+                let variants = EnumDeclaration::new(Name::new("Frame"), frame.variants().to_vec())
+                    .body_schema_text();
+                Delimiter::Parenthesis.wrap(["Frame".to_owned(), parameter_text, variants])
+            }
+        }
+    }
+}
+
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
 pub struct TrueSchema {
     identity: super::SchemaIdentity,
     imports: Vec<ImportDeclaration>,
     resolved_imports: Vec<super::ResolvedImport>,
+    generics: Vec<GenericDefinition>,
     input: Root,
     output: Root,
     namespace: Vec<Declaration>,
@@ -484,6 +614,7 @@ impl TrueSchema {
         identity: super::SchemaIdentity,
         imports: Vec<ImportDeclaration>,
         resolved_imports: Vec<super::ResolvedImport>,
+        generics: Vec<GenericDefinition>,
         input: Root,
         output: Root,
         namespace: Vec<Declaration>,
@@ -495,6 +626,7 @@ impl TrueSchema {
             identity,
             imports,
             resolved_imports,
+            generics,
             input,
             output,
             namespace,
@@ -528,6 +660,16 @@ impl TrueSchema {
     /// reference dependency-emitted types instead of re-declaring them.
     pub fn resolved_imports(&self) -> &[super::ResolvedImport] {
         &self.resolved_imports
+    }
+
+    pub fn generics(&self) -> &[GenericDefinition] {
+        &self.generics
+    }
+
+    pub fn generic_named(&self, name: &str) -> Option<&GenericDefinition> {
+        self.generics
+            .iter()
+            .find(|definition| definition.name().as_str() == name)
     }
 
     pub fn input(&self) -> &Root {
@@ -672,8 +814,12 @@ impl TrueSchema {
     /// `Some(0)`. The import resolver reads this across the crate
     /// boundary so a consumer can validate an imported head's arity.
     pub fn declared_parameter_count(&self, name: &str) -> Option<usize> {
-        self.namespace_declaration_named(name)
-            .map(|declaration| declaration.parameters().len())
+        self.generic_named(name)
+            .map(GenericDefinition::parameter_count)
+            .or_else(|| {
+                self.namespace_declaration_named(name)
+                    .map(|declaration| declaration.parameters().len())
+            })
     }
 
     /// The frame body of a declared parameterized enum: its binders and its
@@ -683,6 +829,11 @@ impl TrueSchema {
     /// consumer applying the imported head can expand the frame in place,
     /// substituting each binder with the application's argument.
     pub fn declared_frame_body(&self, name: &str) -> Option<(&[Name], &[EnumVariant])> {
+        if let Some(definition) = self.generic_named(name)
+            && let Some(frame) = definition.frame_body()
+        {
+            return Some(frame);
+        }
         let declaration = self.namespace_declaration_named(name)?;
         let TypeDeclaration::Enum(body) = declaration.value() else {
             return None;
@@ -783,8 +934,18 @@ impl TrueSchema {
     fn declared_head_arity(&self, head: &ApplicationHead) -> Option<usize> {
         match head {
             ApplicationHead::Local(name) => self
-                .namespace_declaration_named(name.as_str())
-                .map(|declaration| declaration.parameters().len()),
+                .generic_named(name.as_str())
+                .map(GenericDefinition::parameter_count)
+                .or_else(|| {
+                    self.namespace_declaration_named(name.as_str())
+                        .map(|declaration| declaration.parameters().len())
+                })
+                .or_else(|| {
+                    self.resolved_imports
+                        .iter()
+                        .find(|import| import.local_name() == name)
+                        .and_then(|import| import.parameter_count())
+                }),
             ApplicationHead::Imported(import) => import.parameter_count(),
         }
     }
@@ -1018,6 +1179,7 @@ impl TrueSchema {
     pub fn to_schema_text(&self) -> String {
         let mut roots = vec![
             self.imports_schema_text(),
+            self.generics_schema_text(),
             self.input.to_root_schema_text(),
             self.output.to_root_schema_text(),
             self.namespace_schema_text(),
@@ -1050,6 +1212,18 @@ impl TrueSchema {
             })
             .collect::<Vec<_>>();
         format!("{{\n{}\n}}", imports.join("\n"))
+    }
+
+    fn generics_schema_text(&self) -> String {
+        if self.generics.is_empty() {
+            return "{}".to_owned();
+        }
+        let generics = self
+            .generics
+            .iter()
+            .map(|definition| format!("  {}", definition.to_schema_text()))
+            .collect::<Vec<_>>();
+        format!("{{\n{}\n}}", generics.join("\n"))
     }
 
     fn namespace_schema_text(&self) -> String {
@@ -2420,45 +2594,17 @@ impl DeclarationHead {
             Block::Delimited {
                 delimiter: Delimiter::PipeParenthesis,
                 ..
-            } => Self::from_parameterized(block),
+            } => Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!(
+                    "retired parameterized declaration head {}",
+                    block.reemit_fallback()
+                ),
+            }),
             _ => Ok(Self {
                 name: block.schema_name()?,
                 parameters: Vec::new(),
             }),
         }
-    }
-
-    fn from_parameterized(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(
-            block,
-            Delimiter::PipeParenthesis,
-            "parameterized declaration head",
-        )?;
-        let [head, tail @ ..] = body.root_objects() else {
-            return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "at least one declaration-head object",
-                found: body.root_objects().len(),
-            });
-        };
-        let name = head.schema_name()?;
-        let mut parameters = Vec::with_capacity(tail.len());
-        for argument in tail {
-            let parameter =
-                argument
-                    .schema_name()
-                    .map_err(|_| SchemaError::ExpectedTypeParameterName {
-                        declaration: name.as_str().to_owned(),
-                        found: format!("{argument:?}"),
-                    })?;
-            if parameters.iter().any(|existing| existing == &parameter) {
-                return Err(SchemaError::DuplicateTypeParameter {
-                    declaration: name.as_str().to_owned(),
-                    parameter: parameter.as_str().to_owned(),
-                });
-            }
-            parameters.push(parameter);
-        }
-        Ok(Self { name, parameters })
     }
 }
 
@@ -2679,34 +2825,36 @@ impl nota::StructuralMacroNode for TypeReference {
             Self::Boolean => "Boolean".to_owned(),
             Self::Path => "Path".to_owned(),
             Self::Bytes => "Bytes".to_owned(),
-            Self::FixedBytes(width) => format!("(Bytes {width})"),
+            Self::FixedBytes(width) => format!("Bytes.{width}"),
             Self::Plain(name) => name.to_nota(),
             Self::Vector(reference) => {
-                format!("(Vector {})", reference.to_structural_nota())
+                format!("Vector.{}", reference.to_structural_nota())
             }
             Self::Map(key, value) => {
                 format!(
-                    "(Map {} {})",
+                    "Map.{}.{}",
                     key.to_structural_nota(),
                     value.to_structural_nota()
                 )
             }
             Self::Optional(reference) => {
-                format!("(Optional {})", reference.to_structural_nota())
+                format!("Optional.{}", reference.to_structural_nota())
             }
             Self::ScopeOf(reference) => {
-                format!("(ScopeOf {})", reference.to_structural_nota())
+                format!("ScopeOf.{}", reference.to_structural_nota())
             }
             Self::Application { head, arguments } => {
                 let tail = arguments
                     .iter()
                     .map(Self::to_structural_nota)
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                    .collect::<Vec<_>>();
                 if tail.is_empty() {
-                    format!("({})", head.name().to_nota())
+                    head.name().to_nota()
                 } else {
-                    format!("({} {tail})", head.name().to_nota())
+                    let mut segments = Vec::with_capacity(tail.len() + 1);
+                    segments.push(head.name().to_nota());
+                    segments.extend(tail);
+                    segments.join(".")
                 }
             }
         }

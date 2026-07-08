@@ -297,6 +297,9 @@ impl ImportResolver {
         if module_schema
             .declared_type_named(source.type_name().local_part())
             .is_none()
+            && module_schema
+                .generic_named(source.type_name().local_part())
+                .is_none()
         {
             return Err(SchemaError::ImportedTypeNotFound {
                 crate_name: source.crate_name().as_str().to_owned(),

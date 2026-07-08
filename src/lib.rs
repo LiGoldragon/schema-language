@@ -40,21 +40,22 @@ pub use raw::{RawDatatypeEntry, RawDatatypeMap, RawNotaDatatype, RawNotaSequence
 pub use resolution::{ImportResolver, ImportSource, ResolvedImport};
 pub use schema::{
     ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration,
-    FamilyKey, FieldDeclaration, ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact,
-    ImplReference, ImportDeclaration, MethodParameter, MethodSignature, Name, NewtypeDeclaration,
-    ReferenceHead, ReferencedImpl, RelationDeclaration, RelationValue, Root, RootApplication,
-    RustSurface, SchemaDeclaredType, SchemaNode, SchemaNodeData, SchemaNodePair, SchemaNodeValue,
-    StreamDeclaration, StreamRelation, StructDeclaration, StructFieldMap, SymbolPath,
-    SymbolPathPosition, TableName, TrueSchema, TypeDeclaration, TypeReference, Visibility,
+    FamilyKey, FieldDeclaration, GenericBuiltin, GenericDefinition, GenericFrame, ImplBlock,
+    ImplCatalog, ImplCompositionKey, ImplFact, ImplReference, ImportDeclaration, MethodParameter,
+    MethodSignature, Name, NewtypeDeclaration, ReferenceHead, ReferencedImpl, RelationDeclaration,
+    RelationValue, Root, RootApplication, RustSurface, SchemaDeclaredType, SchemaNode,
+    SchemaNodeData, SchemaNodePair, SchemaNodeValue, StreamDeclaration, StreamRelation,
+    StructDeclaration, StructFieldMap, SymbolPath, SymbolPathPosition, TableName, TrueSchema,
+    TypeDeclaration, TypeReference, Visibility,
 };
 pub use source::{
     SchemaSource, SchemaSourceArtifact, SourceDeclaration, SourceDeclarationValue,
     SourceDeclarations, SourceEnumBody, SourceFamilyBody, SourceField, SourceFieldIdentity,
-    SourceFieldValue, SourceImplCatalog, SourceImplEntry, SourceImport, SourceImports,
-    SourceMethodParameter, SourceMethodSignature, SourceNamespace, SourceNamespaceEntry,
-    SourceReference, SourceRelation, SourceRelationValue, SourceRelations, SourceRootBody,
-    SourceRootEnum, SourceStreamBody, SourceStructBody, SourceVariantName, SourceVariantPayload,
-    SourceVariantSignature, StreamRelationKeyword,
+    SourceFieldValue, SourceGenericDefinition, SourceGenerics, SourceImplCatalog, SourceImplEntry,
+    SourceImport, SourceImports, SourceMethodParameter, SourceMethodSignature, SourceNamespace,
+    SourceNamespaceEntry, SourceReference, SourceRelation, SourceRelationValue, SourceRelations,
+    SourceRootBody, SourceRootEnum, SourceStreamBody, SourceStructBody, SourceVariantName,
+    SourceVariantPayload, SourceVariantSignature, StreamRelationKeyword,
 };
 pub use upgrade::{
     AddField, AddVariant, ChangeFieldType, DefaultValue, FieldMigration, MigrationSpec, SchemaEdit,

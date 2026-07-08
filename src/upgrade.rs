@@ -316,6 +316,7 @@ struct SchemaEditor {
     identity: SchemaIdentity,
     imports: Vec<crate::ImportDeclaration>,
     resolved_imports: Vec<crate::ResolvedImport>,
+    generics: Vec<crate::GenericDefinition>,
     input: crate::Root,
     output: crate::Root,
     namespace: Vec<Declaration>,
@@ -329,6 +330,7 @@ impl SchemaEditor {
             identity: schema.identity().clone(),
             imports: schema.imports().to_vec(),
             resolved_imports: schema.resolved_imports().to_vec(),
+            generics: schema.generics().to_vec(),
             input: schema.input().clone(),
             output: schema.output().clone(),
             namespace: schema.namespace().to_vec(),
@@ -402,6 +404,7 @@ impl SchemaEditor {
             self.identity,
             self.imports,
             self.resolved_imports,
+            self.generics,
             self.input,
             self.output,
             self.namespace,
@@ -557,6 +560,7 @@ impl TrueSchema {
     pub fn with_identity(self, identity: SchemaIdentity) -> Self {
         let imports = self.imports().to_vec();
         let resolved_imports = self.resolved_imports().to_vec();
+        let generics = self.generics().to_vec();
         let input = self.input().clone();
         let output = self.output().clone();
         let namespace = self.namespace().to_vec();
@@ -567,6 +571,7 @@ impl TrueSchema {
             identity,
             imports,
             resolved_imports,
+            generics,
             input,
             output,
             namespace,

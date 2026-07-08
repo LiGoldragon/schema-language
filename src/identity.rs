@@ -24,8 +24,8 @@ use std::fmt;
 use crate::{
     SchemaError,
     schema::{
-        Declaration, EnumDeclaration, ImportDeclaration, Name, StreamDeclaration, TrueSchema,
-        TypeDeclaration, TypeReference,
+        Declaration, EnumDeclaration, GenericDefinition, ImportDeclaration, Name,
+        StreamDeclaration, TrueSchema, TypeDeclaration, TypeReference,
     },
 };
 
@@ -118,6 +118,7 @@ pub struct FamilyClosure {
     root: Name,
     root_application: Option<TypeReference>,
     declarations: Vec<Declaration>,
+    generics: Vec<GenericDefinition>,
     imports: Vec<ImportDeclaration>,
     streams: Vec<StreamDeclaration>,
 }
@@ -136,6 +137,10 @@ impl FamilyClosure {
 
     pub fn declarations(&self) -> &[Declaration] {
         &self.declarations
+    }
+
+    pub fn generics(&self) -> &[GenericDefinition] {
+        &self.generics
     }
 
     pub fn imports(&self) -> &[ImportDeclaration] {
@@ -181,6 +186,7 @@ struct ClosureWalk<'schema> {
     schema: &'schema TrueSchema,
     family: &'schema str,
     declarations: Vec<(String, Declaration)>,
+    generics: Vec<(String, GenericDefinition)>,
     imports: Vec<(String, ImportDeclaration)>,
     streams: Vec<(String, StreamDeclaration)>,
     /// Type-parameter binders in scope for the declaration currently
@@ -202,6 +208,7 @@ struct ClosureWalk<'schema> {
 /// declaration name of its own).
 enum FamilyRoot {
     Declaration(Declaration),
+    Generic(GenericDefinition),
     Application {
         name: Name,
         reference: TypeReference,
@@ -212,6 +219,7 @@ impl FamilyRoot {
     fn name(&self) -> &Name {
         match self {
             Self::Declaration(declaration) => declaration.name(),
+            Self::Generic(definition) => definition.name(),
             Self::Application { name, .. } => name,
         }
     }
@@ -223,6 +231,7 @@ impl<'schema> ClosureWalk<'schema> {
             schema,
             family,
             declarations: Vec::new(),
+            generics: Vec::new(),
             imports: Vec::new(),
             streams: Vec::new(),
             binders: BTreeSet::new(),
@@ -244,6 +253,10 @@ impl<'schema> ClosureWalk<'schema> {
                 self.visit_declaration(declaration.clone())?;
                 None
             }
+            FamilyRoot::Generic(definition) => {
+                self.visit_generic_definition(definition.clone())?;
+                None
+            }
             FamilyRoot::Application { reference, .. } => {
                 self.visit_reference(reference)?;
                 Some(reference.clone())
@@ -251,6 +264,7 @@ impl<'schema> ClosureWalk<'schema> {
         };
         self.declarations
             .sort_by(|left, right| left.0.cmp(&right.0));
+        self.generics.sort_by(|left, right| left.0.cmp(&right.0));
         self.imports.sort_by(|left, right| left.0.cmp(&right.0));
         self.streams.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(FamilyClosure {
@@ -260,6 +274,11 @@ impl<'schema> ClosureWalk<'schema> {
                 .declarations
                 .into_iter()
                 .map(|(_, declaration)| declaration)
+                .collect(),
+            generics: self
+                .generics
+                .into_iter()
+                .map(|(_, generic)| generic)
                 .collect(),
             imports: self.imports.into_iter().map(|(_, import)| import).collect(),
             streams: self.streams.into_iter().map(|(_, stream)| stream).collect(),
@@ -275,6 +294,9 @@ impl<'schema> ClosureWalk<'schema> {
     fn family_root(&self, family_name: &str) -> Option<FamilyRoot> {
         if let Some(declaration) = self.namespace_declaration(family_name) {
             return Some(FamilyRoot::Declaration(declaration.clone()));
+        }
+        if let Some(definition) = self.schema.generic_named(family_name) {
+            return Some(FamilyRoot::Generic(definition.clone()));
         }
         let root = self.schema.root_named(family_name)?;
         match root.as_application() {
@@ -393,19 +415,66 @@ impl<'schema> ClosureWalk<'schema> {
                 self.visit_reference(key)?;
                 self.visit_reference(value)
             }
-            // A generic application `(Foo A B …)` reaches both its head and
-            // each argument. Visiting the head name pulls a cross-crate
-            // generic head into the closure's imports exactly as a `Plain`
-            // leaf would; resolving the head this way is what would later
-            // rewrite `ApplicationHead::Local` to `Imported`.
+            // A generic application reaches both its declared generic
+            // definition and each argument. A local generic definition is
+            // schema data, not a namespace declaration; an imported head still
+            // enters through the import path.
             TypeReference::Application { head, arguments } => {
-                self.visit_name(head.name())?;
+                self.visit_generic_head(head.name())?;
                 for argument in arguments {
                     self.visit_reference(argument)?;
                 }
                 Ok(())
             }
         }
+    }
+
+    fn visit_generic_head(&mut self, name: &Name) -> Result<(), SchemaError> {
+        if let Some(definition) = self.schema.generic_named(name.as_str()) {
+            return self.visit_generic_definition(definition.clone());
+        }
+        self.visit_name(name)
+    }
+
+    fn visit_generic_definition(
+        &mut self,
+        definition: GenericDefinition,
+    ) -> Result<(), SchemaError> {
+        let name = definition.name().as_str().to_owned();
+        if self.generics.iter().any(|(existing, _)| existing == &name) {
+            return Ok(());
+        }
+        let frame = definition
+            .frame_body()
+            .map(|(parameters, variants)| (parameters.to_vec(), variants.to_vec()));
+        self.generics.push((name, definition));
+        if let Some((parameters, variants)) = frame {
+            let outer_binders = std::mem::replace(
+                &mut self.binders,
+                parameters
+                    .iter()
+                    .map(|parameter| parameter.as_str().to_owned())
+                    .collect(),
+            );
+            let mut walked = Ok(());
+            for variant in variants {
+                if let Some(payload) = variant.payload {
+                    walked = self.visit_reference(&payload);
+                    if walked.is_err() {
+                        break;
+                    }
+                }
+                if let Some(relation) = variant.stream_relation {
+                    walked = self.visit_stream(relation.stream_name());
+                    if walked.is_err() {
+                        break;
+                    }
+                }
+            }
+            self.binders = outer_binders;
+            walked?;
+        }
+        Ok(())
     }
 
     fn visit_name(&mut self, name: &Name) -> Result<(), SchemaError> {

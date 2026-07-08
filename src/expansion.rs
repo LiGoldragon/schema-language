@@ -195,9 +195,10 @@ impl<'registry> MacroExpansionPass<'registry> {
 }
 
 /// The positional slot map of a schema document: an optional leading imports
-/// brace, then input / output / namespace, then an optional trailing
-/// relations block. The pass reads slots from this map so its recording is
-/// aligned with `SchemaSource::from_document`'s own positional read.
+/// brace, then the generics section, input / output / namespace, then an
+/// optional trailing relations block. The pass reads slots from this map so
+/// its recording is aligned with `SchemaSource::from_document`'s own
+/// positional read.
 #[derive(Clone, Copy, Debug)]
 struct DocumentLayout {
     imports_index: Option<usize>,
@@ -208,10 +209,14 @@ struct DocumentLayout {
 
 impl DocumentLayout {
     fn of(document: &Document) -> Self {
-        let first_is_imports = document
+        let first_two_are_braces = document
             .root_object_at(0)
-            .is_some_and(|block| block.is_brace());
-        let offset = if first_is_imports { 1 } else { 0 };
+            .is_some_and(|block| block.is_brace())
+            && document
+                .root_object_at(1)
+                .is_some_and(|block| block.is_brace());
+        let first_is_imports = first_two_are_braces && document.holds_root_objects() >= 5;
+        let offset = if first_is_imports { 2 } else { 1 };
         Self {
             imports_index: first_is_imports.then_some(0),
             input_index: offset,

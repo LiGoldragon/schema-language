@@ -458,8 +458,8 @@ impl SchemaEngine {
     /// document and its `SchemaSource` cannot lower to different schemas.
     ///
     /// The document entry point keeps its own *entry contract*, narrower
-    /// than the source archive's: it accepts 3 roots (input output
-    /// namespace) or 4 with leading imports, and rejects the trailing
+    /// than the source archive's: it accepts 4 roots (generics input output
+    /// namespace) or 5 with leading imports, and rejects the trailing
     /// relations form. Within that contract the `SchemaSource` it builds
     /// carries no relations, so the single lowering is well-defined.
     pub fn lower_document_with_resolver(
@@ -471,9 +471,9 @@ impl SchemaEngine {
     ) -> Result<TrueSchema, SchemaError> {
         context.remember_structure_header(document.structure_header());
 
-        if !matches!(document.holds_root_objects(), 3 | 4) {
+        if !matches!(document.holds_root_objects(), 4 | 5) {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "3 root values (input output namespace) or 4 with leading imports",
+                expected: "4 root values (generics input output namespace) or 5 with leading imports",
                 found: document.holds_root_objects(),
             });
         }
@@ -488,14 +488,14 @@ impl SchemaEngine {
         // not a rival lowerer.
         let expanded = MacroExpansionPass::new(&self.registry).expand(document, context)?;
         let source = SchemaSource::from_document(&expanded)?;
-        // The document entry path admits imports + input/output/namespace
+        // The document entry path admits imports + generics + input/output/namespace
         // only; a trailing relations block is a source-archive-only form.
         // `from_document` would read a non-brace 4th-or-later root as
         // relations, so reject any relations the reparse produced rather
         // than silently widening the document contract.
         if !source.relations().is_empty() {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "3 root values (input output namespace) or 4 with leading imports",
+                expected: "4 root values (generics input output namespace) or 5 with leading imports",
                 found: document.holds_root_objects(),
             });
         }
