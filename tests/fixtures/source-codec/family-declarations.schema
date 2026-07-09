@@ -1,6 +1,6 @@
 {}
-[(Record Entry) (Observe Query)]
-[Recorded (Rejected Rejection)]
+[Record.Entry Observe.Query]
+[Recorded Rejected.Rejection]
 {
   Topic String
   Body String
@@ -13,3 +13,4 @@
   EntryFamily (Family { record.Entry table.entries key.Domain })
   ObservationFamily (Family { record.Observation table.observations key.Identified })
 }
+[]

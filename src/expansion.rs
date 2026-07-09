@@ -2,7 +2,7 @@ use nota::{Block, Delimiter, Document, StructuralMacroNode};
 
 use crate::{
     MacroContext, MacroObject, MacroOutput, MacroPair, MacroPosition, MacroRegistry, SchemaError,
-    macros::SchemaBlockExt,
+    macros::SchemaBlockExt, source::SchemaDocumentLayout,
 };
 
 /// The c2dc front-end pass: the NOTA decoder, once parsed into a document, is
@@ -15,9 +15,9 @@ use crate::{
 /// Two jobs, both feeding the one downstream lowering:
 ///
 /// 1. It rewrites user type-reference macro invocations — `(Bag Topic)` with a
-///    registered `Bag` macro becomes its expanded body `(Vector Topic)`,
-///    recursively — so the source path sees only built-in heads it already
-///    understands. The expansion reuses the registered macro's own
+///    registered `Bag` macro becomes its expanded source reference
+///    `Vector.Topic`, recursively — so the source path sees only built-in heads
+///    it already understands. The expansion reuses the registered macro's own
 ///    capture/substitution machinery (the `DeclarativeSchemaMacro` handler),
 ///    so `$`-sigil captures bind and substitute exactly as the macro declares.
 /// 2. It records every structural root macro firing (`RootImports`,
@@ -43,15 +43,15 @@ impl<'registry> MacroExpansionPass<'registry> {
 
     /// Run the pass over a parsed document. The returned document is the
     /// macro-expanded re-parse; `context` accumulates the recorded firings and
-    /// bindings. The entry contract (3 roots, or 4 with leading imports) is the
-    /// document path's, and is checked by the caller; this pass tolerates any
-    /// well-formed positional shape and records what it recognises.
+    /// bindings. The entry contract is the strict five-slot document layout
+    /// shared with the source path; grouped dotted root applications occupy one
+    /// typed slot even when raw NOTA currently parses them as two blocks.
     pub(crate) fn expand(
         &self,
         document: &Document,
         context: &mut MacroContext,
     ) -> Result<Document, SchemaError> {
-        let layout = DocumentLayout::of(document);
+        let layout = SchemaDocumentLayout::from_document(document)?;
         self.record_root_firings(document, &layout, context)?;
         let expanded_roots = document
             .root_objects()
@@ -68,24 +68,27 @@ impl<'registry> MacroExpansionPass<'registry> {
     fn record_root_firings(
         &self,
         document: &Document,
-        layout: &DocumentLayout,
+        layout: &SchemaDocumentLayout,
         context: &mut MacroContext,
     ) -> Result<(), SchemaError> {
-        if let Some(index) = layout.imports_index
-            && let Some(block) = document.root_object_at(index)
-        {
-            self.record_block_firing(block, MacroPosition::RootImports, context);
-        }
-        if let Some(block) = document.root_object_at(layout.input_index) {
-            self.record_block_firing(block, MacroPosition::RootInput, context);
-        }
-        if let Some(block) = document.root_object_at(layout.output_index) {
-            self.record_block_firing(block, MacroPosition::RootOutput, context);
-        }
-        if let Some(block) = document.root_object_at(layout.namespace_index) {
-            self.record_block_firing(block, MacroPosition::RootNamespace, context);
-            self.record_namespace_declaration_firings(block, context)?;
-        }
+        self.record_block_firing(
+            layout.imports().block(document),
+            MacroPosition::RootImports,
+            context,
+        );
+        self.record_block_firing(
+            layout.input().block(document),
+            MacroPosition::RootInput,
+            context,
+        );
+        self.record_block_firing(
+            layout.output().block(document),
+            MacroPosition::RootOutput,
+            context,
+        );
+        let namespace = layout.namespace().block(document);
+        self.record_block_firing(namespace, MacroPosition::RootNamespace, context);
+        self.record_namespace_declaration_firings(namespace, context)?;
         Ok(())
     }
 
@@ -190,33 +193,6 @@ impl<'registry> MacroExpansionPass<'registry> {
                     .unwrap_or_else(|| "type reference macro".to_owned()),
                 expected: "type reference",
             }),
-        }
-    }
-}
-
-/// The positional slot map of a schema document: an optional leading imports
-/// brace, then input / output / namespace, then an optional trailing
-/// relations block. The pass reads slots from this map so its recording is
-/// aligned with `SchemaSource::from_document`'s own positional read.
-#[derive(Clone, Copy, Debug)]
-struct DocumentLayout {
-    imports_index: Option<usize>,
-    input_index: usize,
-    output_index: usize,
-    namespace_index: usize,
-}
-
-impl DocumentLayout {
-    fn of(document: &Document) -> Self {
-        let first_is_imports = document
-            .root_object_at(0)
-            .is_some_and(|block| block.is_brace());
-        let offset = if first_is_imports { 1 } else { 0 };
-        Self {
-            imports_index: first_is_imports.then_some(0),
-            input_index: offset,
-            output_index: offset + 1,
-            namespace_index: offset + 2,
         }
     }
 }

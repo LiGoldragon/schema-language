@@ -1,8 +1,10 @@
-[(Record)]
-[(Recorded)]
+{}
+[Record.Record]
+[]
 {
   Description String
   RecordIdentifier Integer
   Record { Description }
   Recorded { RecordIdentifier }
 }
+[]

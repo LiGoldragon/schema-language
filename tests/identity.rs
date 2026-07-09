@@ -20,8 +20,9 @@ impl IdentityFixture {
     }
 
     const BASE: &'static str = "\
-[(Record Entry)]
-[(Recorded Receipt) (Rejected Rejection)]
+{}
+[Record.Entry]
+[Recorded.Receipt Rejected.Rejection]
 {
   Topic String
   Magnitude Integer
@@ -33,15 +34,17 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
+[]
 ";
 
     /// BASE re-spelled with different whitespace and `;;` comments —
     /// the same semantic schema in a different textual coat.
     const REFORMATTED: &'static str = "\
 ;; the input root
-[ (Record Entry) ]
+{}
+[ Record.Entry ]
 ;; the output root
-[ (Recorded Receipt)   (Rejected Rejection) ]
+[ Recorded.Receipt   Rejected.Rejection ]
 {
   Topic     String   ;; alias
   Magnitude Integer
@@ -54,13 +57,15 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
+[]
 ";
 
     /// BASE with `Magnitude` — two reference hops below `Entry` —
     /// changed from `Integer` to `String`.
     const DEEP_CHANGE: &'static str = "\
-[(Record Entry)]
-[(Recorded Receipt) (Rejected Rejection)]
+{}
+[Record.Entry]
+[Recorded.Receipt Rejected.Rejection]
 {
   Topic String
   Magnitude String
@@ -72,12 +77,14 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
+[]
 ";
 
     /// BASE with only `Unrelated` — unreachable from `Entry` — changed.
     const UNRELATED_CHANGE: &'static str = "\
-[(Record Entry)]
-[(Recorded Receipt) (Rejected Rejection)]
+{}
+[Record.Entry]
+[Recorded.Receipt Rejected.Rejection]
 {
   Topic String
   Magnitude Integer
@@ -89,6 +96,7 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
+[]
 ";
 
     fn schema(&self, source: &str) -> TrueSchema {

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use nota::{Delimiter, Document, SourcePosition, SourceSpan};
+use nota::{Document, SourcePosition, SourceSpan};
 
 use crate::{
     ImportResolver, Name, SchemaEngine, SchemaError, SchemaModuleSource, SchemaPackage,
-    SchemaSourceArtifact, TrueSchema,
+    SchemaSourceArtifact, TrueSchema, source::SchemaDocumentLayout,
 };
 
 pub struct SchemaEnvironment {
@@ -200,39 +200,38 @@ struct SchemaRootBlockSummarySet {
 
 impl SchemaRootBlockSummarySet {
     fn from_document(document: &Document) -> Self {
-        let first_is_imports = document
-            .root_object_at(0)
-            .is_some_and(|block| block.is_delimited_with(Delimiter::Brace));
-        let mut blocks = Vec::new();
-        if first_is_imports {
-            blocks.extend(SchemaRootBlockSummary::from_document_block(
-                document,
-                0,
-                SchemaRootBlockKind::Imports,
-            ));
+        let Ok(layout) = SchemaDocumentLayout::from_document(document) else {
+            return Self { blocks: Vec::new() };
+        };
+        Self {
+            blocks: vec![
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.imports(),
+                    SchemaRootBlockKind::Imports,
+                ),
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.input(),
+                    SchemaRootBlockKind::Input,
+                ),
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.output(),
+                    SchemaRootBlockKind::Output,
+                ),
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.namespace(),
+                    SchemaRootBlockKind::Namespace,
+                ),
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.relations(),
+                    SchemaRootBlockKind::Relations,
+                ),
+            ],
         }
-        let input_index = if first_is_imports { 1 } else { 0 };
-        blocks.extend(SchemaRootBlockSummary::from_document_block(
-            document,
-            input_index,
-            SchemaRootBlockKind::Input,
-        ));
-        blocks.extend(SchemaRootBlockSummary::from_document_block(
-            document,
-            input_index + 1,
-            SchemaRootBlockKind::Output,
-        ));
-        blocks.extend(SchemaRootBlockSummary::from_document_block(
-            document,
-            input_index + 2,
-            SchemaRootBlockKind::Namespace,
-        ));
-        blocks.extend(SchemaRootBlockSummary::from_document_block(
-            document,
-            input_index + 3,
-            SchemaRootBlockKind::Relations,
-        ));
-        Self { blocks }
     }
 
     fn into_blocks(self) -> Vec<SchemaRootBlockSummary> {
@@ -260,17 +259,23 @@ impl SchemaRootBlockSummary {
         self.node_type
     }
 
-    fn from_document_block(
+    fn from_document_slot(
         document: &Document,
-        index: usize,
+        slot: crate::source::SchemaDocumentSlot,
         kind: SchemaRootBlockKind,
-    ) -> Option<Self> {
-        let block = document.root_object_at(index)?;
-        Some(Self {
+    ) -> Self {
+        let blocks = slot.blocks(document);
+        let first = blocks
+            .first()
+            .expect("document layout slot always has a first block");
+        let last = blocks
+            .last()
+            .expect("document layout slot always has a last block");
+        Self {
             kind,
-            range: SchemaSourceRange::from(block.source_span()),
+            range: SchemaSourceRange::from_span_bounds(first.source_span(), last.source_span()),
             node_type: SchemaNodeType::from_root_block_kind(kind),
-        })
+        }
     }
 }
 
@@ -376,6 +381,13 @@ impl SchemaSourceRange {
                 column: 1,
             },
             end: SchemaSourcePosition::from_source_text(source),
+        }
+    }
+
+    fn from_span_bounds(first: SourceSpan, last: SourceSpan) -> Self {
+        Self {
+            start: SchemaSourcePosition::from(first.start),
+            end: SchemaSourcePosition::from(last.end),
         }
     }
 }

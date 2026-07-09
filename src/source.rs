@@ -11,10 +11,9 @@ use nota::{
 use crate::{
     Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey,
     FieldDeclaration, ImplBlock, ImplCatalog, ImplReference, ImportDeclaration, MethodParameter,
-    MethodSignature, Name, NewtypeDeclaration, RawNotaDatatype, RawNotaSequence,
-    RelationDeclaration, RelationValue, ResolvedImport, Root, RootApplication, SchemaEngine,
-    SchemaError, SchemaIdentity, StreamDeclaration, StreamRelation, StructDeclaration, TableName,
-    TrueSchema, TypeDeclaration, TypeReference,
+    MethodSignature, Name, NewtypeDeclaration, RelationDeclaration, RelationValue, ResolvedImport,
+    Root, RootApplication, SchemaEngine, SchemaError, SchemaIdentity, StreamDeclaration,
+    StreamRelation, StructDeclaration, TableName, TrueSchema, TypeDeclaration, TypeReference,
     macros::{BlockDebug, SchemaBlockExt},
 };
 
@@ -34,69 +33,20 @@ impl SchemaSource {
     }
 
     pub fn from_document(document: &Document) -> Result<Self, SchemaError> {
-        if !matches!(document.holds_root_objects(), 3..=5) {
-            return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "3 root values (input output namespace), optional leading imports, optional trailing relations",
-                found: document.holds_root_objects(),
-            });
-        }
-
-        let first_is_imports = document.root_object_at(0).is_some_and(|block| {
-            matches!(
-                block,
-                Block::Delimited {
-                    delimiter: Delimiter::Brace,
-                    ..
-                }
-            )
-        });
-        let (imports, input_index) = if first_is_imports {
-            (
-                SourceImports::from_block(document.root_object_at(0).expect("checked root count"))?,
-                1,
-            )
-        } else {
-            (SourceImports::empty(), 0)
-        };
-        let output_index = input_index + 1;
-        let namespace_index = input_index + 2;
-        let relations_index = namespace_index + 1;
-        if document.holds_root_objects() < relations_index {
-            return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "input output namespace after optional imports",
-                found: document.holds_root_objects(),
-            });
-        }
-        let relations = if document.holds_root_objects() == relations_index + 1 {
-            SourceRelations::from_block(
-                document
-                    .root_object_at(relations_index)
-                    .expect("checked root count"),
-            )?
-        } else {
-            SourceRelations::empty()
-        };
+        let layout = SchemaDocumentLayout::from_document(document)?;
 
         Ok(Self {
-            imports,
-            input: SourceRootEnum::from_block(
+            imports: SourceImports::from_block(layout.imports().block(document))?,
+            input: SourceRootEnum::from_blocks(
                 Name::new("Input"),
-                document
-                    .root_object_at(input_index)
-                    .expect("checked root count"),
+                layout.input().blocks(document),
             )?,
-            output: SourceRootEnum::from_block(
+            output: SourceRootEnum::from_blocks(
                 Name::new("Output"),
-                document
-                    .root_object_at(output_index)
-                    .expect("checked root count"),
+                layout.output().blocks(document),
             )?,
-            namespace: SourceNamespace::from_block(
-                document
-                    .root_object_at(namespace_index)
-                    .expect("checked root count"),
-            )?,
-            relations,
+            namespace: SourceNamespace::from_block(layout.namespace().block(document))?,
+            relations: SourceRelations::from_block(layout.relations().block(document))?,
         })
     }
 
@@ -129,16 +79,14 @@ impl SchemaSource {
     }
 
     pub fn to_schema_text(&self) -> String {
-        let mut roots = vec![
+        [
             self.imports.to_schema_text(),
             self.input.body().to_schema_text(),
             self.output.body().to_schema_text(),
             self.namespace.to_schema_text(),
-        ];
-        if !self.relations.is_empty() {
-            roots.push(self.relations.to_schema_text());
-        }
-        roots.join("\n")
+            self.relations.to_schema_text(),
+        ]
+        .join("\n")
     }
 
     pub fn from_binary_bytes(bytes: &[u8]) -> Result<Self, SchemaError> {
@@ -190,6 +138,147 @@ impl SchemaSource {
         .and_then(TrueSchema::product_components_verified)
         .and_then(TrueSchema::arities_verified)
         .and_then(TrueSchema::impls_verified)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SchemaDocumentLayout {
+    imports: SchemaDocumentSlot,
+    input: SchemaDocumentSlot,
+    output: SchemaDocumentSlot,
+    namespace: SchemaDocumentSlot,
+    relations: SchemaDocumentSlot,
+}
+
+impl SchemaDocumentLayout {
+    pub(crate) fn from_document(document: &Document) -> Result<Self, SchemaError> {
+        let objects = document.root_objects();
+        let mut cursor = 0;
+        let imports = SchemaDocumentSlot::consume_delimited(
+            objects,
+            &mut cursor,
+            Delimiter::Brace,
+            "imports",
+        )?;
+        let input = SchemaDocumentSlot::consume_root_body(objects, &mut cursor, "input")?;
+        let output = SchemaDocumentSlot::consume_root_body(objects, &mut cursor, "output")?;
+        let namespace = SchemaDocumentSlot::consume_delimited(
+            objects,
+            &mut cursor,
+            Delimiter::Brace,
+            "namespace",
+        )?;
+        let relations = SchemaDocumentSlot::consume_delimited(
+            objects,
+            &mut cursor,
+            Delimiter::SquareBracket,
+            "relations",
+        )?;
+        if cursor != objects.len() {
+            return Err(SchemaError::ExpectedRootObjectCount {
+                expected: "5 root slots (imports input output namespace relations; grouped dotted applications count as one slot)",
+                found: document.holds_root_objects(),
+            });
+        }
+        Ok(Self {
+            imports,
+            input,
+            output,
+            namespace,
+            relations,
+        })
+    }
+
+    pub(crate) fn imports(&self) -> SchemaDocumentSlot {
+        self.imports
+    }
+
+    pub(crate) fn input(&self) -> SchemaDocumentSlot {
+        self.input
+    }
+
+    pub(crate) fn output(&self) -> SchemaDocumentSlot {
+        self.output
+    }
+
+    pub(crate) fn namespace(&self) -> SchemaDocumentSlot {
+        self.namespace
+    }
+
+    pub(crate) fn relations(&self) -> SchemaDocumentSlot {
+        self.relations
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SchemaDocumentSlot {
+    start: usize,
+    width: usize,
+}
+
+impl SchemaDocumentSlot {
+    fn new(start: usize, width: usize) -> Self {
+        Self { start, width }
+    }
+
+    fn consume_delimited(
+        objects: &[Block],
+        cursor: &mut usize,
+        delimiter: Delimiter,
+        slot_name: &'static str,
+    ) -> Result<Self, SchemaError> {
+        let start = *cursor;
+        let Some(block) = objects.get(start) else {
+            return Err(SchemaError::ExpectedRootObjectCount {
+                expected: "5 root slots (imports input output namespace relations)",
+                found: objects.len(),
+            });
+        };
+        if !block.is_delimited_with(delimiter) {
+            return Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!(
+                    "{slot_name} root slot {}, expected {} block",
+                    block.reemit_fallback(),
+                    delimiter.description()
+                ),
+            });
+        }
+        *cursor += 1;
+        Ok(Self::new(start, 1))
+    }
+
+    fn consume_root_body(
+        objects: &[Block],
+        cursor: &mut usize,
+        slot_name: &'static str,
+    ) -> Result<Self, SchemaError> {
+        let start = *cursor;
+        if objects.get(start).is_none() {
+            return Err(SchemaError::ExpectedRootObjectCount {
+                expected: "5 root slots (imports input output namespace relations)",
+                found: objects.len(),
+            });
+        }
+        let width = SourceReference::block_span_width_at(objects, start)?;
+        *cursor += width;
+        if *cursor > objects.len() {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: slot_name,
+                expected: "a complete root value",
+                found: objects.len().saturating_sub(start),
+            });
+        }
+        Ok(Self::new(start, width))
+    }
+
+    pub(crate) fn blocks<'document>(&self, document: &'document Document) -> &'document [Block] {
+        &document.root_objects()[self.start..self.start + self.width]
+    }
+
+    pub(crate) fn block<'document>(&self, document: &'document Document) -> &'document Block {
+        self.blocks(document)
+            .first()
+            .expect("document layout slot always has one block")
     }
 }
 
@@ -480,7 +569,7 @@ impl SourceImport {
 
 /// A root Input/Output position in the source codec. The body is a typed
 /// sum mirroring the semantic [`Root`]: the enum-body form `[Variant …]`
-/// or the application form `(Head Arg …)`. The name is the position name
+/// or the dotted application form `Head.(Arg …)`. The name is the position name
 /// (`Input` / `Output`) — for an enum root it also names the lowered enum
 /// declaration; for an application root it is only the position identity.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -498,10 +587,10 @@ impl SourceRootEnum {
         &self.body
     }
 
-    fn from_block(name: Name, block: &Block) -> Result<Self, SchemaError> {
+    fn from_blocks(name: Name, blocks: &[Block]) -> Result<Self, SchemaError> {
         Ok(Self {
             name,
-            body: SourceRootBody::from_block(block)?,
+            body: SourceRootBody::from_blocks(blocks)?,
         })
     }
 
@@ -559,18 +648,31 @@ impl SourceRootBody {
         }
     }
 
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        if block.is_parenthesis() {
-            let reference = SourceReference::from_block(block)?;
-            let SourceReference::Application { .. } = &reference else {
-                return Err(SchemaError::ExpectedRootApplication {
-                    position: "root",
-                    found: reference.to_schema_text(),
-                });
-            };
-            return Ok(Self::Application(reference));
+    fn from_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
+        if let [block] = blocks
+            && block.is_delimited_with(Delimiter::SquareBracket)
+        {
+            return Ok(Self::Enum(SourceEnumBody::from_block(block)?));
         }
-        Ok(Self::Enum(SourceEnumBody::from_block(block)?))
+        let mut cursor = 0;
+        let reference = SourceReference::from_blocks_at(blocks, &mut cursor)?;
+        if cursor != blocks.len() {
+            return Err(SchemaError::ExpectedRootApplication {
+                position: "root",
+                found: blocks
+                    .iter()
+                    .map(Block::reemit_fallback)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            });
+        }
+        let SourceReference::Application { .. } = &reference else {
+            return Err(SchemaError::ExpectedRootApplication {
+                position: "root",
+                found: reference.to_schema_text(),
+            });
+        };
+        Ok(Self::Application(reference))
     }
 
     pub fn to_schema_text(&self) -> String {
@@ -766,8 +868,10 @@ impl<'block> SourceNamespaceWalk<'block> {
 
         let body = match self.objects.get(self.cursor) {
             Some(next) if !next.is_pipe_brace() => {
-                self.cursor += 1;
-                Some(next)
+                let start = self.cursor;
+                let width = SourceDeclarationValue::block_span_width_at(self.objects, start)?;
+                self.cursor += width;
+                Some(&self.objects[start..self.cursor])
             }
             _ => None,
         };
@@ -824,7 +928,7 @@ impl SourceNamespaceEntry {
     fn from_parts(
         name: Name,
         parameters: Vec<Name>,
-        body: Option<&Block>,
+        body: Option<&[Block]>,
         impls: Option<&Block>,
     ) -> Result<Self, SchemaError> {
         let value = match body {
@@ -846,18 +950,19 @@ impl SourceNamespaceEntry {
     fn value_from_body(
         name: &Name,
         parameters: &[Name],
-        body: &Block,
+        body: &[Block],
     ) -> Result<SourceNamespaceEntryValue, SchemaError> {
-        if parameters.is_empty()
+        if let [block] = body
+            && parameters.is_empty()
             && SourceIdentifierCase::new(name).is_namespace()
-            && body.is_brace()
+            && block.is_brace()
         {
             Ok(SourceNamespaceEntryValue::Namespace(
-                SourceNamespace::from_block(body)?,
+                SourceNamespace::from_block(block)?,
             ))
         } else {
             Ok(SourceNamespaceEntryValue::Declaration(
-                SourceDeclarationValue::from_block(body)?,
+                SourceDeclarationValue::from_blocks(body)?,
             ))
         }
     }
@@ -1661,17 +1766,26 @@ pub enum SourceDeclarationValue {
 impl SourceDeclarationValue {
     pub fn from_schema_text(source: &str) -> Result<Self, SchemaError> {
         let document = Document::parse(source)?;
-        if document.holds_root_objects() != 1 {
-            return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "one schema declaration body",
-                found: document.holds_root_objects(),
-            });
+        Self::from_blocks(document.root_objects())
+    }
+
+    fn from_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
+        if let [block] = blocks {
+            return Self::from_block(block);
         }
-        Self::from_block(
-            document
-                .root_object_at(0)
-                .expect("checked root object count"),
-        )
+        let mut cursor = 0;
+        let reference = SourceReference::from_blocks_at(blocks, &mut cursor)?;
+        if cursor == blocks.len() {
+            return Ok(Self::Reference(reference));
+        }
+        Err(SchemaError::ExpectedRootObjectCount {
+            expected: "one schema declaration body",
+            found: blocks.len(),
+        })
+    }
+
+    fn block_span_width_at(blocks: &[Block], index: usize) -> Result<usize, SchemaError> {
+        SourceReference::block_span_width_at(blocks, index)
     }
 
     /// Decode a single declaration body block into the typed value, the
@@ -2418,11 +2532,28 @@ impl SourceField {
     }
 
     fn from_positional_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
-        if let Some(named) = SourceNamedBlock::from_blocks_if_trailing_dot(blocks, index)? {
-            return Self::from_explicit_reference(
-                named.name,
-                SourceReference::from_block(named.value)?,
-            );
+        if let Some(Block::Atom(atom)) = blocks.get(*index)
+            && let Some(name_text) = atom.text().strip_suffix('.')
+        {
+            if name_text.is_empty() {
+                return Err(SchemaError::RetiredStructFieldSyntax {
+                    found: atom.text().to_owned(),
+                });
+            }
+            if SourceGenericDefinitions::default()
+                .definition(&Name::new(name_text))
+                .is_some()
+            {
+                let reference = SourceReference::from_blocks_at(blocks, index)?;
+                return Ok(Self {
+                    name: reference.derived_field_name(),
+                    value: SourceFieldValue::Reference(reference),
+                    identity: SourceFieldIdentity::Implicit,
+                });
+            }
+            *index += 1;
+            let reference = SourceReference::from_blocks_at(blocks, index)?;
+            return Self::from_explicit_reference(Name::new(name_text), reference);
         }
         let block = &blocks[*index];
         *index += 1;
@@ -2449,8 +2580,20 @@ impl SourceField {
                 found: atom.0.to_owned(),
             });
         }
-        if let Some((field_name, type_name)) = atom.0.split_once('.') {
-            return Self::from_explicit_field_reference(field_name, type_name);
+        if let Some((head, payload)) = atom.0.split_once('.') {
+            let head_name = Name::new(head);
+            if SourceGenericDefinitions::default()
+                .definition(&head_name)
+                .is_some()
+            {
+                let reference = SourceReference::from_atom_text(atom.0)?;
+                return Ok(Self {
+                    name: reference.derived_field_name(),
+                    value: SourceFieldValue::Reference(reference),
+                    identity: SourceFieldIdentity::Implicit,
+                });
+            }
+            return Self::from_explicit_field_reference(head, payload);
         }
         let name = atom.into_name();
         if SourceIdentifierCase::new(&name).is_type() {
@@ -2481,34 +2624,20 @@ impl SourceField {
 
     fn from_explicit_field_reference(
         field_name: &str,
-        type_name: &str,
+        reference_text: &str,
     ) -> Result<Self, SchemaError> {
         let name = Name::new(field_name);
-        let reference = Name::new(type_name);
         if field_name.is_empty()
-            || type_name.is_empty()
+            || reference_text.is_empty()
             || field_name.contains('.')
-            || type_name.contains('.')
             || !name.qualifies_as_symbol_name()
-            || !reference.qualifies_as_symbol_name()
-            || !SourceIdentifierCase::new(&reference).is_type()
         {
             return Err(SchemaError::RetiredStructFieldSyntax {
-                found: format!("{field_name}.{type_name}"),
+                found: format!("{field_name}.{reference_text}"),
             });
         }
-        if name.field_name() == reference.field_name() && !Self::is_reserved_scalar_name(&reference)
-        {
-            return Err(SchemaError::RedundantExplicitFieldRole {
-                found: format!("{field_name}.{type_name}"),
-                type_name: reference.to_nota(),
-            });
-        }
-        Ok(Self {
-            name,
-            value: SourceFieldValue::Reference(SourceReference::Plain(reference)),
-            identity: SourceFieldIdentity::Explicit,
-        })
+        let reference = SourceReference::from_atom_text(reference_text)?;
+        Self::from_explicit_reference(name, reference)
     }
 
     fn from_explicit_reference(
@@ -2799,16 +2928,7 @@ impl SourceEnumBody {
     }
 }
 
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::StructuralMacroNode,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
         __C: rkyv::validation::ArchiveContext,
@@ -2821,13 +2941,8 @@ impl SourceEnumBody {
     deserialize_bounds(__D::Error: rkyv::rancor::Source)
 )]
 pub enum SourceVariantSignature {
-    #[shape(pascal_atom)]
     Unit(SourceVariantName),
-    #[shape(pascal_head, arity = 1)]
-    SelfTagged(SourceVariantName),
-    #[shape(pascal_head, arity = 2)]
     Data(SourceVariantName, #[rkyv(omit_bounds)] SourceVariantPayload),
-    #[shape(pascal_head, arity = 4)]
     Streaming(
         SourceVariantName,
         #[rkyv(omit_bounds)] SourceVariantPayload,
@@ -2845,24 +2960,11 @@ impl SourceVariantSignature {
         Self::Data(SourceVariantName::new(name), payload)
     }
 
-    pub fn from_self_tagged(name: Name) -> Self {
-        Self::SelfTagged(SourceVariantName::new(name))
-    }
-
     pub fn from_projected(
         name: Name,
         payload: Option<SourceVariantPayload>,
         stream_relation: Option<&StreamRelation>,
     ) -> Self {
-        if stream_relation.is_none()
-            && matches!(
-                &payload,
-                Some(SourceVariantPayload::Reference(SourceReference::Plain(payload_name)))
-                    if payload_name == &name
-            )
-        {
-            return Self::from_self_tagged(name);
-        }
         match (payload, stream_relation) {
             (Some(payload), Some(relation)) => Self::Streaming(
                 SourceVariantName::new(name),
@@ -2877,10 +2979,7 @@ impl SourceVariantSignature {
 
     pub fn name(&self) -> &Name {
         match self {
-            Self::Unit(name)
-            | Self::SelfTagged(name)
-            | Self::Data(name, _)
-            | Self::Streaming(name, ..) => name.name(),
+            Self::Unit(name) | Self::Data(name, _) | Self::Streaming(name, ..) => name.name(),
         }
     }
 
@@ -2900,14 +2999,14 @@ impl SourceVariantSignature {
             Self::Streaming(_, _, keyword, stream_name) => {
                 Some(keyword.into_stream_relation(stream_name.name().clone()))
             }
-            Self::Unit(_) | Self::SelfTagged(_) | Self::Data(_, _) => None,
+            Self::Unit(_) | Self::Data(_, _) => None,
         }
     }
 
     fn payload_value(&self) -> Option<&SourceVariantPayload> {
         match self {
             Self::Data(_, payload) | Self::Streaming(_, payload, _, _) => Some(payload),
-            Self::Unit(_) | Self::SelfTagged(_) => None,
+            Self::Unit(_) => None,
         }
     }
 
@@ -2918,7 +3017,6 @@ impl SourceVariantSignature {
     ) -> Result<EnumVariant, SchemaError> {
         let name = self.name().clone();
         let payload = match self {
-            Self::SelfTagged(_) => Some(resolver.resolve_name(namespace, &name)),
             Self::Data(_, SourceVariantPayload::Reference(reference))
             | Self::Streaming(_, SourceVariantPayload::Reference(reference), _, _) => {
                 Some(resolver.resolve_reference(namespace, reference))
@@ -2993,6 +3091,115 @@ impl SourceVariantSignature {
     }
 }
 
+impl StructuralMacroNode for SourceVariantSignature {
+    type Error = SchemaError;
+
+    fn structural_position() -> nota::PositionPredicate {
+        nota::PositionPredicate::named("source enum variant")
+    }
+
+    fn structural_variants() -> Vec<StructuralVariant> {
+        vec![
+            nota::BlockShape::pascal_atom(Some(CaptureName::new("name")))
+                .into_structural_variant("unit", "PascalCase unit variant"),
+            nota::BlockShape::any(None)
+                .into_structural_variant("payload", "dotted reference or inline payload variant"),
+        ]
+    }
+
+    fn from_structural_block(block: &Block) -> Result<Self, StructuralMacroError<Self::Error>> {
+        match block {
+            Block::Atom(atom) => {
+                Self::from_atom_text(atom.text()).map_err(StructuralMacroError::MatchedNode)
+            }
+            Block::Delimited {
+                delimiter: Delimiter::Parenthesis,
+                root_objects,
+                ..
+            } => Self::from_parenthesis(root_objects).map_err(StructuralMacroError::MatchedNode),
+            _ => Err(StructuralMacroError::MatchedNode(
+                SchemaError::ExpectedSyntaxEnumVariant {
+                    found: block.reemit_fallback(),
+                },
+            )),
+        }
+    }
+
+    fn from_structural_candidate(
+        candidate: MacroCandidate<'_>,
+    ) -> Result<Self, StructuralMacroError<Self::Error>> {
+        match candidate.blocks() {
+            [block] => Self::from_structural_block(block),
+            blocks => Err(StructuralMacroError::ExpectedSingleRoot {
+                found: blocks.len(),
+            }),
+        }
+    }
+
+    fn to_structural_nota(&self) -> String {
+        match self {
+            Self::Unit(name) => name.to_structural_nota(),
+            Self::Data(name, SourceVariantPayload::Reference(reference)) => {
+                format!(
+                    "{}.{}",
+                    name.to_structural_nota(),
+                    reference.to_schema_text()
+                )
+            }
+            Self::Data(name, SourceVariantPayload::Declaration(payload)) => {
+                Delimiter::Parenthesis.wrap([name.to_structural_nota(), payload.to_schema_text()])
+            }
+            Self::Streaming(name, payload, keyword, stream_name) => Delimiter::Parenthesis.wrap([
+                name.to_structural_nota(),
+                payload.to_schema_text(),
+                keyword.to_structural_nota(),
+                stream_name.to_structural_nota(),
+            ]),
+        }
+    }
+}
+
+impl SourceVariantSignature {
+    fn from_atom_text(text: &str) -> Result<Self, SchemaError> {
+        let Some((name, payload)) = text.split_once('.') else {
+            return Ok(Self::Unit(SourceVariantName::from_text(text)?));
+        };
+        if name.is_empty() || payload.is_empty() {
+            return Err(SchemaError::ExpectedSyntaxEnumVariant {
+                found: text.to_owned(),
+            });
+        }
+        Ok(Self::Data(
+            SourceVariantName::from_text(name)?,
+            SourceVariantPayload::Reference(SourceReference::from_atom_text(payload)?),
+        ))
+    }
+
+    fn from_parenthesis(objects: &[Block]) -> Result<Self, SchemaError> {
+        match objects {
+            [name] => Err(SchemaError::SameNamedVariantPayload {
+                enum_name: "<source>".to_owned(),
+                variant_name: name.schema_name()?.as_str().to_owned(),
+                payload_type: name.schema_name()?.as_str().to_owned(),
+            }),
+            [name, payload] => Ok(Self::Data(
+                SourceVariantName::from_structural_block(name).map_err(SchemaError::from)?,
+                SourceVariantPayload::from_structural_block(payload).map_err(SchemaError::from)?,
+            )),
+            [name, payload, relation, stream_name] => Ok(Self::Streaming(
+                SourceVariantName::from_structural_block(name).map_err(SchemaError::from)?,
+                SourceVariantPayload::from_structural_block(payload).map_err(SchemaError::from)?,
+                StreamRelationKeyword::from_structural_block(relation)
+                    .map_err(SchemaError::from)?,
+                SourceVariantName::from_structural_block(stream_name).map_err(SchemaError::from)?,
+            )),
+            _ => Err(SchemaError::ExpectedSyntaxEnumVariant {
+                found: format!("parenthesized variant with {} objects", objects.len()),
+            }),
+        }
+    }
+}
+
 /// A PascalCase schema symbol at a variant-name or stream-name position. It owns
 /// the lowered `Name` and decodes itself from a bare PascalCase atom, so the
 /// `SourceVariantSignature` derive can recurse into each name field.
@@ -3002,6 +3209,16 @@ pub struct SourceVariantName(Name);
 impl SourceVariantName {
     pub fn new(name: Name) -> Self {
         Self(name)
+    }
+
+    fn from_text(text: &str) -> Result<Self, SchemaError> {
+        if Self::qualifies(text) {
+            Ok(Self(Name::new(text)))
+        } else {
+            Err(SchemaError::ExpectedSyntaxEnumVariant {
+                found: text.to_owned(),
+            })
+        }
     }
 
     fn name(&self) -> &Name {
@@ -3197,9 +3414,363 @@ pub enum SourceReference {
     },
 }
 
+#[derive(Clone, Copy, Debug)]
+struct SourceGenericDefinitions {
+    definitions: &'static [SourceGenericDefinition],
+}
+
+impl Default for SourceGenericDefinitions {
+    fn default() -> Self {
+        Self {
+            definitions: Self::builtin_definitions(),
+        }
+    }
+}
+
+impl SourceGenericDefinitions {
+    fn builtin_definitions() -> &'static [SourceGenericDefinition] {
+        static DEFINITIONS: [SourceGenericDefinition; 5] = [
+            SourceGenericDefinition::new(
+                "Vector",
+                SourceGenericLowering::Vector,
+                SourceGenericArity::Exact(1),
+                SourceGenericFieldNamePattern::Suffix("vector"),
+            ),
+            SourceGenericDefinition::new(
+                "Optional",
+                SourceGenericLowering::Optional,
+                SourceGenericArity::Exact(1),
+                SourceGenericFieldNamePattern::Prefix("optional"),
+            ),
+            SourceGenericDefinition::new(
+                "ScopeOf",
+                SourceGenericLowering::ScopeOf,
+                SourceGenericArity::Exact(1),
+                SourceGenericFieldNamePattern::Suffix("scope"),
+            ),
+            SourceGenericDefinition::new(
+                "Map",
+                SourceGenericLowering::Map,
+                SourceGenericArity::Exact(2),
+                SourceGenericFieldNamePattern::Map,
+            ),
+            SourceGenericDefinition::new(
+                "Bytes",
+                SourceGenericLowering::FixedBytes,
+                SourceGenericArity::Exact(1),
+                SourceGenericFieldNamePattern::FixedBytes,
+            ),
+        ];
+        &DEFINITIONS
+    }
+
+    fn definitions(&self) -> &'static [SourceGenericDefinition] {
+        self.definitions
+    }
+
+    fn definition(&self, name: &Name) -> Option<SourceGenericDefinition> {
+        self.definitions()
+            .iter()
+            .copied()
+            .find(|definition| definition.name == name.as_str())
+    }
+
+    fn definition_by_lowering(
+        &self,
+        lowering: SourceGenericLowering,
+    ) -> Option<SourceGenericDefinition> {
+        self.definitions()
+            .iter()
+            .copied()
+            .find(|definition| definition.lowering == lowering)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceGenericLowering {
+    Vector,
+    Optional,
+    ScopeOf,
+    Map,
+    FixedBytes,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceGenericArity {
+    Exact(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceGenericFieldNamePattern {
+    Prefix(&'static str),
+    Suffix(&'static str),
+    Map,
+    FixedBytes,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SourceGenericDefinition {
+    name: &'static str,
+    lowering: SourceGenericLowering,
+    arity: SourceGenericArity,
+    field_name_pattern: SourceGenericFieldNamePattern,
+}
+
+impl SourceGenericDefinition {
+    const fn new(
+        name: &'static str,
+        lowering: SourceGenericLowering,
+        arity: SourceGenericArity,
+        field_name_pattern: SourceGenericFieldNamePattern,
+    ) -> Self {
+        Self {
+            name,
+            lowering,
+            arity,
+            field_name_pattern,
+        }
+    }
+
+    fn lower(self, arguments: Vec<SourceReference>) -> Result<SourceReference, SchemaError> {
+        self.verify_arity(arguments.len())?;
+        match self.lowering {
+            SourceGenericLowering::Vector => Ok(SourceReference::Vector(Box::new(
+                arguments.into_iter().next().expect("arity checked"),
+            ))),
+            SourceGenericLowering::Optional => Ok(SourceReference::Optional(Box::new(
+                arguments.into_iter().next().expect("arity checked"),
+            ))),
+            SourceGenericLowering::ScopeOf => Ok(SourceReference::ScopeOf(Box::new(
+                arguments.into_iter().next().expect("arity checked"),
+            ))),
+            SourceGenericLowering::Map => {
+                let mut arguments = arguments.into_iter();
+                Ok(SourceReference::Map(
+                    Box::new(arguments.next().expect("arity checked")),
+                    Box::new(arguments.next().expect("arity checked")),
+                ))
+            }
+            SourceGenericLowering::FixedBytes => {
+                let argument = arguments.into_iter().next().expect("arity checked");
+                let width = argument.fixed_bytes_width_argument().ok_or_else(|| {
+                    SchemaError::ExpectedSyntaxReference {
+                        found: argument.to_schema_text(),
+                    }
+                })?;
+                Ok(SourceReference::FixedBytes(width))
+            }
+        }
+    }
+
+    fn verify_arity(self, found: usize) -> Result<(), SchemaError> {
+        match self.arity {
+            SourceGenericArity::Exact(expected) if expected == found => Ok(()),
+            SourceGenericArity::Exact(expected) => Err(SchemaError::GenericArityMismatch {
+                head: self.name.to_owned(),
+                expected,
+                found,
+            }),
+        }
+    }
+
+    fn application_text(self, arguments: impl IntoIterator<Item = String>) -> String {
+        Self::application_text_for_head(&Name::new(self.name), arguments)
+    }
+
+    fn application_text_for_head(
+        head: &Name,
+        arguments: impl IntoIterator<Item = String>,
+    ) -> String {
+        let arguments = arguments.into_iter().collect::<Vec<_>>();
+        match arguments.as_slice() {
+            [single] if SourceDottedArgumentText::new(single).can_inline() => {
+                format!("{}.{}", head.to_nota(), single)
+            }
+            _ => format!("{}.({})", head.to_nota(), arguments.join(" ")),
+        }
+    }
+
+    fn derived_field_name<'reference>(
+        self,
+        arguments: impl IntoIterator<Item = &'reference SourceReference>,
+    ) -> Name {
+        let arguments = arguments.into_iter().collect::<Vec<_>>();
+        match self.field_name_pattern {
+            SourceGenericFieldNamePattern::Prefix(prefix) => {
+                Name::new(format!("{prefix}_{}", arguments[0].derived_field_name()))
+            }
+            SourceGenericFieldNamePattern::Suffix(suffix) => {
+                Name::new(format!("{}_{}", arguments[0].derived_field_name(), suffix))
+            }
+            SourceGenericFieldNamePattern::Map => Name::new(format!(
+                "{}_by_{}",
+                arguments[1].derived_field_name(),
+                arguments[0].derived_field_name()
+            )),
+            SourceGenericFieldNamePattern::FixedBytes => Name::new("bytes"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SourceDottedArgumentText<'text>(&'text str);
+
+impl<'text> SourceDottedArgumentText<'text> {
+    fn new(text: &'text str) -> Self {
+        Self(text)
+    }
+
+    fn can_inline(self) -> bool {
+        !self.0.contains(char::is_whitespace) && !self.0.contains('(') && !self.0.contains(')')
+    }
+}
+
 impl SourceReference {
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        Self::from_raw(&RawNotaDatatype::from_block(block)?)
+        let blocks = std::slice::from_ref(block);
+        let mut cursor = 0;
+        let reference = Self::from_blocks_at(blocks, &mut cursor)?;
+        if cursor == blocks.len() {
+            Ok(reference)
+        } else {
+            Err(SchemaError::ExpectedSyntaxReference {
+                found: block.reemit_fallback(),
+            })
+        }
+    }
+
+    pub(crate) fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
+        let Some(block) = blocks.get(*index) else {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: "dotted reference",
+                expected: "a head and payload",
+                found: 0,
+            });
+        };
+        match block {
+            Block::Atom(atom) => {
+                if let Some(head) = atom.text().strip_suffix('.') {
+                    if head.is_empty() {
+                        return Err(SchemaError::ExpectedSyntaxReference {
+                            found: atom.text().to_owned(),
+                        });
+                    }
+                    *index += 1;
+                    let arguments = Self::dotted_payload_arguments(blocks, index)?;
+                    return Self::from_application_parts(Name::new(head), arguments);
+                }
+                *index += 1;
+                Self::from_atom_text(atom.text())
+            }
+            Block::Delimited {
+                delimiter: Delimiter::Parenthesis,
+                root_objects,
+                ..
+            } => Err(SchemaError::UnknownTypeReferenceForm {
+                head: root_objects
+                    .first()
+                    .and_then(Block::demote_to_string)
+                    .unwrap_or("<missing>")
+                    .to_owned(),
+                argument_count: root_objects.len().saturating_sub(1),
+            }),
+            Block::Delimited {
+                delimiter: Delimiter::SquareBracket,
+                root_objects,
+                ..
+            } => Err(SchemaError::UnknownTypeReferenceForm {
+                head: "SquareBracket".to_owned(),
+                argument_count: root_objects.len(),
+            }),
+            Block::Delimited {
+                delimiter: Delimiter::Brace,
+                root_objects,
+                ..
+            } => Err(SchemaError::UnknownTypeReferenceForm {
+                head: "Brace".to_owned(),
+                argument_count: root_objects.len(),
+            }),
+            Block::Delimited {
+                delimiter: Delimiter::PipeBrace | Delimiter::PipeParenthesis,
+                ..
+            }
+            | Block::PipeText(_) => Err(SchemaError::ExpectedSyntaxReference {
+                found: block.reemit_fallback(),
+            }),
+        }
+    }
+
+    pub(crate) fn block_span_width_at(
+        blocks: &[Block],
+        index: usize,
+    ) -> Result<usize, SchemaError> {
+        let Some(Block::Atom(atom)) = blocks.get(index) else {
+            return Ok(1);
+        };
+        if atom.text().strip_suffix('.').is_none() {
+            return Ok(1);
+        }
+        if blocks.get(index + 1).is_none() {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: "dotted reference",
+                expected: "a head and payload",
+                found: 1,
+            });
+        }
+        Ok(2)
+    }
+
+    fn dotted_payload_arguments(
+        blocks: &[Block],
+        index: &mut usize,
+    ) -> Result<Vec<Self>, SchemaError> {
+        let Some(block) = blocks.get(*index) else {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: "dotted reference",
+                expected: "a payload after the dot",
+                found: 1,
+            });
+        };
+        if let Block::Delimited {
+            delimiter: Delimiter::Parenthesis,
+            root_objects,
+            ..
+        } = block
+        {
+            *index += 1;
+            let mut arguments = Vec::new();
+            let mut cursor = 0;
+            while cursor < root_objects.len() {
+                arguments.push(Self::from_blocks_at(root_objects, &mut cursor)?);
+            }
+            return Ok(arguments);
+        }
+        Ok(vec![Self::from_blocks_at(blocks, index)?])
+    }
+
+    fn from_atom_text(text: &str) -> Result<Self, SchemaError> {
+        let Some((head, payload)) = text.split_once('.') else {
+            return Ok(Self::Plain(Name::new(text)));
+        };
+        if head.is_empty() || payload.is_empty() {
+            return Err(SchemaError::ExpectedSyntaxReference {
+                found: text.to_owned(),
+            });
+        }
+        let argument = Self::from_atom_text(payload)?;
+        Self::from_application_parts(Name::new(head), vec![argument])
+    }
+
+    fn from_application_parts(head: Name, arguments: Vec<Self>) -> Result<Self, SchemaError> {
+        if let Some(definition) = SourceGenericDefinitions::default().definition(&head) {
+            return definition.lower(arguments);
+        }
+        if !head.qualifies_as_pascal_case() {
+            return Err(SchemaError::ExpectedSyntaxReference {
+                found: head.to_nota(),
+            });
+        }
+        Ok(Self::Application { head, arguments })
     }
 
     pub fn from_type_reference(reference: &TypeReference) -> Self {
@@ -3275,116 +3846,51 @@ impl SourceReference {
         }
     }
 
-    fn from_raw(raw: &RawNotaDatatype) -> Result<Self, SchemaError> {
-        match raw {
-            RawNotaDatatype::Atom(name) => Ok(Self::Plain(Name::new(name))),
-            RawNotaDatatype::Record(sequence) => Self::from_record(sequence),
-            RawNotaDatatype::Vector(_)
-            | RawNotaDatatype::KeyValue(_)
-            | RawNotaDatatype::PipeBrace(_)
-            | RawNotaDatatype::PipeParenthesis(_)
-            | RawNotaDatatype::Text(_) => Err(SchemaError::ExpectedSyntaxReference {
-                found: SourceRawNotation::new(raw).description(),
-            }),
+    fn fixed_bytes_width_argument(&self) -> Option<u64> {
+        match self {
+            Self::Plain(name) => name.as_str().parse::<u64>().ok(),
+            Self::FixedBytes(_)
+            | Self::Vector(_)
+            | Self::Optional(_)
+            | Self::ScopeOf(_)
+            | Self::Map(..)
+            | Self::Application { .. } => None,
         }
-    }
-
-    /// Lower a parenthesised reference over the source-archive
-    /// [`RawNotaDatatype`] tree. Like the `Block` and `ExpandedObject` paths,
-    /// the canonical built-in heads are the fast path and the generic
-    /// application form `(Foo A B ...)` is the fallback; the dropped aliases
-    /// (`Vec`, `Option`, `Scope`, `KeyValue`) no longer parse. `RawNotaDatatype`
-    /// is schema's own archive representation, not a nota `Block`,
-    /// so it keeps its own dispatch in lockstep with the other paths.
-    fn from_record(sequence: &RawNotaSequence) -> Result<Self, SchemaError> {
-        let items = sequence.items();
-        let Some(head) = items.first().and_then(RawNotaDatatype::as_atom) else {
-            return Err(SchemaError::ExpectedSymbol {
-                found: items
-                    .first()
-                    .map(|item| SourceRawNotation::new(item).description())
-                    .unwrap_or_else(|| SourceSequenceNotation::new(sequence).description()),
-            });
-        };
-        match (head, items.len()) {
-            ("Vector", 2) => return Ok(Self::Vector(Box::new(Self::from_raw(&items[1])?))),
-            ("Optional", 2) => return Ok(Self::Optional(Box::new(Self::from_raw(&items[1])?))),
-            ("ScopeOf", 2) => return Ok(Self::ScopeOf(Box::new(Self::from_raw(&items[1])?))),
-            ("Map", 3) => {
-                return Ok(Self::Map(
-                    Box::new(Self::from_raw(&items[1])?),
-                    Box::new(Self::from_raw(&items[2])?),
-                ));
-            }
-            ("Bytes", 2) => return Self::from_fixed_bytes_record(&items[1]),
-            (head, _) if crate::ReferenceHead::classify(head).is_some() => {
-                return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                    form: "built-in reference head",
-                    expected: "the head's declared arity",
-                    found: items.len(),
-                });
-            }
-            _ => {}
-        }
-        let head_name = Name::new(head);
-        if !head_name.qualifies_as_pascal_case() {
-            return Err(SchemaError::ExpectedSyntaxReference {
-                found: SourceSequenceNotation::new(sequence).description(),
-            });
-        }
-        let arguments = items[1..]
-            .iter()
-            .map(Self::from_raw)
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self::Application {
-            head: head_name,
-            arguments,
-        })
-    }
-
-    /// Parse the numeric width of a fixed-size byte reference `(Bytes N)`.
-    /// This is the grammar's only numeric type-argument; the width lowers to
-    /// a `[u8; N]` array at the emitter.
-    fn from_fixed_bytes_record(raw: &RawNotaDatatype) -> Result<Self, SchemaError> {
-        let width = raw
-            .as_atom()
-            .and_then(|text| text.parse::<u64>().ok())
-            .ok_or_else(|| SchemaError::ExpectedSyntaxReference {
-                found: SourceRawNotation::new(raw).description(),
-            })?;
-        Ok(Self::FixedBytes(width))
     }
 
     pub fn to_schema_text(&self) -> String {
         match self {
             Self::Plain(name) => name.to_nota(),
-            Self::FixedBytes(width) => {
-                Delimiter::Parenthesis.wrap(["Bytes".to_owned(), width.to_string()])
-            }
-            Self::Vector(reference) => {
-                Delimiter::Parenthesis.wrap(["Vector".to_owned(), reference.to_schema_text()])
-            }
-            Self::Optional(reference) => {
-                Delimiter::Parenthesis.wrap(["Optional".to_owned(), reference.to_schema_text()])
-            }
-            Self::ScopeOf(reference) => {
-                Delimiter::Parenthesis.wrap(["ScopeOf".to_owned(), reference.to_schema_text()])
-            }
-            Self::Map(key, value) => Delimiter::Parenthesis.wrap([
-                "Map".to_owned(),
-                key.to_schema_text(),
-                value.to_schema_text(),
-            ]),
+            Self::FixedBytes(width) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::FixedBytes)
+                .expect("fixed bytes definition is installed")
+                .application_text([width.to_string()]),
+            Self::Vector(reference) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::Vector)
+                .expect("vector definition is installed")
+                .application_text([reference.to_schema_text()]),
+            Self::Optional(reference) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::Optional)
+                .expect("optional definition is installed")
+                .application_text([reference.to_schema_text()]),
+            Self::ScopeOf(reference) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::ScopeOf)
+                .expect("scope definition is installed")
+                .application_text([reference.to_schema_text()]),
+            Self::Map(key, value) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::Map)
+                .expect("map definition is installed")
+                .application_text([key.to_schema_text(), value.to_schema_text()]),
             Self::Application { head, arguments } => {
-                let mut items = Vec::with_capacity(arguments.len() + 1);
-                items.push(head.to_nota());
-                items.extend(arguments.iter().map(Self::to_schema_text));
-                Delimiter::Parenthesis.wrap(items)
+                SourceGenericDefinition::application_text_for_head(
+                    head,
+                    arguments.iter().map(Self::to_schema_text),
+                )
             }
         }
     }
 
-    fn derived_field_name(&self) -> Name {
+    pub(crate) fn derived_field_name(&self) -> Name {
         match self {
             Self::Plain(name) => match name.as_str() {
                 "String" => Name::new("string"),
@@ -3395,20 +3901,22 @@ impl SourceReference {
                 _ => Name::new(name.field_name()),
             },
             Self::FixedBytes(_) => Name::new("bytes"),
-            Self::Vector(reference) => {
-                Name::new(format!("{}_vector", reference.derived_field_name()))
-            }
-            Self::Optional(reference) => {
-                Name::new(format!("optional_{}", reference.derived_field_name()))
-            }
-            Self::ScopeOf(reference) => {
-                Name::new(format!("{}_scope", reference.derived_field_name()))
-            }
-            Self::Map(key, value) => Name::new(format!(
-                "{}_by_{}",
-                value.derived_field_name(),
-                key.derived_field_name()
-            )),
+            Self::Vector(reference) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::Vector)
+                .expect("vector definition is installed")
+                .derived_field_name([reference.as_ref()]),
+            Self::Optional(reference) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::Optional)
+                .expect("optional definition is installed")
+                .derived_field_name([reference.as_ref()]),
+            Self::ScopeOf(reference) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::ScopeOf)
+                .expect("scope definition is installed")
+                .derived_field_name([reference.as_ref()]),
+            Self::Map(key, value) => SourceGenericDefinitions::default()
+                .definition_by_lowering(SourceGenericLowering::Map)
+                .expect("map definition is installed")
+                .derived_field_name([key.as_ref(), value.as_ref()]),
             Self::Application { head, arguments } => {
                 let mut derived = Name::new(head.field_name()).as_str().to_owned();
                 for argument in arguments {
@@ -3420,7 +3928,7 @@ impl SourceReference {
         }
     }
 
-    fn to_type_reference(&self) -> TypeReference {
+    pub(crate) fn to_type_reference(&self) -> TypeReference {
         match self {
             Self::Plain(name) => TypeReference::from_name(name.clone()),
             Self::FixedBytes(width) => TypeReference::FixedBytes(*width),
@@ -3915,39 +4423,5 @@ impl<'source> SourceBlockNotation<'source> {
             Block::PipeText(_) => "pipe text".to_owned(),
             Block::Atom(atom) => format!("atom {}", atom.text()),
         }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SourceRawNotation<'source>(&'source RawNotaDatatype);
-
-impl<'source> SourceRawNotation<'source> {
-    fn new(raw: &'source RawNotaDatatype) -> Self {
-        Self(raw)
-    }
-
-    fn description(&self) -> String {
-        match self.0 {
-            RawNotaDatatype::Atom(text) => format!("atom {text}"),
-            RawNotaDatatype::Text(_) => "text".to_owned(),
-            RawNotaDatatype::Record(_) => "parenthesis record".to_owned(),
-            RawNotaDatatype::Vector(_) => "square-bracket vector".to_owned(),
-            RawNotaDatatype::KeyValue(_) => "brace key-value map".to_owned(),
-            RawNotaDatatype::PipeParenthesis(_) => "pipe-parenthesis declaration".to_owned(),
-            RawNotaDatatype::PipeBrace(_) => "pipe-brace declaration".to_owned(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SourceSequenceNotation<'source>(&'source RawNotaSequence);
-
-impl<'source> SourceSequenceNotation<'source> {
-    fn new(sequence: &'source RawNotaSequence) -> Self {
-        Self(sequence)
-    }
-
-    fn description(&self) -> String {
-        format!("parenthesis record with {} objects", self.0.items().len())
     }
 }

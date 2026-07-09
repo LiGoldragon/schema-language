@@ -1,8 +1,9 @@
 {}
-[(Record RecordPayload)]
+[Record.RecordPayload]
 []
 {
   Topic String
   Description String
   RecordPayload { Topic Description }
 }
+[]

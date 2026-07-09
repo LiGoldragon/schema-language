@@ -1,7 +1,8 @@
 { DatabaseMarker marker-core:mail:DatabaseMarker }
-[(Observe Query)]
-[(Marked DatabaseMarker)]
+[Observe.Query]
+[Marked.DatabaseMarker]
 {
   Topic String
   Query { Topic }
 }
+[]

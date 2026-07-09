@@ -1,13 +1,14 @@
 {}
-[(Watch WatchRequest opens RecordStream) (Unwatch SubscriptionToken)]
-[(Watching SubscriptionReceipt)]
+[(Watch WatchRequest opens RecordStream) Unwatch.SubscriptionToken]
+[Watching.SubscriptionReceipt]
 {
   RuntimeEvent [(RecordChanged RecordChangedPayload belongs RecordStream)]
   RecordStream (Stream { token.SubscriptionToken opened.SubscriptionReceipt event.RuntimeEvent close.SubscriptionToken })
   WatchRequest { Topics }
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Topic String
   SubscriptionToken Integer
   SubscriptionReceipt { SubscriptionToken }
   RecordChangedPayload { Topic }
 }
+[]

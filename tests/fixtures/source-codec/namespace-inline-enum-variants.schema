@@ -2,8 +2,9 @@
 []
 []
 {
-  Domain [(Craft CraftLeaf) (Information InformationLeaf)]
+  Domain [Craft.CraftLeaf Information.InformationLeaf]
   CraftLeaf [Schema Programming]
   InformationLeaf [Documentation RecordKeeping]
   Entry { Domain }
 }
+[]

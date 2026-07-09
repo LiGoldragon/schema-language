@@ -1,6 +1,7 @@
 { SignalInput plane-crate:signal:Input SignalOutput plane-crate:signal:Output }
-[(SignalArrived SignalInput)]
-[(ReplyToSignal SignalOutput)]
+[SignalArrived.SignalInput]
+[ReplyToSignal.SignalOutput]
 {
   NexusReceipt Integer
 }
+[]

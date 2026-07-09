@@ -1,5 +1,5 @@
 {}
-[(Record RecordPayload) (Select SelectPayload)]
+[Record.RecordPayload Select.SelectPayload]
 []
 {
   Topic String
@@ -7,5 +7,6 @@
   RecordPayload { Topic Description }
   ByTopicPayload { Topic }
   ByDescriptionPayload { Description }
-  SelectPayload [(ByTopic ByTopicPayload) (ByDescription ByDescriptionPayload)]
+  SelectPayload [ByTopic.ByTopicPayload ByDescription.ByDescriptionPayload]
 }
+[]

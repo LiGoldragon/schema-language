@@ -1,5 +1,5 @@
 {}
-[(Lookup LookupPayload) (Count CountPayload)]
+[Lookup.LookupPayload Count.CountPayload]
 []
 {
   RecordIdentifier Integer
@@ -8,3 +8,4 @@
   LookupPayload { RecordIdentifier }
   CountPayload { Query }
 }
+[]

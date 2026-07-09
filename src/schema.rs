@@ -1016,21 +1016,17 @@ impl TrueSchema {
     }
 
     pub fn to_schema_text(&self) -> String {
-        let mut roots = vec![
+        let roots = [
             self.imports_schema_text(),
             self.input.to_root_schema_text(),
             self.output.to_root_schema_text(),
             self.namespace_schema_text(),
+            Delimiter::SquareBracket.wrap(
+                self.relations
+                    .iter()
+                    .map(RelationDeclaration::to_schema_text),
+            ),
         ];
-        if !self.relations.is_empty() {
-            roots.push(
-                Delimiter::SquareBracket.wrap(
-                    self.relations
-                        .iter()
-                        .map(RelationDeclaration::to_schema_text),
-                ),
-            );
-        }
         roots.join("\n")
     }
 
@@ -1197,9 +1193,6 @@ impl EnumVariant {
     fn to_schema_text(&self) -> String {
         match (&self.payload, &self.stream_relation) {
             (None, None) => self.name.to_nota(),
-            (Some(payload), None) if payload.plain_name() == Some(&self.name) => {
-                Delimiter::Parenthesis.wrap([self.name.to_nota()])
-            }
             (Some(payload), None) => {
                 Delimiter::Parenthesis.wrap([self.name.to_nota(), payload.to_structural_nota()])
             }
@@ -2362,21 +2355,21 @@ impl ApplicationHead {
     }
 }
 
-/// The broad generic-application node `(Foo A B …)`, captured directly by
-/// nota's `#[shape(pascal_head, body)]` derive: a PascalCase head atom
-/// followed by a variable-arity tail of type-reference arguments. This is the
-/// structural-macro seam for the application form — the head decodes as a
-/// `Name` (always `Local` at decode time) and the tail decodes as a
-/// `Vec<TypeReference>`. The derive is the single source of truth for matching
-/// and re-emitting the form; this node lowers into [`TypeReference::Application`].
+/// The legacy macro-expansion generic-application node `(Foo A B …)`, captured
+/// directly by nota's `#[shape(pascal_head, body)]` derive: a PascalCase head
+/// atom followed by a variable-arity tail of type-reference arguments. Authored
+/// schema source enters through the dotted [`crate::SourceReference`] reader;
+/// this node remains for macro-expanded/internal parenthesized data. The head
+/// decodes as a `Name` (always `Local` at decode time) and the tail decodes as
+/// a `Vec<TypeReference>`, then lowers into [`TypeReference::Application`].
 #[derive(Clone, Debug, Eq, PartialEq, nota::StructuralMacroNode)]
 enum ApplicationNode {
     #[shape(pascal_head, body)]
     Application(Name, Vec<TypeReference>),
 }
 
-/// The fixed-width byte leaf `(Bytes N)`, captured through nota's
-/// headed-atom structural shape.
+/// The legacy macro-expansion fixed-width byte leaf `(Bytes N)`, captured
+/// through nota's headed-atom structural shape.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, nota::StructuralMacroNode)]
 enum FixedBytesNode {
     #[shape(head = "Bytes", atom)]
@@ -2385,10 +2378,10 @@ enum FixedBytesNode {
 
 /// A declaration's type-name position: either a bare `Name` (the ordinary
 /// declaration head) or a pipe-parenthesized `(| Name Param Param … |)` head
-/// that introduces type-parameter binders. Use-site generic application keeps
-/// ordinary parentheses (`(Head Arg …)`); declaration binders use the pipe
-/// form so binding syntax and application syntax remain structurally distinct.
-/// The parameterized form still decodes through the captured-head +
+/// that introduces type-parameter binders. Authored use-site generic
+/// application is dotted (`Head.(Arg …)`); declaration binders use the pipe form
+/// so binding syntax and application syntax remain structurally distinct. The
+/// parameterized form still decodes through the captured-head +
 /// variable-arity tail seam (`ApplicationNode`) after the delimiter gate —
 /// each tail item must be a bare binder name (a `Plain` reference), since a
 /// parameter is a binder, not an applied type.
@@ -2468,13 +2461,12 @@ impl DeclarationHead {
 /// `String`, `Integer`, `Boolean`, and `Path` are reserved scalar leaves.
 /// `Plain` is a declared-name leaf (`Topic`, `Magnitude`). `Vector`,
 /// `Map`, `Optional`, and `ScopeOf` carry inner references, lowered from the
-/// single canonical head spelling each: `(Vector T)`, `(Map K V)`,
-/// `(Optional T)`, `(ScopeOf T)` — the earlier aliases (`Vec`, `Option`,
-/// `Scope`, `KeyValue`) are gone and no longer parse. `Application` is the
-/// broad generic-application form `(Foo A B …)`: any other PascalCase head
-/// carrying a tail of type-reference arguments, decoded through the
-/// `#[shape(pascal_head, body)]` structural-macro seam. Built-in heads are
-/// dispatched first; the application form is the fallback.
+/// dotted authored head spelling each: `Vector.T`, `Map.(K V)`, `Optional.T`,
+/// `ScopeOf.T` — the earlier aliases (`Vec`, `Option`, `Scope`, `KeyValue`)
+/// are gone and no longer parse. `Application` is the broad generic-application
+/// form `Foo.(A B …)`: any other PascalCase head carrying a tail of
+/// type-reference arguments. Built-in heads are dispatched first; the
+/// application form is the fallback.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
@@ -2636,11 +2628,10 @@ impl NotaEncode for TypeReference {
 /// form's variable-arity tail (`Vec<TypeReference>`, via nota's blanket
 /// `StructuralMacroNode for Vec<Item>`) can decode each argument back through
 /// the full reference grammar. Decode delegates to [`Self::from_block`] (which
-/// owns the built-in-head fast path and the application seam), and encode is
-/// the source-grammar projection — a bare PascalCase atom for a leaf, a
-/// headed parenthesis for every composite. This is the source-facing grammar
-/// projection, distinct from the canonical-only `NotaEncode`/`NotaDecode`
-/// machine codec above.
+/// owns the public dotted reader), and encode is the source-grammar projection
+/// — a bare PascalCase atom for a leaf and dotted positional form for every
+/// composite. This is the source-facing grammar projection, distinct from the
+/// canonical-only `NotaEncode`/`NotaDecode` machine codec above.
 impl nota::StructuralMacroNode for TypeReference {
     type Error = SchemaError;
 
@@ -2664,52 +2655,29 @@ impl nota::StructuralMacroNode for TypeReference {
     fn from_structural_candidate(
         candidate: nota::MacroCandidate<'_>,
     ) -> Result<Self, nota::StructuralMacroError<Self::Error>> {
-        match candidate.blocks() {
-            [block] => Self::from_structural_block(block),
-            blocks => Err(nota::StructuralMacroError::ExpectedSingleRoot {
+        let blocks = candidate.blocks();
+        let source = blocks
+            .iter()
+            .map(|block| block.reemit_fallback())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let document = nota::Document::parse(&source)
+            .map_err(|error| nota::StructuralMacroError::MatchedNode(SchemaError::from(error)))?;
+        let mut cursor = 0;
+        let reference =
+            crate::SourceReference::from_blocks_at(document.root_objects(), &mut cursor)
+                .map_err(nota::StructuralMacroError::MatchedNode)?;
+        if cursor == document.root_objects().len() {
+            Ok(reference.to_type_reference())
+        } else {
+            Err(nota::StructuralMacroError::ExpectedSingleRoot {
                 found: blocks.len(),
-            }),
+            })
         }
     }
 
     fn to_structural_nota(&self) -> String {
-        match self {
-            Self::String => "String".to_owned(),
-            Self::Integer => "Integer".to_owned(),
-            Self::Boolean => "Boolean".to_owned(),
-            Self::Path => "Path".to_owned(),
-            Self::Bytes => "Bytes".to_owned(),
-            Self::FixedBytes(width) => format!("(Bytes {width})"),
-            Self::Plain(name) => name.to_nota(),
-            Self::Vector(reference) => {
-                format!("(Vector {})", reference.to_structural_nota())
-            }
-            Self::Map(key, value) => {
-                format!(
-                    "(Map {} {})",
-                    key.to_structural_nota(),
-                    value.to_structural_nota()
-                )
-            }
-            Self::Optional(reference) => {
-                format!("(Optional {})", reference.to_structural_nota())
-            }
-            Self::ScopeOf(reference) => {
-                format!("(ScopeOf {})", reference.to_structural_nota())
-            }
-            Self::Application { head, arguments } => {
-                let tail = arguments
-                    .iter()
-                    .map(Self::to_structural_nota)
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if tail.is_empty() {
-                    format!("({})", head.name().to_nota())
-                } else {
-                    format!("({} {tail})", head.name().to_nota())
-                }
-            }
-        }
+        crate::SourceReference::from_type_reference(self).to_schema_text()
     }
 }
 
@@ -2757,36 +2725,7 @@ impl TypeReference {
     }
 
     pub(crate) fn derived_field_name(&self) -> Name {
-        match self {
-            Self::String => Name::new("string"),
-            Self::Integer => Name::new("integer"),
-            Self::Boolean => Name::new("boolean"),
-            Self::Path => Name::new("path"),
-            Self::Bytes | Self::FixedBytes(_) => Name::new("bytes"),
-            Self::Plain(name) => Name::new(name.field_name()),
-            Self::Vector(reference) => {
-                Name::new(format!("{}_vector", reference.derived_field_name()))
-            }
-            Self::Optional(reference) => {
-                Name::new(format!("optional_{}", reference.derived_field_name()))
-            }
-            Self::ScopeOf(reference) => {
-                Name::new(format!("{}_scope", reference.derived_field_name()))
-            }
-            Self::Map(key, value) => Name::new(format!(
-                "{}_by_{}",
-                value.derived_field_name(),
-                key.derived_field_name()
-            )),
-            Self::Application { head, arguments } => {
-                let mut derived = Name::new(head.name().field_name()).as_str().to_owned();
-                for argument in arguments {
-                    derived.push('_');
-                    derived.push_str(argument.derived_field_name().as_str());
-                }
-                Name::new(derived)
-            }
-        }
+        crate::SourceReference::from_type_reference(self).derived_field_name()
     }
 
     /// The plain name when this reference is a declared-name leaf.
@@ -2862,19 +2801,14 @@ impl TypeReference {
     }
 
     /// Lower an already-parsed NOTA block at a reference position into
-    /// a `TypeReference`.
-    ///
-    /// A bare PascalCase symbol (`Topic`, `schema-core:mail:Magnitude`)
-    /// lowers to `Plain`. TrueSchema type-reference objects lower at this
-    /// position: `(Vector T)` -> `Vector`, `(Map K V)` -> `Map`,
-    /// `(Optional T)` -> `Optional`, and `(ScopeOf T)` -> `ScopeOf`.
-    /// The inner positions recurse, so
-    /// `(Vector (Optional Topic))` and `(Map NodeName (Vector Service))`
-    /// nest. nota did the structural parse; this is pure semantic
-    /// lowering over its `Block`s, not a hand-rolled text parser.
+    /// a `TypeReference`. The public authored-schema entry accepts the
+    /// strict dotted reference projection (`Vector.Topic`, `Map.(Key Value)`)
+    /// and rejects the legacy parenthesized generic surface. Macro expansion
+    /// internals that still need the legacy grammar call the private
+    /// `from_block_with_registry` entry directly until that pipeline is
+    /// retired.
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let mut context = MacroContext::default();
-        Self::from_block_with_registry(block, &MacroRegistry::with_schema_defaults(), &mut context)
+        Ok(crate::SourceReference::from_block(block)?.to_type_reference())
     }
 
     pub(crate) fn from_block_with_registry(
@@ -2966,7 +2900,7 @@ impl TypeReference {
         name.schema_name()
     }
 
-    /// Construct the `Vector` built-in: `(Vector T)`.
+    /// Construct the legacy macro-path `Vector` built-in: `(Vector T)`.
     ///
     /// One of the uniform per-built-in resolvers the schema-language-cc-generated
     /// parenthesis dispatch calls (see `reference_resolver_generated.rs`).
@@ -2986,7 +2920,7 @@ impl TypeReference {
         )?)))
     }
 
-    /// Construct the `Optional` built-in: `(Optional T)`.
+    /// Construct the legacy macro-path `Optional` built-in: `(Optional T)`.
     fn resolve_optional(
         _block: &Block,
         objects: &[Block],
@@ -3000,7 +2934,7 @@ impl TypeReference {
         )?)))
     }
 
-    /// Construct the `ScopeOf` built-in: `(ScopeOf T)`.
+    /// Construct the legacy macro-path `ScopeOf` built-in: `(ScopeOf T)`.
     fn resolve_scope_of(
         _block: &Block,
         objects: &[Block],
@@ -3014,7 +2948,7 @@ impl TypeReference {
         )?)))
     }
 
-    /// Construct the `Map` built-in: `(Map K V)`.
+    /// Construct the legacy macro-path `Map` built-in: `(Map K V)`.
     fn resolve_map(
         _block: &Block,
         objects: &[Block],
@@ -3035,8 +2969,8 @@ impl TypeReference {
         ))
     }
 
-    /// Construct the `Bytes` built-in: `(Bytes N)` — the fixed-width byte
-    /// leaf decoded through the HeadedAtom seam.
+    /// Construct the legacy macro-path `Bytes` built-in: `(Bytes N)` — the
+    /// fixed-width byte leaf decoded through the HeadedAtom seam.
     fn resolve_bytes(
         block: &Block,
         _objects: &[Block],
@@ -3080,7 +3014,8 @@ impl TypeReference {
         }
     }
 
-    /// Lower the fixed-width byte leaf `(Bytes N)` through the HeadedAtom seam.
+    /// Lower the legacy macro-path fixed-width byte leaf `(Bytes N)` through
+    /// the HeadedAtom seam.
     fn from_fixed_bytes_block(block: &Block) -> Result<Self, SchemaError> {
         match FixedBytesNode::from_structural_block(block)? {
             FixedBytesNode::FixedBytes(width) => Ok(Self::FixedBytes(width)),

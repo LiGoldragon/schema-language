@@ -1,14 +1,14 @@
 { DatabaseMarker marker-core:mail:DatabaseMarker
   CommitSequence marker-core:mail:CommitSequence }
-[(Record RecordPayload)
- (Observe ObservePayload)
- (Mark MarkPayload)
- (Commit CommitPayload)]
-[(Recorded RecordedPayload)
- (Observed ObservedPayload)
- (Marked MarkedPayload)
- (Committed CommittedPayload)
- (Rejected RejectedPayload)]
+[Record.RecordPayload
+ Observe.ObservePayload
+ Mark.MarkPayload
+ Commit.CommitPayload]
+[Recorded.RecordedPayload
+ Observed.ObservedPayload
+ Marked.MarkedPayload
+ Committed.CommittedPayload
+ Rejected.RejectedPayload]
 {
   RecordPayload Entry
   ObservePayload Query
@@ -20,16 +20,17 @@
   CommittedPayload CommitSequence
   RejectedPayload Rejection
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Description String
   AgentName String
   RecordIdentifier Integer
   Rejection { Description }
-  Limit (Optional Integer)
-  Entries (Vector Entry)
-  ByTopic (Map Topic RecordIdentifier)
+  Limit Optional.Integer
+  Entries Vector.Entry
+  ByTopic Map.(Topic RecordIdentifier)
   Entry { Topics Description AgentName DatabaseMarker }
   Query { Topics Limit }
   RecordReceipt { RecordIdentifier DatabaseMarker CommitSequence }
   RecordSet { Entries ByTopic }
 }
+[]

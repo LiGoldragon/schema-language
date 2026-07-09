@@ -1,17 +1,18 @@
-[(Record RecordPayload)
- (Correct CorrectPayload)
- (Observe ObservePayload)
- (Watch WatchPayload)
- (Unwatch UnwatchPayload)
+{}
+[Record.RecordPayload
+ Correct.CorrectPayload
+ Observe.ObservePayload
+ Watch.WatchPayload
+ Unwatch.UnwatchPayload
  Reindex
  Compact]
-[(Recorded RecordedPayload)
- (Corrected CorrectedPayload)
- (Observed ObservedPayload)
- (Watching WatchingPayload)
- (Unwatched UnwatchedPayload)
- (Rejected RejectedPayload)
- (Indexed IndexedPayload)]
+[Recorded.RecordedPayload
+ Corrected.CorrectedPayload
+ Observed.ObservedPayload
+ Watching.WatchingPayload
+ Unwatched.UnwatchedPayload
+ Rejected.RejectedPayload
+ Indexed.IndexedPayload]
 {
   RecordPayload Entry
   CorrectPayload Correction
@@ -26,7 +27,7 @@
   RejectedPayload Rejection
   IndexedPayload IndexReceipt
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Description String
   AgentName String
   Timestamp Integer
@@ -34,10 +35,10 @@
   SubscriptionToken Integer
   CommitSequence Integer
   DatabaseDigest Integer
-  Kinds (Vector Kind)
-  Limit (Optional Integer)
-  Records (Vector Entry)
-  ByTopic (Map Topic RecordIdentifier)
+  Kinds Vector.Kind
+  Limit Optional.Integer
+  Records Vector.Entry
+  ByTopic Map.(Topic RecordIdentifier)
   Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
   Kind [Decision Principle Correction Clarification Constraint Observation Question]
   RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion]
@@ -52,3 +53,4 @@
   Rejection { RejectionReason Description }
   IndexReceipt { CommitSequence DatabaseDigest }
 }
+[]

@@ -1,8 +1,8 @@
 {}
-[(SignalArrived SignalInput) (SemaWriteCompleted SemaWriteOutput) (SemaReadCompleted SemaReadOutput) (EffectCompleted EffectOutcome)]
-[(ReplyToSignal SignalOutput) (CommandSemaWrite SemaWriteSet) (CommandSemaRead SemaReadInput) (CommandEffect EffectCommand) (Continue Work)]
+[SignalArrived.SignalInput SemaWriteCompleted.SemaWriteOutput SemaReadCompleted.SemaReadOutput EffectCompleted.EffectOutcome]
+[ReplyToSignal.SignalOutput CommandSemaWrite.SemaWriteSet CommandSemaRead.SemaReadInput CommandEffect.EffectCommand Continue.Work]
 {
-  Work [(SignalArrived SignalInput) (SemaWriteCompleted SemaWriteOutput) (SemaReadCompleted SemaReadOutput) (EffectCompleted EffectOutcome)]
+  Work [SignalArrived.SignalInput SemaWriteCompleted.SemaWriteOutput SemaReadCompleted.SemaReadOutput EffectCompleted.EffectOutcome]
 
   SignalInput String
   SignalOutput String
@@ -48,7 +48,7 @@
   ObserverSubscription SubscriptionToken
   ObserverRetraction SubscriptionToken
 
-  SemaWriteSet [(Record Entry) (Remove Removal) (ChangeCertainty CertaintyChange) (BumpImportance ImportanceBump) (ChangeRecord RecordChange) (RegisterReferent ReferentRegistration)]
+  SemaWriteSet [Record.Entry Remove.Removal ChangeCertainty.CertaintyChange BumpImportance.ImportanceBump ChangeRecord.RecordChange RegisterReferent.ReferentRegistration]
   Record Entry
   Remove Removal
   ChangeCertainty CertaintyChange
@@ -56,7 +56,7 @@
   ChangeRecord RecordChange
   RegisterReferent ReferentRegistration
 
-  EffectCommand [(Stash StashRequest) (ClassifyState Statement) (RecordWithImpliedReferents RecordRequest) (GuardRecord RecordRequest) (ProposeWithImpliedReferents Proposal) (Propose Proposal) (Clarify Clarification) (SupersedeWithImpliedReferents Supersession) (Supersede Supersession) (Retire Retirement) (GuardRemove Removal) (ChangeRecordWithImpliedReferents RecordChange) (GuardChangeRecord RecordChange) (GuardReferentRegistration ReferentRegistration) (OpenIntentSubscription Query) (CollectRemovalCandidates RemovalCandidateCollection) (OpenObserverTap ObserverFilter) (CloseObserverTap SubscriptionToken)]
+  EffectCommand [Stash.StashRequest ClassifyState.Statement RecordWithImpliedReferents.RecordRequest GuardRecord.RecordRequest ProposeWithImpliedReferents.Proposal Propose.Proposal Clarify.Clarification SupersedeWithImpliedReferents.Supersession Supersede.Supersession Retire.Retirement GuardRemove.Removal ChangeRecordWithImpliedReferents.RecordChange GuardChangeRecord.RecordChange GuardReferentRegistration.ReferentRegistration OpenIntentSubscription.Query CollectRemovalCandidates.RemovalCandidateCollection OpenObserverTap.ObserverFilter CloseObserverTap.SubscriptionToken]
   Stash StashRequest
   ClassifyState Statement
   RecordWithImpliedReferents RecordRequest
@@ -76,7 +76,7 @@
   OpenObserverTap ObserverFilter
   CloseObserverTap SubscriptionToken
 
-  EffectOutcome [(Stashed StashResult) (StateClassified RecordRequest) (RecordReferentsSettled RecordRequest) (ProposeReferentsSettled Proposal) (SupersedeReferentsSettled Supersession) (ChangeRecordReferentsSettled RecordChange) (Recorded SemaReceipt) (Proposed SemaReceipt) (Clarified ClarificationReceipt) (Superseded SupersessionReceipt) (Retired RetirementReceipt) (Removed RemoveReceipt) (RecordChanged RecordChangeReceipt) (GuardianRejected GuardianRejection) (ReferentRegistered ReferentRegistrationReceipt) (ReferentGuardianRejected ReferentGuardianRejection) (OperationFailed ErrorReport) (IntentSubscriptionOpened IntentSubscription) (RemovalCandidatesCollected RemovalCandidatesCollection) (ObserverTapOpened ObserverSubscription) (ObserverTapClosed ObserverRetraction)]
+  EffectOutcome [Stashed.StashResult StateClassified.RecordRequest RecordReferentsSettled.RecordRequest ProposeReferentsSettled.Proposal SupersedeReferentsSettled.Supersession ChangeRecordReferentsSettled.RecordChange Recorded.SemaReceipt Proposed.SemaReceipt Clarified.ClarificationReceipt Superseded.SupersessionReceipt Retired.RetirementReceipt Removed.RemoveReceipt RecordChanged.RecordChangeReceipt GuardianRejected.GuardianRejection ReferentRegistered.ReferentRegistrationReceipt ReferentGuardianRejected.ReferentGuardianRejection OperationFailed.ErrorReport IntentSubscriptionOpened.IntentSubscription RemovalCandidatesCollected.RemovalCandidatesCollection ObserverTapOpened.ObserverSubscription ObserverTapClosed.ObserverRetraction]
   Stashed StashResult
   StateClassified RecordRequest
   RecordReferentsSettled RecordRequest
@@ -102,3 +102,4 @@
   StashRequest { Records DatabaseMarker }
   StashResult { StashHandle RecordCount DatabaseMarker }
 }
+[]

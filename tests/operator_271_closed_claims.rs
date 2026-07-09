@@ -197,9 +197,9 @@ fn production_schema_sources_use_honest_enum_bodies() {
     }
 }
 
-/// Claim 4 — Spirit-min carries compact root enum bodies of the
-/// `[Record Observe]` shape. The namespace defines those payload objects one
-/// level below the root header.
+/// Claim 4 — Spirit-min carries compact root enum bodies in the strict input
+/// slot. The namespace defines distinct payload objects one level below the
+/// root header.
 #[test]
 fn spirit_min_input_enum_body_has_explicit_payload_variants() {
     let source = include_str!("../schemas/spirit-min.schema");
@@ -207,8 +207,8 @@ fn spirit_min_input_enum_body_has_explicit_payload_variants() {
     let root_objects = document.root_objects();
 
     let input = root_objects
-        .first()
-        .expect("spirit-min schema starts with an input enum-body vector");
+        .get(1)
+        .expect("spirit-min schema has an input enum-body vector in slot 2");
     let Block::Delimited {
         delimiter,
         root_objects: variants,
@@ -231,14 +231,11 @@ fn spirit_min_input_enum_body_has_explicit_payload_variants() {
     );
     let names = variants
         .iter()
-        .map(|variant| match variant {
-            Block::Delimited { root_objects, .. } => root_objects
-                .first()
-                .and_then(Block::demote_to_string)
-                .expect("spirit-min input variant starts with an operation name"),
-            _ => panic!(
-                "every spirit-min input variant must carry an explicit payload type; got {variant:?}"
-            ),
+        .map(|variant| {
+            variant
+                .demote_to_string()
+                .and_then(|text| text.split_once('.').map(|(name, _)| name))
+                .expect("spirit-min input variant is dotted with an explicit payload type")
         })
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["Record", "Observe"]);

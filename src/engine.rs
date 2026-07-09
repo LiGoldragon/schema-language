@@ -85,7 +85,7 @@ pub enum SchemaError {
     #[error("duplicate explicit product component identity {field} for repeated type {type_name}")]
     DuplicateExplicitProductComponentIdentity { field: String, type_name: String },
     #[error(
-        "optional enum-variant payload {enum_name}::{variant_name}; a variant payload must always appear in the text form, so (Optional T) is forbidden here — model the optional case as an explicit member carrying a required payload (for example a leaf enum with an explicit All member)"
+        "optional enum-variant payload {enum_name}::{variant_name}; a variant payload must always appear in the text form, so Optional.T is forbidden here — model the optional case as an explicit member carrying a required payload (for example a leaf enum with an explicit All member)"
     )]
     OptionalVariantPayload {
         enum_name: String,
@@ -218,10 +218,9 @@ pub enum SchemaError {
         expected: usize,
         found: usize,
     },
-    /// A parenthesis at a root Input/Output position did not decode to the
-    /// application form `(Head Arg …)` — a built-in head (`(Vector T)`), a
-    /// collection form, or any other non-application parenthesis is not a
-    /// legal root body.
+    /// A root Input/Output position did not decode to an enum body or dotted
+    /// application form (`Head.(Arg …)`). A bare declared-name root, built-in
+    /// collection, or any other non-application body is not legal.
     #[error("expected a root application at {position}, found {found}")]
     ExpectedRootApplication {
         position: &'static str,
@@ -457,11 +456,10 @@ impl SchemaEngine {
     /// source path handled both); delegating here collapses the two so a
     /// document and its `SchemaSource` cannot lower to different schemas.
     ///
-    /// The document entry point keeps its own *entry contract*, narrower
-    /// than the source archive's: it accepts 3 roots (input output
-    /// namespace) or 4 with leading imports, and rejects the trailing
-    /// relations form. Within that contract the `SchemaSource` it builds
-    /// carries no relations, so the single lowering is well-defined.
+    /// The document entry point has the same strict entry contract as the
+    /// source archive: exactly five root slots, in order: imports, input,
+    /// output, namespace, relations. Empty optional sections are typed empty
+    /// roots (`{}` / `[]`), not omitted roots.
     pub fn lower_document_with_resolver(
         &self,
         document: &Document,
@@ -471,9 +469,9 @@ impl SchemaEngine {
     ) -> Result<TrueSchema, SchemaError> {
         context.remember_structure_header(document.structure_header());
 
-        if !matches!(document.holds_root_objects(), 3 | 4) {
+        if document.holds_root_objects() < 5 {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "3 root values (input output namespace) or 4 with leading imports",
+                expected: "5 root slots (imports input output namespace relations; grouped dotted applications count as one slot)",
                 found: document.holds_root_objects(),
             });
         }
@@ -488,17 +486,6 @@ impl SchemaEngine {
         // not a rival lowerer.
         let expanded = MacroExpansionPass::new(&self.registry).expand(document, context)?;
         let source = SchemaSource::from_document(&expanded)?;
-        // The document entry path admits imports + input/output/namespace
-        // only; a trailing relations block is a source-archive-only form.
-        // `from_document` would read a non-brace 4th-or-later root as
-        // relations, so reject any relations the reparse produced rather
-        // than silently widening the document contract.
-        if !source.relations().is_empty() {
-            return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "3 root values (input output namespace) or 4 with leading imports",
-                found: document.holds_root_objects(),
-            });
-        }
         self.lower_schema_source_with_resolver(&source, identity, resolver)
     }
 
@@ -1056,14 +1043,13 @@ impl SchemaMacroHandler for RootEnumMacro {
     }
 }
 
-/// The application-form root `(Head Arg …)` at an Input/Output position. It
-/// lowers through the *same* `TypeReference::from_block_with_registry`
-/// parenthesis decode a field-position application takes, so the head and
+/// The legacy macro-path application root at an Input/Output position. It
+/// lowers through the *same* `TypeReference::from_block_with_registry` decode
+/// a macro-expanded field-position application takes, so the head and
 /// arguments resolve identically; the only root-specific addition is the
 /// position name (`Input` / `Output`) the root is identified by, since an
-/// application carries no declaration name of its own. A parenthesis at a
-/// root position that does not decode to an application (a built-in head
-/// like `(Vector T)`, or a collection form) is rejected as a non-root form.
+/// application carries no declaration name of its own. A root position that
+/// does not decode to an application is rejected as a non-root form.
 #[derive(Clone, Copy, Debug)]
 struct RootApplicationBlock<'schema> {
     block: &'schema Block,

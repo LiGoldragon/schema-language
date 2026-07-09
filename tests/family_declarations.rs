@@ -95,13 +95,14 @@ fn family_record_closure_hashes_through_the_content_identity_surface() {
 fn family_record_must_resolve_to_a_declared_type() {
     let source = "\
 {}
-[(Record Entry)]
+[Record.Entry]
 [Recorded]
 {
   Body String
   Entry { Body }
   GhostFamily (Family { record.Ghost table.ghosts key.Domain })
 }
+[]
 ";
 
     let error = lower(source).expect_err("unresolved family record is a typed error");
@@ -118,7 +119,7 @@ fn family_record_must_resolve_to_a_declared_type() {
 fn duplicate_family_names_are_a_typed_error() {
     let source = "\
 {}
-[(Record Entry)]
+[Record.Entry]
 [Recorded]
 {
   Body String
@@ -126,6 +127,7 @@ fn duplicate_family_names_are_a_typed_error() {
   EntryFamily (Family { record.Entry table.entries key.Domain })
   EntryFamily (Family { record.Entry table.archive key.Domain })
 }
+[]
 ";
 
     let error = lower(source).expect_err("duplicate family name is a typed error");
@@ -141,7 +143,7 @@ fn duplicate_family_names_are_a_typed_error() {
 fn duplicate_family_tables_are_a_typed_error() {
     let source = "\
 {}
-[(Record Entry) (Observe Query)]
+[Record.Entry Observe.Query]
 [Recorded]
 {
   Body String
@@ -151,6 +153,7 @@ fn duplicate_family_tables_are_a_typed_error() {
   EntryFamily (Family { record.Entry table.entries key.Domain })
   QueryFamily (Family { record.Query table.entries key.Identified })
 }
+[]
 ";
 
     let error = lower(source).expect_err("duplicate family table is a typed error");
@@ -166,13 +169,14 @@ fn duplicate_family_tables_are_a_typed_error() {
 fn family_key_kind_is_a_closed_structural_choice() {
     let source = "\
 {}
-[(Record Entry)]
+[Record.Entry]
 [Recorded]
 {
   Body String
   Entry { Body }
   EntryFamily (Family { record.Entry table.entries key.Sideways })
 }
+[]
 ";
 
     lower(source).expect_err("an unknown family key kind does not lower");

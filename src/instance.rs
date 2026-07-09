@@ -15,10 +15,10 @@
 //!   (a struct shows its field *type names*, an enum shows its enum name with
 //!   the realized payload's reference one level in). `Entry` renders as
 //!   `{ Domains Kind Description Certainty Importance Privacy Referents }`;
-//!   `DomainMatch::Partial(…)` renders as `(DomainMatch DomainScopes)`.
+//!   `DomainMatch::Partial(…)` renders as `DomainMatch.DomainScopes`.
 //! - [`InstanceSchemaText::expanded`] — recurse all the way down the realized
 //!   value: the root `Input::Record` renders as
-//!   `(Input ({ … } { Testimony Reasoning }))`, with the transparent `Record` /
+//!   `Input.({ … } { Testimony Reasoning })`, with the transparent `Record` /
 //!   `RecordRequest` wrappers collapsed to provenance.
 //!
 //! At an enum-payload position both projections collapse the variant's
@@ -61,7 +61,7 @@ impl<'schema> InstanceSchemaText<'schema> {
             }
             InstanceSchemaBody::EnumPayload(Some(payload)) => {
                 let payload_text = Self::new(payload).collapsed_reference();
-                self.parenthesis([self.reference_text(), payload_text])
+                self.application_text(self.reference_text(), [payload_text])
             }
             // Scalar, unit enum, newtype, optional, vector, map: one token.
             _ => self.reference_text(),
@@ -76,18 +76,18 @@ impl<'schema> InstanceSchemaText<'schema> {
             InstanceSchemaBody::EnumPayload(None) => self.reference_text(),
             InstanceSchemaBody::EnumPayload(Some(payload)) => {
                 let payload_text = Self::new(payload).collapsed_expansion();
-                self.parenthesis([self.reference_text(), payload_text])
+                self.application_text(self.reference_text(), [payload_text])
             }
             InstanceSchemaBody::Newtype(inner) => {
                 // A newtype keeps both facts: the wrapper name and the wrapped
-                // schema one level in, as `(Wrapper inner)`.
+                // schema one level in, as `Wrapper.inner`.
                 let inner_text = Self::new(inner).expanded();
-                self.parenthesis([self.reference_text(), inner_text])
+                self.application_text(self.reference_text(), [inner_text])
             }
             InstanceSchemaBody::Optional(None) => self.reference_text(),
             InstanceSchemaBody::Optional(Some(inner)) => {
                 let inner_text = Self::new(inner).expanded();
-                self.parenthesis([self.reference_text(), inner_text])
+                self.application_text(self.reference_text(), [inner_text])
             }
             InstanceSchemaBody::Vector(elements) => {
                 if elements.is_empty() {
@@ -161,6 +161,18 @@ impl<'schema> InstanceSchemaText<'schema> {
             .map(|field| Self::new(field).expanded())
             .collect::<Vec<_>>();
         self.brace(field_texts)
+    }
+
+    fn application_text<Items>(&self, head: String, items: Items) -> String
+    where
+        Items: IntoIterator<Item = String>,
+    {
+        let arguments = items.into_iter().collect::<Vec<_>>();
+        match arguments.as_slice() {
+            [] => head,
+            [argument] => format!("{head}.{argument}"),
+            _ => format!("{head}.{}", Delimiter::Parenthesis.wrap(arguments)),
+        }
     }
 
     fn parenthesis<Items>(&self, items: Items) -> String

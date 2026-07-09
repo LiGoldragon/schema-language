@@ -1,5 +1,6 @@
-[(Record RecordPayload) (Observe ObservePayload)]
-[(Accepted AcceptedPayload) (Failed FailedPayload)]
+{}
+[Record.RecordPayload Observe.ObservePayload]
+[Accepted.AcceptedPayload Failed.FailedPayload]
 {
   RecordPayload Entry
   ObservePayload Query
@@ -8,14 +9,15 @@
   RecordIdentifier Integer
   DatabaseMarker Integer
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Kind [Decision Correction]
   Description String
   Magnitude [Low High]
   SomethingHoldingSomethingPayload String
   Entry { Topics Kind Description Magnitude }
-  Query { Topics (Optional Integer) }
+  Query { Topics Optional.Integer }
   Receipt { RecordIdentifier DatabaseMarker }
   ErrorReport { Description }
-  SomeEnum [ (SomethingHoldingSomething SomethingHoldingSomethingPayload) SomethingElse (SomeString String) ]
+  SomeEnum [ SomethingHoldingSomething.SomethingHoldingSomethingPayload SomethingElse SomeString.String ]
 }
+[]

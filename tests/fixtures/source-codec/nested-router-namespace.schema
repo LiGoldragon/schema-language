@@ -1,12 +1,12 @@
 {}
-[(Deliver router:routed_object:Envelope)]
+[Deliver.router:routed_object:Envelope]
 []
 {
   ActorIdentifier String
   ContractName String
   ContractOperation String
   ContractPayloadSize Integer
-  ContractPayloadOctets (Vector Integer)
+  ContractPayloadOctets Vector.Integer
   router:routed_object {
     Destination ActorIdentifier
     Contract ContractName
@@ -17,3 +17,4 @@
     Envelope { Destination Contract Operation Exchange PayloadSize PayloadOctets }
   }
 }
+[]

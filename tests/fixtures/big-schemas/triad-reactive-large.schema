@@ -1,14 +1,15 @@
-[(SignalIn SignalInPayload)
- (NexusIn NexusInPayload)
- (SemaIn SemaInPayload)
- (Admin AdminPayload)
+{}
+[SignalIn.SignalInPayload
+ NexusIn.NexusInPayload
+ SemaIn.SemaInPayload
+ Admin.AdminPayload
  Heartbeat]
-[(SignalOut SignalOutPayload)
- (NexusOut NexusOutPayload)
- (SemaOut SemaOutPayload)
- (AdminOut AdminOutPayload)
- (Event EventPayload)
- (Rejected RejectedPayload)]
+[SignalOut.SignalOutPayload
+ NexusOut.NexusOutPayload
+ SemaOut.SemaOutPayload
+ AdminOut.AdminOutPayload
+ Event.EventPayload
+ Rejected.RejectedPayload]
 {
   SignalInPayload SignalRequest
   NexusInPayload NexusRequest
@@ -24,15 +25,15 @@
   DatabaseDigest Integer
   ActorIdentifier String
   SocketPath String
-  SignalRequest [(RecordIntent RecordIntentPayload) (ObserveIntent ObserveIntentPayload) (SubscribeIntent SubscribeIntentPayload)]
-  SignalReply [(RecordAccepted RecordAcceptedPayload) (ObservationReturned ObservationReturnedPayload) (SubscriptionStarted SubscriptionStartedPayload)]
-  NexusRequest [(PushSignal PushSignalPayload) (PushSemaResult PushSemaResultPayload) ResolveMail ExpireMail]
-  NexusReply [(PushedToSema PushedToSemaPayload) (MailResolved MailResolvedPayload) MailExpired]
-  SemaRequest [(WriteEntry WriteEntryPayload) (ReadEntries ReadEntriesPayload) (OpenSubscription OpenSubscriptionPayload) (CloseSubscription CloseSubscriptionPayload)]
-  SemaReply [(EntryWritten EntryWrittenPayload) (EntriesRead EntriesReadPayload) (SubscriptionOpened SubscriptionOpenedPayload) (SubscriptionClosed SubscriptionClosedPayload)]
-  AdminRequest [Drain Pause Resume (Snapshot SnapshotPayload)]
-  AdminReply [Drained Paused Resumed (SnapshotReady SnapshotReadyPayload)]
-  RuntimeEvent [(MailSent MailSentPayload) (MessageAccepted MessageAcceptedPayload) (MessageCommitted MessageCommittedPayload) (MessageFailed MessageFailedPayload)]
+  SignalRequest [RecordIntent.RecordIntentPayload ObserveIntent.ObserveIntentPayload SubscribeIntent.SubscribeIntentPayload]
+  SignalReply [RecordAccepted.RecordAcceptedPayload ObservationReturned.ObservationReturnedPayload SubscriptionStarted.SubscriptionStartedPayload]
+  NexusRequest [PushSignal.PushSignalPayload PushSemaResult.PushSemaResultPayload ResolveMail ExpireMail]
+  NexusReply [PushedToSema.PushedToSemaPayload MailResolved.MailResolvedPayload MailExpired]
+  SemaRequest [WriteEntry.WriteEntryPayload ReadEntries.ReadEntriesPayload OpenSubscription.OpenSubscriptionPayload CloseSubscription.CloseSubscriptionPayload]
+  SemaReply [EntryWritten.EntryWrittenPayload EntriesRead.EntriesReadPayload SubscriptionOpened.SubscriptionOpenedPayload SubscriptionClosed.SubscriptionClosedPayload]
+  AdminRequest [Drain Pause Resume Snapshot.SnapshotPayload]
+  AdminReply [Drained Paused Resumed SnapshotReady.SnapshotReadyPayload]
+  RuntimeEvent [MailSent.MailSentPayload MessageAccepted.MessageAcceptedPayload MessageCommitted.MessageCommittedPayload MessageFailed.MessageFailedPayload]
   RejectedReply { RejectionReason }
   RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion InternalError]
   RecordIntentPayload { ActorIdentifier Entry }
@@ -61,16 +62,17 @@
   MessageFailedPayload { RejectionReason }
   Entry { Topics Kind Description Magnitude ActorIdentifier }
   Topic String
-  Topics (Vector Topic)
+  Topics Vector.Topic
   Description String
   Kind [Decision Principle Correction Clarification Constraint Observation Question]
   Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
-  Kinds (Vector Kind)
-  Limit (Optional Integer)
+  Kinds Vector.Kind
+  Limit Optional.Integer
   Query { Topics Kinds Limit }
   RecordIdentifier Integer
   SubscriptionToken Integer
-  Records (Vector Entry)
-  ByTopic (Map Topic RecordIdentifier)
+  Records Vector.Entry
+  ByTopic Map.(Topic RecordIdentifier)
   RecordSet { Records ByTopic }
 }
+[]

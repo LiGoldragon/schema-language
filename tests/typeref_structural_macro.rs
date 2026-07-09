@@ -1,17 +1,13 @@
-//! `TypeReference` exposes the structural reference grammar through
-//! `StructuralMacroNode`: full-word built-ins use `(Vector T)`,
-//! `(Optional T)`, `(ScopeOf T)`, flat `(Map K V)`, and `(Bytes N)`, while any
-//! other PascalCase head is the generic application form.
-//!
-//! Round-trip is the witness: every variant decodes from its canonical NOTA
-//! form and re-encodes to byte-identical text through the structural node.
+//! `TypeReference` exposes the authored structural reference grammar through
+//! `StructuralMacroNode`: generics are dotted and positional. Unary forms use
+//! `Head.Payload`; multi-argument forms use `Head.(A B)`. The legacy
+//! parenthesized generic surface is rejected at this public boundary.
 
 use nota::StructuralMacroNode;
-use schema_language::{ApplicationHead, Name, TypeReference};
+use schema_language::{
+    ApplicationHead, Name, SchemaEngine, SchemaIdentity, TypeDeclaration, TypeReference,
+};
 
-/// Decode the input through the derive, assert the node, then re-encode and
-/// assert the text round-trips byte-identically — and that re-decoding the
-/// output yields the same node.
 fn assert_round_trip(input: &str, expected: TypeReference) {
     let decoded = TypeReference::from_structural_nota(input)
         .unwrap_or_else(|error| panic!("{input} decodes: {error}"));
@@ -27,6 +23,19 @@ fn plain(name: &str) -> TypeReference {
     TypeReference::Plain(Name::new(name))
 }
 
+fn lower_reference(namespace: &str, name: &str) -> TypeReference {
+    let schema = SchemaEngine::default()
+        .lower_source(
+            &format!("{{}}\n[]\n[]\n{{ {namespace} }}\n[]"),
+            SchemaIdentity::new("typeref:test", "0.1.0"),
+        )
+        .expect("schema lowers");
+    match schema.type_named(name).expect("type present") {
+        TypeDeclaration::Newtype(declaration) => declaration.reference.clone(),
+        _ => panic!("{name} should be a newtype"),
+    }
+}
+
 #[test]
 fn scalar_leaves_round_trip_through_their_bare_atoms() {
     assert_round_trip("String", TypeReference::String);
@@ -37,8 +46,8 @@ fn scalar_leaves_round_trip_through_their_bare_atoms() {
 }
 
 #[test]
-fn fixed_bytes_round_trips_through_the_bytes_head_with_a_width() {
-    assert_round_trip("(Bytes 32)", TypeReference::FixedBytes(32));
+fn fixed_bytes_round_trips_through_the_bytes_definition() {
+    assert_round_trip("Bytes.32", TypeReference::FixedBytes(32));
 }
 
 #[test]
@@ -47,33 +56,28 @@ fn plain_name_round_trips_through_a_bare_pascal_case_atom() {
 }
 
 #[test]
-fn vector_round_trips_through_the_full_word_head() {
+fn unary_generic_definitions_round_trip_through_dotted_forms() {
     assert_round_trip(
-        "(Vector Topic)",
+        "Vector.Topic",
         TypeReference::Vector(Box::new(plain("Topic"))),
     );
-}
-
-#[test]
-fn optional_round_trips_through_the_optional_head() {
     assert_round_trip(
-        "(Optional Topic)",
+        "Optional.Topic",
         TypeReference::Optional(Box::new(plain("Topic"))),
     );
-}
-
-#[test]
-fn scope_round_trips_through_the_scope_of_head() {
     assert_round_trip(
-        "(ScopeOf Topic)",
+        "ScopeOf.Topic",
         TypeReference::ScopeOf(Box::new(plain("Topic"))),
     );
 }
 
 #[test]
-fn map_round_trips_through_the_flat_map_head() {
-    assert_round_trip(
-        "(Map Topic RecordIdentifier)",
+fn map_lowers_through_grouped_positional_payload() {
+    assert_eq!(
+        lower_reference(
+            "Topic String RecordIdentifier String Holder Map.(Topic RecordIdentifier)",
+            "Holder"
+        ),
         TypeReference::Map(
             Box::new(plain("Topic")),
             Box::new(plain("RecordIdentifier")),
@@ -82,13 +86,16 @@ fn map_round_trips_through_the_flat_map_head() {
 }
 
 #[test]
-fn nested_grammar_forms_recurse_and_round_trip() {
+fn nested_dotted_forms_recurse() {
     assert_round_trip(
-        "(Vector (Optional Topic))",
+        "Vector.Optional.Topic",
         TypeReference::Vector(Box::new(TypeReference::Optional(Box::new(plain("Topic"))))),
     );
-    assert_round_trip(
-        "(Map Topic (Vector Entry))",
+    assert_eq!(
+        lower_reference(
+            "Topic String Entry String Holder Map.(Topic Vector.Entry)",
+            "Holder"
+        ),
         TypeReference::Map(
             Box::new(plain("Topic")),
             Box::new(TypeReference::Vector(Box::new(plain("Entry")))),
@@ -97,9 +104,9 @@ fn nested_grammar_forms_recurse_and_round_trip() {
 }
 
 #[test]
-fn scalar_leaf_nests_inside_a_grammar_form() {
-    assert_round_trip(
-        "(Map String Boolean)",
+fn scalar_leaf_nests_inside_a_grouped_generic_form() {
+    assert_eq!(
+        lower_reference("Holder Map.(String Boolean)", "Holder"),
         TypeReference::Map(
             Box::new(TypeReference::String),
             Box::new(TypeReference::Boolean),
@@ -108,16 +115,12 @@ fn scalar_leaf_nests_inside_a_grammar_form() {
 }
 
 #[test]
-fn dropped_short_heads_lower_to_generic_applications() {
+fn non_builtin_heads_lower_to_generic_applications() {
     for (source, head, arguments) in [
-        ("(Vec Topic)", "Vec", vec![plain("Topic")]),
-        ("(Option Topic)", "Option", vec![plain("Topic")]),
-        ("(Scope Topic)", "Scope", vec![plain("Topic")]),
-        (
-            "(KeyValue Topic RecordIdentifier)",
-            "KeyValue",
-            vec![plain("Topic"), plain("RecordIdentifier")],
-        ),
+        ("Vec.Topic", "Vec", vec![plain("Topic")]),
+        ("Option.Topic", "Option", vec![plain("Topic")]),
+        ("Scope.Topic", "Scope", vec![plain("Topic")]),
+        ("KeyValue.Topic", "KeyValue", vec![plain("Topic")]),
     ] {
         assert_round_trip(
             source,
@@ -130,20 +133,33 @@ fn dropped_short_heads_lower_to_generic_applications() {
 }
 
 #[test]
-fn dropped_nested_map_payload_no_longer_parses() {
-    // The old nested payload shape is gone; only the flat `(Map K V)` is the
-    // Map grammar form now.
-    let decoded = TypeReference::from_structural_nota("(Map (Topic RecordIdentifier))");
+fn legacy_parenthesized_generic_forms_are_rejected() {
+    for source in [
+        "(Vector Topic)",
+        "(Optional Topic)",
+        "(ScopeOf Topic)",
+        "(Map Topic RecordIdentifier)",
+        "(Bytes 32)",
+    ] {
+        let decoded = TypeReference::from_structural_nota(source);
+        assert!(
+            decoded.is_err(),
+            "{source} must be rejected, got {decoded:?}"
+        );
+    }
+}
+
+#[test]
+fn map_dot_key_dot_value_is_unary_nesting_and_rejected_by_map_arity() {
+    let decoded = TypeReference::from_structural_nota("Map.Topic.RecordIdentifier");
     assert!(
         decoded.is_err(),
-        "the nested Map payload is no longer a grammar form, got {decoded:?}"
+        "Map.Topic.RecordIdentifier supplies one nested payload to Map, got {decoded:?}"
     );
 }
 
 #[test]
-fn dropped_alias_heads_are_only_bare_declared_names() {
-    // As bare atoms these spellings are ordinary PascalCase names: they
-    // fall through to `Plain`, carrying no wrapper meaning.
+fn generic_names_are_plain_when_bare() {
     assert_round_trip("Vector", plain("Vector"));
     assert_round_trip("Option", plain("Option"));
     assert_round_trip("ScopeOf", plain("ScopeOf"));

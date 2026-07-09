@@ -1,7 +1,9 @@
-[(Send Message)]
-[(Sent Receipt)]
+{}
+[Send.Message]
+[Sent.Receipt]
 {
   Text String
   Message { Text }
   Receipt Integer
 }
+[]
