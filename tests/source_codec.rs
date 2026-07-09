@@ -58,12 +58,12 @@ fn schema_source_lowers_through_engine_schema_source_endpoint() {
 #[test]
 fn reheaded_source_declarations_round_trip_help_forms() {
     let declarations = SourceDeclarations::from_schema_text(
-        "(Record { Entry Justification })\n(IntentEventStream (Stream { token.SubscriptionToken opened.SubscriptionStarted event.IntentEvent close.SubscriptionToken }))",
+        "(Record { Entry Justification })\n(IntentEventStream Stream.(SubscriptionToken SubscriptionStarted IntentEvent SubscriptionToken))",
     )
     .expect("help declaration document decodes");
     assert_eq!(
         declarations.to_schema_text(),
-        "(Record { Entry Justification })\n(IntentEventStream (Stream { token.SubscriptionToken opened.SubscriptionStarted event.IntentEvent close.SubscriptionToken }))"
+        "(Record { Entry Justification })\n(IntentEventStream Stream.(SubscriptionToken SubscriptionStarted IntentEvent SubscriptionToken))"
     );
 
     let record = SourceDeclaration::new(
@@ -100,6 +100,30 @@ fn reheaded_source_declarations_round_trip_help_forms() {
         encoded,
         "(Record { Entry Justification })\n(Kind [Decision Principle])\n(Domains Vector.Domain)\n(Version)"
     );
+}
+
+#[test]
+fn named_brace_stream_application_is_rejected() {
+    for source in [
+        "(IntentEventStream (Stream { token.SubscriptionToken opened.SubscriptionStarted event.IntentEvent close.SubscriptionToken }))",
+        "(IntentEventStream Stream.{ token.SubscriptionToken opened.SubscriptionStarted event.IntentEvent close.SubscriptionToken })",
+    ] {
+        let error = SourceDeclarations::from_schema_text(source)
+            .expect_err("named-brace stream application must be rejected");
+        assert!(matches!(
+            &error,
+            SchemaError::ExpectedSyntaxDeclaration { .. }
+        ));
+        let message = error.to_string();
+        assert!(
+            message.contains("named-brace Stream application is invalid"),
+            "error should name the retired Stream named-brace form: {message}"
+        );
+        assert!(
+            message.contains("Stream.(Token Opened Event Close)"),
+            "error should show the positional dotted Stream shape: {message}"
+        );
+    }
 }
 
 #[test]
@@ -760,6 +784,18 @@ fn schema_source_lowers_stream_declarations_and_variant_relations() {
     assert!(
         schema.type_named("RecordStream").is_none(),
         "stream declarations are schema metadata, not namespace data types"
+    );
+
+    let semantic_source = schema.to_schema_text();
+    assert!(
+        semantic_source.contains(
+            "RecordStream Stream.(SubscriptionToken SubscriptionReceipt RuntimeEvent SubscriptionToken)"
+        ),
+        "semantic schema re-emission should use the positional dotted Stream form"
+    );
+    assert!(
+        !semantic_source.contains("(Stream {"),
+        "semantic schema re-emission must not reintroduce named-brace Stream application"
     );
 
     let watch_relation = schema

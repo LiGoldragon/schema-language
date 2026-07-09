@@ -36,6 +36,37 @@ fn family_declarations_round_trip_through_canonical_schema_source() {
 }
 
 #[test]
+fn named_brace_family_application_is_rejected() {
+    let source = "\
+{}
+[Record.Entry]
+[Recorded]
+{
+  Body String
+  Entry { Body }
+  EntryFamily (Family { record.Entry table.entries key.Domain })
+}
+[]
+";
+
+    let error = SchemaSourceArtifact::from_schema_text(source)
+        .expect_err("named-brace family application must be rejected");
+    assert!(matches!(
+        &error,
+        SchemaError::ExpectedSyntaxDeclaration { .. }
+    ));
+    let message = error.to_string();
+    assert!(
+        message.contains("named-brace Family application is invalid"),
+        "error should name the retired Family named-brace form: {message}"
+    );
+    assert!(
+        message.contains("Family.(Record table Domain)"),
+        "error should show the positional dotted Family shape: {message}"
+    );
+}
+
+#[test]
 fn family_declarations_lower_to_semantic_schema_metadata() {
     let schema = lower(&family_fixture()).expect("schema source lowers");
 
@@ -60,6 +91,16 @@ fn family_declarations_lower_to_semantic_schema_metadata() {
     assert!(
         matches!(schema.type_named("Entry"), Some(TypeDeclaration::Struct(_))),
         "the record type stays an ordinary namespace declaration"
+    );
+
+    let semantic_source = schema.to_schema_text();
+    assert!(
+        semantic_source.contains("EntryFamily Family.(Entry entries Domain)"),
+        "semantic schema re-emission should use the positional dotted Family form"
+    );
+    assert!(
+        !semantic_source.contains("(Family {"),
+        "semantic schema re-emission must not reintroduce named-brace Family application"
     );
 }
 
@@ -100,7 +141,7 @@ fn family_record_must_resolve_to_a_declared_type() {
 {
   Body String
   Entry { Body }
-  GhostFamily (Family { record.Ghost table.ghosts key.Domain })
+  GhostFamily Family.(Ghost ghosts Domain)
 }
 []
 ";
@@ -124,8 +165,8 @@ fn duplicate_family_names_are_a_typed_error() {
 {
   Body String
   Entry { Body }
-  EntryFamily (Family { record.Entry table.entries key.Domain })
-  EntryFamily (Family { record.Entry table.archive key.Domain })
+  EntryFamily Family.(Entry entries Domain)
+  EntryFamily Family.(Entry archive Domain)
 }
 []
 ";
@@ -150,8 +191,8 @@ fn duplicate_family_tables_are_a_typed_error() {
   Topic String
   Entry { Body }
   Query { Topic }
-  EntryFamily (Family { record.Entry table.entries key.Domain })
-  QueryFamily (Family { record.Query table.entries key.Identified })
+  EntryFamily Family.(Entry entries Domain)
+  QueryFamily Family.(Query entries Identified)
 }
 []
 ";
@@ -174,7 +215,7 @@ fn family_key_kind_is_a_closed_structural_choice() {
 {
   Body String
   Entry { Body }
-  EntryFamily (Family { record.Entry table.entries key.Sideways })
+  EntryFamily Family.(Entry entries Sideways)
 }
 []
 ";

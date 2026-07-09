@@ -180,10 +180,12 @@ help printing; it would be intentionally non-round-tripping. Neither is decided.
 
 ### Named-brace application is not valid schema
 
-The `Family { record.StoredRecord ... }` named-brace application form is
-confused-agent drift, not valid schema. Generic application is positional and
-dotted; parameter names live only in the definition. Schemas using the
-named-brace form must be rewritten to positional dotted application.
+The `Family { record.StoredRecord ... }` / `Stream { token.Token ... }`
+named-brace application form is confused-agent drift, not valid schema.
+Generic application is positional and dotted; parameter names live only in the
+definition. Schemas using the named-brace form must be rewritten to positional
+dotted application, for example `Family.(StoredRecord stored_records Domain)`
+or `Stream.(Token Opened Event Closed)`.
 
 ### Blast radius
 

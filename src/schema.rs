@@ -1218,7 +1218,7 @@ impl StreamRelation {
 impl StreamDeclaration {
     fn to_schema_text(&self) -> String {
         format!(
-            "{} (Stream {{ token.{} opened.{} event.{} close.{} }})",
+            "{} Stream.({} {} {} {})",
             self.name.to_nota(),
             self.token.to_structural_nota(),
             self.opened.to_structural_nota(),
@@ -1231,7 +1231,7 @@ impl StreamDeclaration {
 impl FamilyDeclaration {
     fn to_schema_text(&self) -> String {
         format!(
-            "{} (Family {{ record.{} table.{} key.{} }})",
+            "{} Family.({} {} {})",
             self.name.to_nota(),
             self.record.to_nota(),
             self.table.to_nota(),

@@ -893,11 +893,13 @@ impl<'schema> NamespaceBlock<'schema> {
     }
 }
 
-/// One segmented namespace entry on the macro path: a head block and an
-/// optional inline body (the `definition`). The trailing `{| … |}` impl
-/// block is recognised and skipped by the walk — the macro lowerer consumes
-/// only the body; the typed source archive (`SourceNamespaceEntry`) is what
-/// carries the impl catalog.
+/// One segmented namespace entry on the macro path: a head block and the first
+/// block of an optional inline body (the `definition`). A grouped dotted
+/// application body consumes its payload block during the walk so the payload
+/// is not mistaken for the next entry. The trailing `{| … |}` impl block is
+/// recognised and skipped by the walk — the macro lowerer consumes only the
+/// body; the typed source archive (`SourceNamespaceEntry`) is what carries the
+/// impl catalog.
 #[derive(Clone, Copy, Debug)]
 struct NamespaceEntry<'schema> {
     name: &'schema Block,
@@ -933,8 +935,9 @@ impl<'schema> NamespaceEntryWalk<'schema> {
 
         let definition = match self.objects.get(self.cursor) {
             Some(next) if !next.is_pipe_brace() => {
-                self.cursor += 1;
-                Some(next)
+                let definition = next;
+                self.cursor += self.definition_width_at(self.cursor);
+                Some(definition)
             }
             _ => None,
         };
@@ -958,6 +961,22 @@ impl<'schema> NamespaceEntryWalk<'schema> {
             definition,
         }))
     }
+
+    fn definition_width_at(&self, index: usize) -> usize {
+        let Some(Block::Atom(atom)) = self.objects.get(index) else {
+            return 1;
+        };
+        if atom.text().strip_suffix('.').is_some()
+            && self
+                .objects
+                .get(index + 1)
+                .is_some_and(|block| !block.is_pipe_brace())
+        {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 /// Whether a namespace entry's value is a schema-metadata definition —
@@ -975,18 +994,21 @@ impl<'schema> MetadataDefinitionProbe<'schema> {
     }
 
     fn matches(&self) -> bool {
-        let Block::Delimited {
-            delimiter: Delimiter::Parenthesis,
-            root_objects,
-            ..
-        } = self.definition
-        else {
-            return false;
-        };
-        root_objects
-            .first()
-            .and_then(Block::demote_to_string)
-            .is_some_and(|head| matches!(head, "Stream" | "Family"))
+        match self.definition {
+            Block::Atom(atom) => atom
+                .text()
+                .strip_suffix('.')
+                .is_some_and(|head| matches!(head, "Stream" | "Family")),
+            Block::Delimited {
+                delimiter: Delimiter::Parenthesis,
+                root_objects,
+                ..
+            } => root_objects
+                .first()
+                .and_then(Block::demote_to_string)
+                .is_some_and(|head| matches!(head, "Stream" | "Family")),
+            _ => false,
+        }
     }
 }
 

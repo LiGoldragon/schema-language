@@ -199,9 +199,10 @@ impl<'registry> MacroExpansionPass<'registry> {
 
 /// A cursor over a namespace body that segments it into key/value pairs using
 /// the head / optional-body / optional-pipe-brace grammar the source-path
-/// namespace walk uses. Used only to count the `KeyValueDeclaration` firings
-/// for the macro context; segmentation errors are left for the source path to
-/// report, so the walk yields what it can and stops.
+/// namespace walk uses, including grouped dotted bodies that occupy a head
+/// block plus a payload block. Used only to count the `KeyValueDeclaration`
+/// firings for the macro context; segmentation errors are left for the source
+/// path to report, so the walk yields what it can and stops.
 #[derive(Clone, Copy, Debug)]
 struct NamespacePairWalk<'schema> {
     objects: &'schema [Block],
@@ -222,8 +223,9 @@ impl<'schema> NamespacePairWalk<'schema> {
             self.cursor += 1;
             let definition = match self.objects.get(self.cursor) {
                 Some(next) if !next.is_pipe_brace() => {
-                    self.cursor += 1;
-                    Some(next)
+                    let definition = next;
+                    self.cursor += self.definition_width_at(self.cursor);
+                    Some(definition)
                 }
                 _ => None,
             };
@@ -243,6 +245,22 @@ impl<'schema> NamespacePairWalk<'schema> {
                 // declaration on the macro path; skip it and keep walking.
                 None => continue,
             }
+        }
+    }
+
+    fn definition_width_at(&self, index: usize) -> usize {
+        let Some(Block::Atom(atom)) = self.objects.get(index) else {
+            return 1;
+        };
+        if atom.text().strip_suffix('.').is_some()
+            && self
+                .objects
+                .get(index + 1)
+                .is_some_and(|block| !block.is_pipe_brace())
+        {
+            2
+        } else {
+            1
         }
     }
 }

@@ -4,8 +4,8 @@ use std::{
 };
 
 use nota::{
-    Block, CaptureName, Delimiter, Document, MacroCandidate, NotaBody, NotaEncode, NotaString,
-    StructuralMacroError, StructuralMacroNode, StructuralVariant,
+    Block, CaptureName, Delimiter, Document, MacroCandidate, NotaBody, NotaDecode, NotaEncode,
+    NotaString, StructuralMacroError, StructuralMacroNode, StructuralVariant,
 };
 
 use crate::{
@@ -454,12 +454,7 @@ impl SourceDeclaration {
         }
         let value = match tail {
             [] => None,
-            [body] => Some(SourceDeclarationValue::from_block(body)?),
-            _ => {
-                return Err(SchemaError::ExpectedSyntaxDeclaration {
-                    found: block.reemit_fallback(),
-                });
-            }
+            body => Some(SourceDeclarationValue::from_blocks(body)?),
         };
         Ok(Self::new(name, value))
     }
@@ -830,11 +825,12 @@ impl SourceNamespace {
 
 /// A cursor over a namespace body's root objects that segments them into
 /// entries. Each entry is a head (declaration-head block), an optional inline
-/// body (any non-pipe-brace block), and an optional trailing `{| … |}` impl
-/// block. The trailing pipe-brace is a *separate* root object — it never
-/// nests inside the body — so the classic `chunks_exact(2)` map-pairing
-/// cannot see it; this stateful walk is what replaces it. The same grammar is
-/// mirrored on the engine/macro path by [`crate::engine`]'s entry walk.
+/// body (one block, or a dotted-application head plus its payload block), and
+/// an optional trailing `{| … |}` impl block. The trailing pipe-brace is a
+/// *separate* root object — it never nests inside the body — so the classic
+/// `chunks_exact(2)` map-pairing cannot see it; this stateful walk is what
+/// replaces it. The same grammar is mirrored on the engine/macro path by
+/// [`crate::engine`]'s entry walk.
 struct SourceNamespaceWalk<'block> {
     objects: &'block [Block],
     cursor: usize,
@@ -848,8 +844,9 @@ impl<'block> SourceNamespaceWalk<'block> {
     /// Read the next entry, or `None` at the end of the body. An entry head
     /// is always present; a pipe-brace head is illegal (an impl block must
     /// trail a type name). After the head, an inline body is taken when the
-    /// next object is a non-pipe-brace, then a trailing pipe-brace impl block
-    /// is taken when present. At least one of body/impl-block is guaranteed
+    /// next object is a non-pipe-brace; grouped dotted application bodies
+    /// consume their payload block too. A trailing pipe-brace impl block is
+    /// taken when present. At least one of body/impl-block is guaranteed
     /// because a lone head with neither is a missing value.
     fn next_entry(&mut self) -> Result<Option<SourceNamespaceEntry>, SchemaError> {
         let Some(head) = self.objects.get(self.cursor) else {
@@ -920,8 +917,8 @@ pub struct SourceNamespaceEntry {
 
 impl SourceNamespaceEntry {
     /// Build an entry from its parsed parts. `body` is the optional inline
-    /// body block (`String`, `{ … }`, `[ … ]`, …); `impls` is the optional
-    /// trailing `{| … |}` block. At least one must be present — the
+    /// body block slice (`String`, `{ … }`, `[ … ]`, `Map.(K V)`, …); `impls`
+    /// is the optional trailing `{| … |}` block. At least one must be present — the
     /// stateful namespace walk guarantees that. A body-optional entry
     /// (`TypeName {| … |}`, no inline body) carries only impls and
     /// references the type declared elsewhere by name.
@@ -1770,13 +1767,16 @@ impl SourceDeclarationValue {
     }
 
     fn from_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
+        if let Some(value) = Self::from_positional_metadata_blocks(blocks)? {
+            return Ok(value);
+        }
         if let [block] = blocks {
             return Self::from_block(block);
         }
         let mut cursor = 0;
         let reference = SourceReference::from_blocks_at(blocks, &mut cursor)?;
         if cursor == blocks.len() {
-            return Ok(Self::Reference(reference));
+            return Self::from_reference(reference);
         }
         Err(SchemaError::ExpectedRootObjectCount {
             expected: "one schema declaration body",
@@ -1795,14 +1795,14 @@ impl SourceDeclarationValue {
     /// re-headed help declaration round-trips through, with no parallel codec.
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
         match block {
-            Block::Atom(_) => Ok(Self::Reference(SourceReference::from_block(block)?)),
+            Block::Atom(_) => Self::from_reference(SourceReference::from_block(block)?),
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 ..
-            } => match Self::from_metadata_block(block)? {
-                Some(value) => Ok(value),
-                None => Ok(Self::Reference(SourceReference::from_block(block)?)),
-            },
+            } => {
+                Self::reject_parenthesized_metadata_block(block)?;
+                Self::from_reference(SourceReference::from_block(block)?)
+            }
             Block::PipeText(text) => Ok(Self::Text(text.text.clone())),
             Block::Delimited {
                 delimiter: Delimiter::Brace,
@@ -1836,11 +1836,70 @@ impl SourceDeclarationValue {
         }
     }
 
-    fn from_metadata_block(block: &Block) -> Result<Option<Self>, SchemaError> {
-        if let Some(stream) = SourceStreamBody::from_block(block)? {
-            return Ok(Some(Self::Stream(stream)));
+    fn from_positional_metadata_blocks(blocks: &[Block]) -> Result<Option<Self>, SchemaError> {
+        let [head, payload] = blocks else {
+            return Ok(None);
+        };
+        let Block::Atom(atom) = head else {
+            return Ok(None);
+        };
+        let Some(head) = atom.text().strip_suffix('.') else {
+            return Ok(None);
+        };
+        match head {
+            "Stream" => SourceStreamBody::from_positional_payload(payload)
+                .map(Self::Stream)
+                .map(Some),
+            "Family" => SourceFamilyBody::from_positional_payload(payload)
+                .map(Self::Family)
+                .map(Some),
+            _ => Ok(None),
         }
-        SourceFamilyBody::from_block(block).map(|body| body.map(Self::Family))
+    }
+
+    fn reject_parenthesized_metadata_block(block: &Block) -> Result<(), SchemaError> {
+        let body = NotaBody::from_delimited(block, Delimiter::Parenthesis, "source metadata body")?;
+        let objects = body.root_objects();
+        let Some(head) = objects.first().and_then(Block::demote_to_string) else {
+            return Ok(());
+        };
+        match head {
+            "Stream" | "Family" if objects.get(1).is_some_and(|block| block.is_brace()) => {
+                Err(Self::named_brace_application_error(head))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn from_reference(reference: SourceReference) -> Result<Self, SchemaError> {
+        match reference {
+            SourceReference::Application { head, arguments } => match head.as_str() {
+                "Stream" => {
+                    SourceStreamBody::from_positional_arguments(arguments).map(Self::Stream)
+                }
+                "Family" => {
+                    SourceFamilyBody::from_positional_arguments(arguments).map(Self::Family)
+                }
+                _ => Ok(Self::Reference(SourceReference::Application {
+                    head,
+                    arguments,
+                })),
+            },
+            reference => Ok(Self::Reference(reference)),
+        }
+    }
+
+    fn named_brace_application_error(head: &str) -> SchemaError {
+        let expected = match head {
+            "Stream" => "Stream.(Token Opened Event Close)",
+            "Family" => "Family.(Record table Domain)",
+            _ => "Head.(positional payload)",
+        };
+        SchemaError::ExpectedSyntaxDeclaration {
+            found: format!(
+                "named-brace {head} application is invalid; use positional dotted application {expected}; parameter names belong in the definition, not at the use site"
+            ),
+        }
     }
 
     pub fn to_schema_text(&self) -> String {
@@ -1957,40 +2016,52 @@ impl SourceStreamBody {
         &self.close
     }
 
-    fn from_block(block: &Block) -> Result<Option<Self>, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Parenthesis, "source stream body")?;
-        let objects = body.root_objects();
-        let Some(head) = objects.first().and_then(Block::demote_to_string) else {
-            return Ok(None);
-        };
-        if head != "Stream" {
-            return Ok(None);
+    fn from_positional_payload(block: &Block) -> Result<Self, SchemaError> {
+        if block.is_brace() {
+            return Err(SourceDeclarationValue::named_brace_application_error(
+                "Stream",
+            ));
         }
-        if objects.len() != 2 {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                form: "stream declaration",
-                expected: "Stream plus one brace payload",
-                found: objects.len(),
-            });
+        let body = NotaBody::from_delimited(
+            block,
+            Delimiter::Parenthesis,
+            "stream declaration positional payload",
+        )?;
+        Self::from_positional_blocks(body.root_objects())
+    }
+
+    fn from_positional_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
+        let mut arguments = Vec::new();
+        let mut cursor = 0;
+        while cursor < blocks.len() {
+            arguments.push(SourceReference::from_blocks_at(blocks, &mut cursor)?);
         }
-        let fields = SourceStreamFields::from_block(&objects[1])?;
-        Ok(Some(fields.into_stream_body()?))
+        Self::from_positional_arguments(arguments)
+    }
+
+    fn from_positional_arguments(arguments: Vec<SourceReference>) -> Result<Self, SchemaError> {
+        let found = arguments.len();
+        let [token, opened, event, close]: [SourceReference; 4] =
+            arguments
+                .try_into()
+                .map_err(|_| SchemaError::ExpectedSyntaxReferenceArity {
+                    form: "stream declaration",
+                    expected: "four positional arguments: token opened event close",
+                    found,
+                })?;
+        Ok(Self::new(token, opened, event, close))
     }
 
     fn to_schema_text(&self) -> String {
-        Delimiter::Parenthesis.wrap([
-            "Stream".to_owned(),
-            SourceDelimitedText::new(
-                Delimiter::Brace,
-                vec![
-                    format!("token.{}", self.token.to_schema_text()),
-                    format!("opened.{}", self.opened.to_schema_text()),
-                    format!("event.{}", self.event.to_schema_text()),
-                    format!("close.{}", self.close.to_schema_text()),
-                ],
-            )
-            .inline(),
-        ])
+        SourceGenericDefinition::application_text_for_head(
+            &Name::new("Stream"),
+            [
+                self.token.to_schema_text(),
+                self.opened.to_schema_text(),
+                self.event.to_schema_text(),
+                self.close.to_schema_text(),
+            ],
+        )
     }
 
     fn to_stream_declaration(&self, name: Name) -> StreamDeclaration {
@@ -2004,88 +2075,10 @@ impl SourceStreamBody {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SourceStreamFields {
-    token: Option<SourceReference>,
-    opened: Option<SourceReference>,
-    event: Option<SourceReference>,
-    close: Option<SourceReference>,
-}
-
-impl SourceStreamFields {
-    fn empty() -> Self {
-        Self {
-            token: None,
-            opened: None,
-            event: None,
-            close: None,
-        }
-    }
-
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Brace, "stream declaration fields")?;
-        let mut fields = Self::empty();
-        let mut index = 0;
-        let objects = body.root_objects();
-        while index < objects.len() {
-            if let Some(named) = SourceNamedBlock::from_blocks_if_trailing_dot(objects, &mut index)?
-            {
-                fields.insert(
-                    named.name.as_str(),
-                    SourceReference::from_block(named.value)?,
-                )?;
-                continue;
-            }
-            let atom = SourceAtom::from_block(&objects[index])?;
-            index += 1;
-            let Some((field, reference)) = atom.0.split_once('.') else {
-                return Err(SchemaError::ExpectedSyntaxDeclaration {
-                    found: format!("stream field {}", atom.0),
-                });
-            };
-            fields.insert(field, SourceReference::Plain(Name::new(reference)))?;
-        }
-        Ok(fields)
-    }
-
-    fn insert(&mut self, field: &str, reference: SourceReference) -> Result<(), SchemaError> {
-        match field {
-            "token" => self.token = Some(reference),
-            "opened" => self.opened = Some(reference),
-            "event" => self.event = Some(reference),
-            "close" => self.close = Some(reference),
-            other => {
-                return Err(SchemaError::ExpectedSyntaxDeclaration {
-                    found: format!("stream field {other}"),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn into_stream_body(self) -> Result<SourceStreamBody, SchemaError> {
-        Ok(SourceStreamBody {
-            token: Self::required_field(self.token, "token")?,
-            opened: Self::required_field(self.opened, "opened")?,
-            event: Self::required_field(self.event, "event")?,
-            close: Self::required_field(self.close, "close")?,
-        })
-    }
-
-    fn required_field(
-        field: Option<SourceReference>,
-        field_name: &'static str,
-    ) -> Result<SourceReference, SchemaError> {
-        field.ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
-            found: format!("stream missing {field_name} field"),
-        })
-    }
-}
-
-/// The authored body of a family declaration: `(Family { record
-/// <TypeName> table <table-name> key <Domain|Identified> })` inside the
-/// namespace map, on the stream-declaration precedent. The record name
-/// must resolve to a declared or imported type when the source lowers.
+/// The authored body of a family declaration: `Family.(<TypeName>
+/// <table-name> <Domain|Identified>)` inside the namespace map, on the
+/// stream-declaration precedent. The record name must resolve to a declared
+/// or imported type when the source lowers.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct SourceFamilyBody {
     record: Name,
@@ -2110,137 +2103,105 @@ impl SourceFamilyBody {
         self.key
     }
 
-    fn from_block(block: &Block) -> Result<Option<Self>, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Parenthesis, "source family body")?;
-        let objects = body.root_objects();
-        let Some(head) = objects.first().and_then(Block::demote_to_string) else {
-            return Ok(None);
-        };
-        if head != "Family" {
-            return Ok(None);
+    fn from_positional_payload(block: &Block) -> Result<Self, SchemaError> {
+        if block.is_brace() {
+            return Err(SourceDeclarationValue::named_brace_application_error(
+                "Family",
+            ));
         }
-        if objects.len() != 2 {
+        let body = NotaBody::from_delimited(
+            block,
+            Delimiter::Parenthesis,
+            "family declaration positional payload",
+        )?;
+        Self::from_positional_blocks(body.root_objects())
+    }
+
+    fn from_positional_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
+        let [record, table, key] = blocks else {
             return Err(SchemaError::ExpectedSyntaxReferenceArity {
                 form: "family declaration",
-                expected: "Family plus one brace payload",
-                found: objects.len(),
+                expected: "three positional arguments: record table key",
+                found: blocks.len(),
             });
+        };
+        Ok(Self::new(
+            SourceAtom::from_block(record)?.into_name(),
+            TableName::from_nota_block(table)?,
+            Self::key_from_block(key)?,
+        ))
+    }
+
+    fn from_positional_arguments(arguments: Vec<SourceReference>) -> Result<Self, SchemaError> {
+        let found = arguments.len();
+        let [record, table, key]: [SourceReference; 3] =
+            arguments
+                .try_into()
+                .map_err(|_| SchemaError::ExpectedSyntaxReferenceArity {
+                    form: "family declaration",
+                    expected: "three positional arguments: record table key",
+                    found,
+                })?;
+        Ok(Self::new(
+            Self::name_from_reference(record, "record")?,
+            TableName::new(
+                Self::name_from_reference(table, "table")?
+                    .as_str()
+                    .to_owned(),
+            ),
+            Self::key_from_reference(key)?,
+        ))
+    }
+
+    fn name_from_reference(
+        reference: SourceReference,
+        argument_name: &'static str,
+    ) -> Result<Name, SchemaError> {
+        match reference {
+            SourceReference::Plain(name) => Ok(name),
+            reference => Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!(
+                    "family {argument_name} argument {}; expected a positional atom",
+                    reference.to_schema_text()
+                ),
+            }),
         }
-        let fields = SourceFamilyFields::from_block(&objects[1])?;
-        Ok(Some(fields.into_family_body()?))
+    }
+
+    fn key_from_block(block: &Block) -> Result<FamilyKey, SchemaError> {
+        match SourceAtom::from_block(block)?.0 {
+            "Domain" => Ok(FamilyKey::Domain),
+            "Identified" => Ok(FamilyKey::Identified),
+            other => Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!("family key {other}"),
+            }),
+        }
+    }
+
+    fn key_from_reference(reference: SourceReference) -> Result<FamilyKey, SchemaError> {
+        let key = Self::name_from_reference(reference, "key")?;
+        match key.as_str() {
+            "Domain" => Ok(FamilyKey::Domain),
+            "Identified" => Ok(FamilyKey::Identified),
+            other => Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!("family key {other}"),
+            }),
+        }
     }
 
     fn to_schema_text(&self) -> String {
-        Delimiter::Parenthesis.wrap([
-            "Family".to_owned(),
-            SourceDelimitedText::new(
-                Delimiter::Brace,
-                vec![
-                    format!("record.{}", self.record.to_nota()),
-                    format!("table.{}", self.table.to_nota()),
-                    format!("key.{}", self.key.to_structural_nota()),
-                ],
-            )
-            .inline(),
-        ])
+        SourceGenericDefinition::application_text_for_head(
+            &Name::new("Family"),
+            [
+                self.record.to_nota(),
+                self.table.to_nota(),
+                self.key.to_nota(),
+            ],
+        )
     }
 
     fn to_family_declaration(&self, name: Name) -> FamilyDeclaration {
         FamilyDeclaration::new(name, self.record.clone(), self.table.clone(), self.key)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SourceFamilyFields {
-    record: Option<Name>,
-    table: Option<TableName>,
-    key: Option<FamilyKey>,
-}
-
-impl SourceFamilyFields {
-    fn empty() -> Self {
-        Self {
-            record: None,
-            table: None,
-            key: None,
-        }
-    }
-
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Brace, "family declaration fields")?;
-        let mut fields = Self::empty();
-        let mut index = 0;
-        let objects = body.root_objects();
-        while index < objects.len() {
-            if let Some(named) = SourceNamedBlock::from_blocks_if_trailing_dot(objects, &mut index)?
-            {
-                fields.insert_block(named.name.as_str(), named.value)?;
-                continue;
-            }
-            let atom = SourceAtom::from_block(&objects[index])?;
-            index += 1;
-            let Some((field, value)) = atom.0.split_once('.') else {
-                return Err(SchemaError::ExpectedSyntaxDeclaration {
-                    found: format!("family field {}", atom.0),
-                });
-            };
-            fields.insert_atom(field, value)?;
-        }
-        Ok(fields)
-    }
-
-    fn insert_block(&mut self, field: &str, value: &Block) -> Result<(), SchemaError> {
-        match field {
-            "record" => self.record = Some(SourceAtom::from_block(value)?.into_name()),
-            "table" => self.table = Some(TableName::new(SourceAtom::from_block(value)?.0)),
-            "key" => {
-                self.key = Some(FamilyKey::from_structural_block(value).map_err(SchemaError::from)?)
-            }
-            other => {
-                return Err(SchemaError::ExpectedSyntaxDeclaration {
-                    found: format!("family field {other}"),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn insert_atom(&mut self, field: &str, value: &str) -> Result<(), SchemaError> {
-        match field {
-            "record" => self.record = Some(Name::new(value)),
-            "table" => self.table = Some(TableName::new(value)),
-            "key" => {
-                self.key = Some(match value {
-                    "Domain" => FamilyKey::Domain,
-                    "Identified" => FamilyKey::Identified,
-                    other => {
-                        return Err(SchemaError::ExpectedSyntaxDeclaration {
-                            found: format!("family key {other}"),
-                        });
-                    }
-                })
-            }
-            other => {
-                return Err(SchemaError::ExpectedSyntaxDeclaration {
-                    found: format!("family field {other}"),
-                });
-            }
-        }
-        Ok(())
-    }
-
-    fn into_family_body(self) -> Result<SourceFamilyBody, SchemaError> {
-        Ok(SourceFamilyBody {
-            record: self.record.ok_or_else(|| Self::missing_field("record"))?,
-            table: self.table.ok_or_else(|| Self::missing_field("table"))?,
-            key: self.key.ok_or_else(|| Self::missing_field("key"))?,
-        })
-    }
-
-    fn missing_field(field_name: &'static str) -> SchemaError {
-        SchemaError::ExpectedSyntaxDeclaration {
-            found: format!("family missing {field_name} field"),
-        }
     }
 }
 

@@ -3,7 +3,7 @@
 [Watching.SubscriptionReceipt]
 {
   RuntimeEvent [(RecordChanged RecordChangedPayload belongs RecordStream)]
-  RecordStream (Stream { token.SubscriptionToken opened.SubscriptionReceipt event.RuntimeEvent close.SubscriptionToken })
+  RecordStream Stream.(SubscriptionToken SubscriptionReceipt RuntimeEvent SubscriptionToken)
   WatchRequest { Topics }
   Topics Vector.Topic
   Topic String
