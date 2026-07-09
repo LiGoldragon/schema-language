@@ -1766,7 +1766,7 @@ impl<'template> MacroExpansionField<'template> {
             });
         }
         let name = self.object.schema_name()?;
-        if Self::is_reserved_scalar_name(&name) {
+        if TypeReference::is_reserved_scalar_name(&name) {
             return Err(SchemaError::RetiredStructFieldSyntax {
                 found: name.to_nota(),
             });
@@ -1796,7 +1796,8 @@ impl<'template> MacroExpansionField<'template> {
                 found: format!("{field_name}.{type_name}"),
             });
         }
-        if name.field_name() == reference.field_name() && !Self::is_reserved_scalar_name(&reference)
+        if name.field_name() == reference.field_name()
+            && !TypeReference::is_reserved_scalar_name(&reference)
         {
             return Err(SchemaError::RedundantExplicitFieldRole {
                 found: format!("{field_name}.{type_name}"),
@@ -1874,13 +1875,6 @@ impl<'template> MacroExpansionField<'template> {
                         .next()
                         .is_some_and(|character| character.is_ascii_lowercase())
                 })
-    }
-
-    fn is_reserved_scalar_name(name: &Name) -> bool {
-        matches!(
-            name.as_str(),
-            "String" | "Integer" | "Boolean" | "Path" | "Bytes"
-        )
     }
 
     fn derived_name_for_reference(reference: &TypeReference) -> Name {

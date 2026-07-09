@@ -2629,6 +2629,21 @@ impl nota::StructuralMacroNode for TypeReference {
 }
 
 impl TypeReference {
+    /// The canonical roster of primitive scalar kinds. This is the single
+    /// source of the reserved-scalar vocabulary: `from_name`,
+    /// `is_reserved_scalar_name`, and every source-side derivation read each
+    /// kind's spelling through [`scalar_name`](Self::scalar_name) instead of
+    /// repeating the `String | Integer | …` list. A new scalar is therefore
+    /// declared in exactly one place — a variant plus its `scalar_name` arm —
+    /// and the roster's own guard test fails if the two ever disagree.
+    const SCALAR_KINDS: [Self; 5] = [
+        Self::String,
+        Self::Integer,
+        Self::Boolean,
+        Self::Path,
+        Self::Bytes,
+    ];
+
     /// Construct a reference from a schema name. Reserved scalar names
     /// become scalar leaves; every other name remains a declared-name
     /// leaf.
@@ -2637,21 +2652,21 @@ impl TypeReference {
     }
 
     pub fn from_name(name: Name) -> Self {
-        match name.as_str() {
-            "String" => Self::String,
-            "Integer" => Self::Integer,
-            "Boolean" => Self::Boolean,
-            "Path" => Self::Path,
-            "Bytes" => Self::Bytes,
-            _ => Self::Plain(name),
-        }
+        Self::scalar_kind_for(name.as_str()).unwrap_or(Self::Plain(name))
     }
 
     pub fn is_reserved_scalar_name(name: &Name) -> bool {
-        matches!(
-            name.as_str(),
-            "String" | "Integer" | "Boolean" | "Path" | "Bytes"
-        )
+        Self::scalar_kind_for(name.as_str()).is_some()
+    }
+
+    /// The scalar kind a name denotes, matched against the one scalar roster
+    /// through each kind's own [`scalar_name`](Self::scalar_name). Returns
+    /// `None` for every name outside the reserved scalar vocabulary.
+    fn scalar_kind_for(name: &str) -> Option<Self> {
+        Self::SCALAR_KINDS
+            .iter()
+            .find(|kind| kind.scalar_name() == Some(name))
+            .cloned()
     }
 
     pub fn scalar_name(&self) -> Option<&'static str> {
@@ -3012,6 +3027,63 @@ impl SchemaNodeDelimitedNotation {
             Delimiter::Brace => "}",
             Delimiter::PipeParenthesis => "|)",
             Delimiter::PipeBrace => "|}",
+        }
+    }
+}
+
+/// Drift guard for the primitive scalar vocabulary. The reserved-scalar set
+/// lives in exactly one place — [`TypeReference::SCALAR_KINDS`] paired with
+/// each kind's [`scalar_name`](TypeReference::scalar_name). Every consuming
+/// site (`from_name`, `is_reserved_scalar_name`, and the source-side reference
+/// and field derivations) reads that one authority. These tests fail if a
+/// scalar is added to the roster without a matching `scalar_name`, if the
+/// name/kind bijection stops round-tripping, or if the machine wire tag drifts
+/// away from the reserved source name it currently shares.
+#[cfg(test)]
+mod scalar_vocabulary_guard {
+    use super::*;
+
+    #[test]
+    fn every_scalar_kind_resolves_through_one_vocabulary() {
+        for kind in &TypeReference::SCALAR_KINDS {
+            let name = Name::new(
+                kind.scalar_name()
+                    .expect("a scalar kind exposes its reserved name"),
+            );
+            assert!(
+                TypeReference::is_reserved_scalar_name(&name),
+                "scalar name {name:?} must be reserved",
+            );
+            assert_eq!(
+                &TypeReference::from_name(name.clone()),
+                kind,
+                "scalar name {name:?} must resolve back to its own kind",
+            );
+        }
+    }
+
+    #[test]
+    fn declared_name_is_not_a_reserved_scalar() {
+        let declared = Name::new("Widget");
+        assert!(!TypeReference::is_reserved_scalar_name(&declared));
+        assert!(matches!(
+            TypeReference::from_name(declared),
+            TypeReference::Plain(_),
+        ));
+    }
+
+    #[test]
+    fn machine_wire_tag_matches_reserved_source_name() {
+        // The canonical machine codec and the source-grammar vocabulary are
+        // distinct concerns that currently share one spelling per scalar.
+        // This pins that coincidence so an intentional divergence surfaces as
+        // a conscious decision rather than a silent round-trip break.
+        for kind in &TypeReference::SCALAR_KINDS {
+            assert_eq!(
+                Some(kind.to_nota().as_str()),
+                kind.scalar_name(),
+                "machine wire tag must match the reserved source name",
+            );
         }
     }
 }

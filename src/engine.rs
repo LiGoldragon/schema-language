@@ -12,6 +12,7 @@ use crate::{
         Declaration, DeclarationHead, EnumDeclaration, EnumVariant, ImportDeclaration, Name,
         NewtypeDeclaration, RootApplication, TrueSchema, TypeDeclaration, TypeReference,
     },
+    source::MetadataHead,
 };
 
 #[derive(
@@ -998,7 +999,7 @@ impl<'schema> MetadataDefinitionProbe<'schema> {
             Block::Atom(atom) => atom
                 .text()
                 .strip_suffix('.')
-                .is_some_and(|head| matches!(head, "Stream" | "Family")),
+                .is_some_and(|head| MetadataHead::from_head_name(head).is_some()),
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 root_objects,
@@ -1006,7 +1007,7 @@ impl<'schema> MetadataDefinitionProbe<'schema> {
             } => root_objects
                 .first()
                 .and_then(Block::demote_to_string)
-                .is_some_and(|head| matches!(head, "Stream" | "Family")),
+                .is_some_and(|head| MetadataHead::from_head_name(head).is_some()),
             _ => false,
         }
     }

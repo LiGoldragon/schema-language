@@ -1760,6 +1760,61 @@ pub enum SourceDeclarationValue {
     Family(#[rkyv(omit_bounds)] SourceFamilyBody),
 }
 
+/// The closed vocabulary of schema-metadata heads — the dotted heads a
+/// namespace entry uses to declare metadata rather than a type. Every site
+/// that recognizes, rejects, or re-emits a metadata head reads this one enum
+/// through [`from_head_name`](MetadataHead::from_head_name) and
+/// [`canonical_name`](MetadataHead::canonical_name), so the `Stream`/`Family`
+/// spelling lives in exactly one place and dispatch happens on the kind, not
+/// on a re-matched string.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MetadataHead {
+    Stream,
+    Family,
+}
+
+impl MetadataHead {
+    const ALL: [MetadataHead; 2] = [Self::Stream, Self::Family];
+
+    /// The metadata head a dotted head name denotes, or `None` for any head
+    /// outside the metadata vocabulary.
+    pub(crate) fn from_head_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|head| head.canonical_name() == name)
+    }
+
+    fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Stream => "Stream",
+            Self::Family => "Family",
+        }
+    }
+
+    fn head_name(self) -> Name {
+        Name::new(self.canonical_name())
+    }
+
+    /// The positional application form this head expects, shown when a use
+    /// site reaches for the rejected named-brace form instead.
+    fn expected_positional_form(self) -> &'static str {
+        match self {
+            Self::Stream => "Stream.(Token Opened Event Close)",
+            Self::Family => "Family.(Record table Domain)",
+        }
+    }
+
+    fn named_brace_application_error(self) -> SchemaError {
+        SchemaError::ExpectedSyntaxDeclaration {
+            found: format!(
+                "named-brace {head} application is invalid; use positional dotted application {expected}; parameter names belong in the definition, not at the use site",
+                head = self.canonical_name(),
+                expected = self.expected_positional_form(),
+            ),
+        }
+    }
+}
+
 impl SourceDeclarationValue {
     pub fn from_schema_text(source: &str) -> Result<Self, SchemaError> {
         let document = Document::parse(source)?;
@@ -1846,14 +1901,14 @@ impl SourceDeclarationValue {
         let Some(head) = atom.text().strip_suffix('.') else {
             return Ok(None);
         };
-        match head {
-            "Stream" => SourceStreamBody::from_positional_payload(payload)
+        match MetadataHead::from_head_name(head) {
+            Some(MetadataHead::Stream) => SourceStreamBody::from_positional_payload(payload)
                 .map(Self::Stream)
                 .map(Some),
-            "Family" => SourceFamilyBody::from_positional_payload(payload)
+            Some(MetadataHead::Family) => SourceFamilyBody::from_positional_payload(payload)
                 .map(Self::Family)
                 .map(Some),
-            _ => Ok(None),
+            None => Ok(None),
         }
     }
 
@@ -1863,9 +1918,9 @@ impl SourceDeclarationValue {
         let Some(head) = objects.first().and_then(Block::demote_to_string) else {
             return Ok(());
         };
-        match head {
-            "Stream" | "Family" if objects.get(1).is_some_and(|block| block.is_brace()) => {
-                Err(Self::named_brace_application_error(head))
+        match MetadataHead::from_head_name(head) {
+            Some(metadata_head) if objects.get(1).is_some_and(|block| block.is_brace()) => {
+                Err(metadata_head.named_brace_application_error())
             }
             _ => Ok(()),
         }
@@ -1873,32 +1928,21 @@ impl SourceDeclarationValue {
 
     fn from_reference(reference: SourceReference) -> Result<Self, SchemaError> {
         match reference {
-            SourceReference::Application { head, arguments } => match head.as_str() {
-                "Stream" => {
-                    SourceStreamBody::from_positional_arguments(arguments).map(Self::Stream)
+            SourceReference::Application { head, arguments } => {
+                match MetadataHead::from_head_name(head.as_str()) {
+                    Some(MetadataHead::Stream) => {
+                        SourceStreamBody::from_positional_arguments(arguments).map(Self::Stream)
+                    }
+                    Some(MetadataHead::Family) => {
+                        SourceFamilyBody::from_positional_arguments(arguments).map(Self::Family)
+                    }
+                    None => Ok(Self::Reference(SourceReference::Application {
+                        head,
+                        arguments,
+                    })),
                 }
-                "Family" => {
-                    SourceFamilyBody::from_positional_arguments(arguments).map(Self::Family)
-                }
-                _ => Ok(Self::Reference(SourceReference::Application {
-                    head,
-                    arguments,
-                })),
-            },
+            }
             reference => Ok(Self::Reference(reference)),
-        }
-    }
-
-    fn named_brace_application_error(head: &str) -> SchemaError {
-        let expected = match head {
-            "Stream" => "Stream.(Token Opened Event Close)",
-            "Family" => "Family.(Record table Domain)",
-            _ => "Head.(positional payload)",
-        };
-        SchemaError::ExpectedSyntaxDeclaration {
-            found: format!(
-                "named-brace {head} application is invalid; use positional dotted application {expected}; parameter names belong in the definition, not at the use site"
-            ),
         }
     }
 
@@ -2018,9 +2062,7 @@ impl SourceStreamBody {
 
     fn from_positional_payload(block: &Block) -> Result<Self, SchemaError> {
         if block.is_brace() {
-            return Err(SourceDeclarationValue::named_brace_application_error(
-                "Stream",
-            ));
+            return Err(MetadataHead::Stream.named_brace_application_error());
         }
         let body = NotaBody::from_delimited(
             block,
@@ -2054,7 +2096,7 @@ impl SourceStreamBody {
 
     fn to_schema_text(&self) -> String {
         SourceGenericDefinition::application_text_for_head(
-            &Name::new("Stream"),
+            &MetadataHead::Stream.head_name(),
             [
                 self.token.to_schema_text(),
                 self.opened.to_schema_text(),
@@ -2105,9 +2147,7 @@ impl SourceFamilyBody {
 
     fn from_positional_payload(block: &Block) -> Result<Self, SchemaError> {
         if block.is_brace() {
-            return Err(SourceDeclarationValue::named_brace_application_error(
-                "Family",
-            ));
+            return Err(MetadataHead::Family.named_brace_application_error());
         }
         let body = NotaBody::from_delimited(
             block,
@@ -2191,7 +2231,7 @@ impl SourceFamilyBody {
 
     fn to_schema_text(&self) -> String {
         SourceGenericDefinition::application_text_for_head(
-            &Name::new("Family"),
+            &MetadataHead::Family.head_name(),
             [
                 self.record.to_nota(),
                 self.table.to_nota(),
@@ -2577,7 +2617,8 @@ impl SourceField {
             return Ok(false);
         }
         let name = SourceAtom::from_block(&objects[0])?.into_name();
-        Ok(SourceIdentifierCase::new(&name).is_type() && !Self::is_reserved_scalar_name(&name))
+        Ok(SourceIdentifierCase::new(&name).is_type()
+            && !TypeReference::is_reserved_scalar_name(&name))
     }
 
     fn from_explicit_field_reference(
@@ -2619,13 +2660,6 @@ impl SourceField {
             value: SourceFieldValue::Reference(reference),
             identity: SourceFieldIdentity::Explicit,
         })
-    }
-
-    fn is_reserved_scalar_name(name: &Name) -> bool {
-        matches!(
-            name.as_str(),
-            "String" | "Integer" | "Boolean" | "Path" | "Bytes"
-        )
     }
 
     fn to_lowered_field(
@@ -3681,55 +3715,6 @@ impl SourceMultiTypeReferenceProjection {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct SourcePrimitiveDefinitions {
-    definitions: &'static [SourcePrimitiveDefinition],
-}
-
-impl Default for SourcePrimitiveDefinitions {
-    fn default() -> Self {
-        Self {
-            definitions: Self::builtin_definitions(),
-        }
-    }
-}
-
-impl SourcePrimitiveDefinitions {
-    fn builtin_definitions() -> &'static [SourcePrimitiveDefinition] {
-        static DEFINITIONS: [SourcePrimitiveDefinition; 5] = [
-            SourcePrimitiveDefinition::new("String", "string"),
-            SourcePrimitiveDefinition::new("Integer", "integer"),
-            SourcePrimitiveDefinition::new("Boolean", "boolean"),
-            SourcePrimitiveDefinition::new("Path", "path"),
-            SourcePrimitiveDefinition::new("Bytes", "bytes"),
-        ];
-        &DEFINITIONS
-    }
-
-    fn definition(&self, name: &Name) -> Option<SourcePrimitiveDefinition> {
-        self.definitions
-            .iter()
-            .copied()
-            .find(|definition| definition.name == name.as_str())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SourcePrimitiveDefinition {
-    name: &'static str,
-    field_name: &'static str,
-}
-
-impl SourcePrimitiveDefinition {
-    const fn new(name: &'static str, field_name: &'static str) -> Self {
-        Self { name, field_name }
-    }
-
-    fn field_name(self) -> Name {
-        Name::new(self.field_name)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
 struct SourceGenericDefinitions {
     definitions: &'static [SourceGenericDefinition],
 }
@@ -4218,11 +4203,15 @@ impl SourceReference {
     pub fn from_type_reference(reference: &TypeReference) -> Self {
         let definitions = SourceGenericDefinitions::default();
         match reference {
-            TypeReference::String => Self::Plain(Name::new("String")),
-            TypeReference::Integer => Self::Plain(Name::new("Integer")),
-            TypeReference::Boolean => Self::Plain(Name::new("Boolean")),
-            TypeReference::Path => Self::Plain(Name::new("Path")),
-            TypeReference::Bytes => Self::Plain(Name::new("Bytes")),
+            TypeReference::String
+            | TypeReference::Integer
+            | TypeReference::Boolean
+            | TypeReference::Path
+            | TypeReference::Bytes => Self::Plain(Name::new(
+                reference
+                    .scalar_name()
+                    .expect("a scalar reference exposes its canonical name"),
+            )),
             TypeReference::FixedBytes(width) => definitions
                 .value_definition(SourceValueReferenceProjection::FixedBytes)
                 .expect("fixed bytes definition is installed")
@@ -4332,12 +4321,7 @@ impl SourceReference {
 
     pub(crate) fn derived_field_name(&self) -> Name {
         match self {
-            Self::Plain(name) => SourcePrimitiveDefinitions::default()
-                .definition(name)
-                .map_or_else(
-                    || Name::new(name.field_name()),
-                    SourcePrimitiveDefinition::field_name,
-                ),
+            Self::Plain(name) => Name::new(name.field_name()),
             Self::ValueApplication(application) => application.derived_field_name(),
             Self::SingleTypeApplication(application) => application.derived_field_name(),
             Self::MultiTypeApplication(application) => application.derived_field_name(),
@@ -4404,6 +4388,39 @@ mod source_reference_tests {
             reference.to_type_reference(),
             TypeReference::Optional(Box::new(TypeReference::new("Event"))),
         );
+    }
+}
+
+/// Drift guard for the schema-metadata head vocabulary. The `Stream`/`Family`
+/// set lives in exactly one place — [`MetadataHead`] — and every recognizing,
+/// rejecting, and re-emitting site reads it through
+/// [`MetadataHead::from_head_name`]. These tests fail if a head is added to
+/// [`MetadataHead::ALL`] without a matching `canonical_name`, or if the
+/// name/kind mapping stops round-tripping.
+#[cfg(test)]
+mod metadata_head_vocabulary_guard {
+    use super::*;
+
+    #[test]
+    fn every_metadata_head_resolves_through_one_vocabulary() {
+        for head in MetadataHead::ALL {
+            assert_eq!(
+                MetadataHead::from_head_name(head.canonical_name()),
+                Some(head),
+                "a metadata head name must resolve back to its own kind",
+            );
+            assert!(
+                head.expected_positional_form()
+                    .starts_with(head.canonical_name()),
+                "each metadata head's positional-form example leads with its own name",
+            );
+        }
+    }
+
+    #[test]
+    fn non_metadata_head_is_unrecognized() {
+        assert_eq!(MetadataHead::from_head_name("Widget"), None);
+        assert_eq!(MetadataHead::from_head_name("Stream."), None);
     }
 }
 
@@ -4572,7 +4589,7 @@ impl SourceLoweredNamespace {
                     // is the matching declaration-position gate, so the single
                     // lowering path rejects `{ String Integer }` the same way
                     // the retired second engine did.
-                    if SourceField::is_reserved_scalar_name(entry.name()) {
+                    if TypeReference::is_reserved_scalar_name(entry.name()) {
                         return Err(SchemaError::ReservedScalarTypeName {
                             name: entry.name().as_str().to_owned(),
                         });
