@@ -84,9 +84,11 @@ fn reheaded_source_declarations_round_trip_help_forms() {
     );
     let domains = SourceDeclaration::new(
         Name::new("Domains"),
-        Some(SourceDeclarationValue::Reference(SourceReference::Vector(
-            Box::new(SourceReference::Plain(Name::new("Domain"))),
-        ))),
+        Some(SourceDeclarationValue::Reference(
+            SourceReference::from_type_reference(&TypeReference::Vector(Box::new(
+                TypeReference::new("Domain"),
+            ))),
+        )),
     );
     let version = SourceDeclaration::new(Name::new("Version"), None);
     let encoded = SourceDeclarations::new(vec![record, kind, domains, version]).to_schema_text();
