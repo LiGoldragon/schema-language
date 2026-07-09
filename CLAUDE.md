@@ -1,1 +1,1 @@
-You MUST read AGENTS.md.
+You MUST read ARCHITECTURE.md.
