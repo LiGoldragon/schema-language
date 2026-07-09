@@ -9,10 +9,10 @@ use nota::{
 };
 
 use crate::{
-    ApplicationHead, EnumDeclaration, EnumVariant, FieldDeclaration, MacroContext, MacroObject,
-    MacroOutput, MacroPair, MacroPosition, MacroRegistry, Name, NewtypeDeclaration, ReferenceHead,
-    SchemaError, SchemaMacroHandler, StreamRelation, StructDeclaration, TypeDeclaration,
-    TypeReference, macros::SchemaBlockExt,
+    EnumDeclaration, EnumVariant, FieldDeclaration, MacroContext, MacroObject, MacroOutput,
+    MacroPair, MacroPosition, MacroRegistry, Name, NewtypeDeclaration, SchemaError,
+    SchemaMacroHandler, StreamRelation, StructDeclaration, TypeDeclaration, TypeReference,
+    macros::SchemaBlockExt,
 };
 
 #[derive(
@@ -595,8 +595,8 @@ pub enum MacroTemplate {
     Fields(#[rkyv(omit_bounds)] Vec<MacroTemplateObject>),
     #[shape(head = "Variants", body)]
     Variants(#[rkyv(omit_bounds)] Vec<MacroTemplateObject>),
-    #[shape(head = "Reference", arity = 2)]
-    Reference(#[rkyv(omit_bounds)] MacroTemplateObject),
+    #[shape(head = "Reference", body)]
+    Reference(#[rkyv(omit_bounds)] Vec<MacroTemplateObject>),
 }
 
 impl MacroTemplate {
@@ -641,15 +641,20 @@ impl MacroTemplate {
                 .lower(registry, context)
                 .map(MacroOutput::Variants)
             }
-            Self::Reference(object) => {
-                let expanded = object.expand_single(bindings, "Reference template")?;
+            Self::Reference(objects) => {
+                let mut expanded = Vec::new();
+                for object in objects {
+                    expanded.extend(object.expand_objects(bindings)?);
+                }
                 context.remember_expanded_template(
                     macro_name,
-                    ExpandedNotation::headed("Reference", std::slice::from_ref(&expanded)).text(),
+                    ExpandedNotation::headed("Reference", &expanded).text(),
                 );
-                MacroExpansionReference::new(ObjectView::Expanded(&expanded))
-                    .lower(registry, context)
-                    .map(MacroOutput::Reference)
+                MacroExpansionReference::from_objects(
+                    expanded.iter().map(ObjectView::Expanded).collect(),
+                )
+                .lower(registry, context)
+                .map(MacroOutput::Reference)
             }
         }
     }
@@ -1321,11 +1326,6 @@ impl<'object> ObjectView<'object> {
         self.delimited_children(Delimiter::Parenthesis).is_some()
     }
 
-    fn parenthesized_children(&self, expected: &'static str) -> Result<Vec<Self>, SchemaError> {
-        self.delimited_children(Delimiter::Parenthesis)
-            .ok_or(SchemaError::ExpectedDelimiter { expected })
-    }
-
     fn holds_root_objects(&self) -> usize {
         match self {
             Self::Block(block) => block.holds_root_objects(),
@@ -1378,13 +1378,20 @@ impl<'object> ObjectView<'object> {
         }
     }
 
+    fn compact_notation(&self) -> String {
+        match self {
+            Self::Block(block) => NotationBlock::new(block).compact_notation(),
+            Self::Expanded(object) => object.compact_notation(),
+        }
+    }
+
     fn type_reference(
         &self,
         registry: &MacroRegistry,
         context: &mut MacroContext,
     ) -> Result<TypeReference, SchemaError> {
         match self {
-            Self::Block(block) => TypeReference::from_block_with_registry(block, registry, context),
+            Self::Block(block) => TypeReference::from_block(block),
             Self::Expanded(object) => object.type_reference(registry, context),
         }
     }
@@ -1487,14 +1494,12 @@ impl ExpandedObject {
         context: &mut MacroContext,
     ) -> Result<TypeReference, SchemaError> {
         match self {
-            Self::Captured(block) => {
-                TypeReference::from_block_with_registry(block, registry, context)
-            }
-            Self::Atom(_) => Ok(TypeReference::from_name(self.schema_name()?)),
+            Self::Captured(block) => TypeReference::from_block(block),
+            Self::Atom(_) => ExpandedReference::new(std::slice::from_ref(self)).type_reference(),
             Self::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 children,
-            } => ExpandedReference::new(children).type_reference(registry, context),
+            } => ExpandedReference::new(children).type_reference(),
             Self::Delimited {
                 delimiter: Delimiter::SquareBracket,
                 children,
@@ -1531,94 +1536,16 @@ impl<'object> ExpandedReference<'object> {
         Self { children }
     }
 
-    /// Lower a parenthesised reference over the post-expansion
-    /// [`ExpandedObject`] tree. This mirrors the `Block`-path dispatch order
-    /// in `TypeReference::resolve_parenthesis_reference` (which schema-language-cc now
-    /// generates from the canonical reference grammar) over a different input
-    /// type — `ExpandedObject` is schema-language's own template-expansion
-    /// representation, not a nota `Block`, so it cannot share the
-    /// `StructuralMacroNode` decode directly; the canonical-head fast path
-    /// and the application fallback are kept in lockstep by hand. The dropped
-    /// aliases (`Vec`, `Option`, `Scope`, `KeyValue`) no longer parse.
-    fn type_reference(
-        &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
-        if let Some(head) = self
-            .children
-            .first()
-            .and_then(ExpandedObject::demote_to_string)
-        {
-            match (head, self.children.len()) {
-                ("Vector", 2) => {
-                    return Ok(TypeReference::Vector(Box::new(
-                        self.children[1].type_reference(registry, context)?,
-                    )));
-                }
-                ("Optional", 2) => {
-                    return Ok(TypeReference::Optional(Box::new(
-                        self.children[1].type_reference(registry, context)?,
-                    )));
-                }
-                ("ScopeOf", 2) => {
-                    return Ok(TypeReference::ScopeOf(Box::new(
-                        self.children[1].type_reference(registry, context)?,
-                    )));
-                }
-                ("Map", 3) => {
-                    return Ok(TypeReference::Map(
-                        Box::new(self.children[1].type_reference(registry, context)?),
-                        Box::new(self.children[2].type_reference(registry, context)?),
-                    ));
-                }
-                ("Bytes", 2) => {
-                    if let Some(width) = self.children[1]
-                        .demote_to_string()
-                        .and_then(|text| text.parse::<u64>().ok())
-                    {
-                        return Ok(TypeReference::FixedBytes(width));
-                    }
-                }
-                (head, found) if ReferenceHead::classify(head).is_some() => {
-                    return Err(SchemaError::UnknownTypeReferenceForm {
-                        head: head.to_owned(),
-                        argument_count: found.saturating_sub(1),
-                    });
-                }
-                _ => {}
-            }
-        }
-        self.application(registry, context)
-    }
-
-    /// The application fallback for the expanded-object path: a PascalCase
-    /// head followed by zero or more type-reference arguments lowers to
-    /// `TypeReference::Application`. Any head that is not a PascalCase symbol
-    /// is not an application and is reported as an unknown reference form.
-    fn application(
-        &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
-        let Some(head) = self.children.first() else {
-            return Err(SchemaError::EmptyTypeReference);
-        };
-        if !head.qualifies_as_pascal_case_symbol() {
-            return Err(SchemaError::UnknownTypeReferenceForm {
-                head: head.demote_to_string().unwrap_or("<missing>").to_owned(),
-                argument_count: self.children.len().saturating_sub(1),
-            });
-        }
-        let head = head.schema_name()?;
-        let arguments = self.children[1..]
-            .iter()
-            .map(|argument| argument.type_reference(registry, context))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(TypeReference::Application {
-            head: ApplicationHead::Local(head),
-            arguments,
-        })
+    /// Lower a grouped post-expansion source-reference sequence through the
+    /// same dotted reader used by authored schema source. The grouping exists
+    /// only so a macro template can keep a trailing-dot head and its capture
+    /// payload together; `(Vector $Type)` remains invalid because the sequence
+    /// is parsed as ordinary dotted source, not as a parenthesized resolver.
+    fn type_reference(&self) -> Result<TypeReference, SchemaError> {
+        MacroExpansionReference::from_objects(
+            self.children.iter().map(ObjectView::Expanded).collect(),
+        )
+        .lower_source()
     }
 
     fn inline_struct(
@@ -1724,12 +1651,6 @@ impl<'template> MacroExpansionStructBody<'template> {
 }
 
 impl<'template> MacroExpansionFields<'template> {
-    pub(crate) fn new(objects: &'template [Block]) -> Self {
-        Self {
-            objects: objects.iter().map(ObjectView::Block).collect(),
-        }
-    }
-
     fn from_objects(objects: Vec<ObjectView<'template>>) -> Self {
         Self { objects }
     }
@@ -1792,10 +1713,10 @@ impl<'template> MacroExpansionFields<'template> {
 /// Strict struct bodies are positional lists. A bare PascalCase type
 /// derives the field name from the referenced type. `field.Type` is the
 /// explicit differentiator when a field role should not be derived from
-/// the referenced type. Native NOTA type-reference objects can also sit
-/// directly in a field position: `(Vector Topic)`, `(Map Topic
-/// RecordIdentifier)`, and `(Optional Topic)` lower to vector, map, and
-/// optional references with names derived from the reference shape.
+/// the referenced type. Composite references use the same dotted source reader
+/// as authored schema: `Vector.Topic`, `Map.(Topic RecordIdentifier)`, and
+/// `Optional.Topic` lower to vector, map, and optional references with names
+/// derived from the reference shape.
 #[derive(Clone, Copy, Debug)]
 struct MacroExpansionField<'template> {
     object: ObjectView<'template>,
@@ -1930,11 +1851,8 @@ impl<'template> MacroExpansionField<'template> {
         {
             return Ok(None);
         }
-        let name = name_object.schema_name()?;
-        if ReferenceHead::classify(name.as_str()).is_some() {
-            return Ok(None);
-        }
         let _ = (registry, context, reference_object);
+        let _name = name_object.schema_name()?;
         Err(SchemaError::RetiredStructFieldSyntax {
             found: self
                 .object
@@ -2134,53 +2052,45 @@ impl<'template> StreamRelationObject<'template> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct MacroExpansionReference<'template> {
-    object: ObjectView<'template>,
+    objects: Vec<ObjectView<'template>>,
 }
 
 impl<'template> MacroExpansionReference<'template> {
-    fn new(object: ObjectView<'template>) -> Self {
-        Self { object }
+    fn from_objects(objects: Vec<ObjectView<'template>>) -> Self {
+        Self { objects }
     }
 
     fn lower(
         &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
+        _registry: &MacroRegistry,
+        _context: &mut MacroContext,
     ) -> Result<TypeReference, SchemaError> {
-        Self::lower_object(self.object, registry, context)
+        self.lower_source()
     }
 
-    fn lower_object(
-        object: ObjectView<'template>,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
-        if !object.is_parenthesis() {
-            return object.type_reference(registry, context);
+    fn lower_source(&self) -> Result<TypeReference, SchemaError> {
+        let document = Document::parse(self.source_text())?;
+        let mut cursor = 0;
+        let reference =
+            crate::SourceReference::from_blocks_at(document.root_objects(), &mut cursor)?;
+        if cursor == document.root_objects().len() {
+            Ok(reference.to_type_reference())
+        } else {
+            Err(SchemaError::ExpectedRootObjectCount {
+                expected: "one dotted type-reference template",
+                found: document.root_objects().len(),
+            })
         }
-        let children = object.parenthesized_children("macro expansion reference")?;
-        let head = children
-            .first()
-            .ok_or(SchemaError::EmptyTypeReference)?
-            .schema_name()?;
-        match head.as_str() {
-            "Vector" if children.len() == 2 => Ok(TypeReference::Vector(Box::new(
-                Self::lower_object(children[1], registry, context)?,
-            ))),
-            "Optional" if children.len() == 2 => Ok(TypeReference::Optional(Box::new(
-                Self::lower_object(children[1], registry, context)?,
-            ))),
-            "ScopeOf" if children.len() == 2 => Ok(TypeReference::ScopeOf(Box::new(
-                Self::lower_object(children[1], registry, context)?,
-            ))),
-            "Map" if children.len() == 3 => Ok(TypeReference::Map(
-                Box::new(Self::lower_object(children[1], registry, context)?),
-                Box::new(Self::lower_object(children[2], registry, context)?),
-            )),
-            _ => object.type_reference(registry, context),
-        }
+    }
+
+    fn source_text(&self) -> String {
+        self.objects
+            .iter()
+            .map(ObjectView::compact_notation)
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 

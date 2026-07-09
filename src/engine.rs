@@ -648,8 +648,8 @@ impl<'schema> KeyValueDeclaration<'schema> {
         &self,
         name: Name,
         definition: &'schema Block,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
+        _registry: &MacroRegistry,
+        _context: &mut MacroContext,
     ) -> Result<TypeDeclaration, SchemaError> {
         // A `{| … |}` impl block is segmented off as a trailing block by the
         // namespace entry walk, so it never arrives as a newtype definition.
@@ -666,7 +666,7 @@ impl<'schema> KeyValueDeclaration<'schema> {
                 expected: "namespace value reference, not pipe declaration block",
             });
         }
-        let reference = TypeReference::from_block_with_registry(definition, registry, context)?;
+        let reference = TypeReference::from_block(definition)?;
         Ok(TypeDeclaration::Newtype(NewtypeDeclaration::new(
             name, reference,
         )))
@@ -1043,13 +1043,12 @@ impl SchemaMacroHandler for RootEnumMacro {
     }
 }
 
-/// The legacy macro-path application root at an Input/Output position. It
-/// lowers through the *same* `TypeReference::from_block_with_registry` decode
-/// a macro-expanded field-position application takes, so the head and
-/// arguments resolve identically; the only root-specific addition is the
-/// position name (`Input` / `Output`) the root is identified by, since an
-/// application carries no declaration name of its own. A root position that
-/// does not decode to an application is rejected as a non-root form.
+/// A macro-path application root at an Input/Output position. It lowers
+/// through the same dotted `TypeReference::from_block` reader a field-position
+/// reference takes; the only root-specific addition is the position name
+/// (`Input` / `Output`) the root is identified by, since an application carries
+/// no declaration name of its own. A root position that does not decode to an
+/// application is rejected as a non-root form.
 #[derive(Clone, Copy, Debug)]
 struct RootApplicationBlock<'schema> {
     block: &'schema Block,
@@ -1066,10 +1065,10 @@ impl<'schema> RootApplicationBlock<'schema> {
 
     fn lower(
         &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
+        _registry: &MacroRegistry,
+        _context: &mut MacroContext,
     ) -> Result<RootApplication, SchemaError> {
-        let reference = TypeReference::from_block_with_registry(self.block, registry, context)?;
+        let reference = TypeReference::from_block(self.block)?;
         let TypeReference::Application { head, arguments } = reference else {
             return Err(SchemaError::ExpectedRootApplication {
                 position: self.position_name,

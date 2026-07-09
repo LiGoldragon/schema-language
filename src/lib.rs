@@ -42,8 +42,8 @@ pub use schema::{
     ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration,
     FamilyKey, FieldDeclaration, ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact,
     ImplReference, ImportDeclaration, MethodParameter, MethodSignature, Name, NewtypeDeclaration,
-    ReferenceHead, ReferencedImpl, RelationDeclaration, RelationValue, Root, RootApplication,
-    RustSurface, SchemaDeclaredType, SchemaNode, SchemaNodeData, SchemaNodePair, SchemaNodeValue,
+    ReferencedImpl, RelationDeclaration, RelationValue, Root, RootApplication, RustSurface,
+    SchemaDeclaredType, SchemaNode, SchemaNodeData, SchemaNodePair, SchemaNodeValue,
     StreamDeclaration, StreamRelation, StructDeclaration, StructFieldMap, SymbolPath,
     SymbolPathPosition, TableName, TrueSchema, TypeDeclaration, TypeReference, Visibility,
 };

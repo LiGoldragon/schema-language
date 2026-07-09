@@ -204,33 +204,20 @@ The current code carries the temporary string-bearing model. The target design
 above requires the following removals and unifications. Each is stated as
 current fact plus the required change.
 
-### Two reference pipelines to unify
+### Reference parsing is unified on the dotted source reader
 
-Two reference-resolution pipelines exist:
+The legacy parenthesized, string-name-keyed resolver has been removed. There is
+no generated `reference_resolver_generated.rs`, no `schemas/reference-grammar.nota`
+seed, and no `schema-language-cc` build-time generator in this repository. The
+single source-facing reference entry is the dotted reader in `src/source.rs`:
+`SchemaSource::from_schema_text` / `from_document` and `SourceReference`.
 
-- A legacy parenthesized, string-name-keyed resolver. Its entry is
-  `TypeReference::from_block` (`src/schema.rs`), which delegates to
-  `from_block_with_registry` (`src/schema.rs`) and, on a parenthesis block,
-  dispatches through the generated `reference_resolver_generated.rs` seeded by
-  `schemas/reference-grammar.nota`. It classifies heads with
-  `ReferenceHead::classify` (`src/schema.rs`) and accepts `(Vector T)`,
-  `(Optional T)`, `(ScopeOf T)`, `(Map K V)`, and `(Bytes N)`.
-- A newer dotted, variant-dispatched source reader in `src/source.rs`. Its
-  entry is `SchemaSource::from_schema_text` / `from_document`; its reference
-  type is `SourceReference`, read by `SourceReferenceReader` over the dotted
-  grammar and resolved by variant (not by string) through
-  `SourceVariantResolver` on the `SourceGenericBuiltin` variant.
-
-The target is to unify onto the dotted reader, delete the parenthesized
-name-keyed resolver, retire the name-keyed grammar seed
-(`schemas/reference-grammar.nota` and its `schema-language-cc` generator), and
-repoint the parenthesized-pipeline callers.
-
-Note on the design's earlier phrasing: `from_block_with_registry` belongs to the
-legacy parenthesized pipeline in `src/schema.rs`, not to the dotted reader in
-`src/source.rs`. The dotted reader's entry is `SourceReference` /
-`SchemaSource::from_document`. The unification intent is unchanged; the callers
-to repoint are the parenthesized-pipeline consumers.
+`TypeReference::from_block` delegates to `SourceReference::from_block` and then
+projects to the temporary semantic `TypeReference`. Macro template reference
+expansion also re-parses its expanded object stream through the same dotted
+reader. Parenthesized builtin applications such as `(Vector T)`, `(Optional T)`,
+`(ScopeOf T)`, `(Map K V)`, and `(Bytes N)` are rejected rather than routed
+through a compatibility resolver.
 
 ### Per-name generics collapse to per-kind
 
@@ -300,26 +287,21 @@ via `SourceImports::from_block`; the namespace section is read via
 ## Checked-in schema files
 
 - `schemas/root.schema` is the self-describing schema of the schema root type.
-  It still teaches legacy forms — its `TypeReference` declaration mixes dotted
-  (`Vector.TypeReference`, `Optional.TypeReference`) with parenthesized
-  (`(Map TypeReferencePair)`, `(Plain Name)`). It is not unused:
-  `tests/lowering.rs`, `tests/operator_271_closed_claims.rs`, and the
-  `flake.nix` lint depend on it. It must be rewritten to the strict dotted,
-  per-kind model with its dependents updated, not deleted.
+  It now uses the dotted source projection for composite references and remains
+  active: `tests/lowering.rs`, `tests/operator_271_closed_claims.rs`, and the
+  `flake.nix` lint depend on it. It still mirrors the temporary semantic
+  `TypeReference` variants until the per-name semantic variants are collapsed
+  to the per-kind model.
 - `schemas/core.schema` is the builtin-macro-library schema. Its namespace
   declares a type named `CoreSchema` (the macro library), which is unrelated to
   the target stringless `CoreSchema` substrate. This name collision is a
   hazard; the builtin-macro-library `CoreSchema` should be renamed so the
   substrate name is free.
-- `schemas/reference-grammar.nota` is the seed for the legacy parenthesized
-  resolver. It is slated for retirement with that resolver.
 
 ## Boundaries
 
 - `schema-language` owns authored `.schema` parsing, the typed source model,
-  lowering into the semantic schema value, schema identity and evolution, and
-  (until retired) the build-time resolver generated from the checked-in
-  reference grammar.
+  lowering into the semantic schema value, and schema identity and evolution.
 - `schema-rust` owns Rust source emission from typed schema data.
 - The old `schema` repository is the extraction source for this wave and
   remains intact until it is intentionally repurposed as the live runtime
@@ -327,21 +309,12 @@ via `SourceImports::from_block`; the namespace section is read via
 - This repository is not a runtime daemon, storage owner, or public authority
   surface.
 
-## Build-time resolver generation (legacy, slated for removal)
-
-The workspace member `schema-language-cc` is a build-time generator. It decodes
-and validates `schemas/reference-grammar.nota`, emits the parenthesis-reference
-resolver source, and the root build script freshness-checks the committed
-generated file. It never links into runtime components. This whole path is the
-legacy name-keyed pipeline and is slated for removal once the dotted reader is
-the single reference path.
-
 ## Sequencing (recommendation)
 
 - The dotted-everywhere source sweep (text projection) and the
   `CoreSchema`/`TrueSchema` data-model build are orthogonal and can proceed in
   parallel.
-- The per-name-to-per-kind generic collapse and the two-pipeline unification are
-  the core simplification work; they touch generic definition, reference
-  resolution, and lowering together.
+- The per-name-to-per-kind generic collapse remains core simplification work;
+  it touches generic definition, reference resolution, and lowering together.
+  The legacy reference-pipeline split is closed.
 - Identifier reuse on reload is parked (OPEN) and is sequenced separately.

@@ -2616,9 +2616,6 @@ impl SourceField {
             return Ok(false);
         }
         let name = SourceAtom::from_block(&objects[0])?.into_name();
-        if crate::ReferenceHead::classify(name.as_str()).is_some() {
-            return Ok(false);
-        }
         Ok(SourceIdentifierCase::new(&name).is_type() && !Self::is_reserved_scalar_name(&name))
     }
 

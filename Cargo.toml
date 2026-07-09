@@ -1,5 +1,4 @@
 [workspace]
-members  = ["schema-language-cc"]
 resolver = "2"
 
 [package]
@@ -11,7 +10,6 @@ license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/LiGoldragon/schema-language"
 description  = "Build-time .schema parser and lowering bridge for TrueSchema staging."
 publish      = false
-build        = "build.rs"
 
 [lib]
 name = "schema_language"
@@ -22,14 +20,6 @@ blake3 = "1"
 nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 thiserror = "2"
-
-# Build-time only: schema-language-cc generates schema-language's parenthesis-reference
-# dispatch from the canonical ReferenceGrammar; it never links into the
-# library. A workspace `path` dep, not a `git` dep — schema-language-cc is co-located
-# as a workspace member, not a sibling repo.
-[build-dependencies]
-schema-language-cc = { path = "schema-language-cc" }
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
 
 [lints.rust]
 unsafe_code = "forbid"

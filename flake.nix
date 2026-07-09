@@ -21,9 +21,6 @@
             pkgs.lib.hasSuffix ".schema" path
             || pkgs.lib.hasSuffix ".asschema" path
             || pkgs.lib.hasSuffix ".macro-library" path
-            # The canonical reference grammar (schemas/reference-grammar.nota)
-            # is build-time data: build.rs reads it to generate the resolver.
-            || pkgs.lib.hasSuffix ".nota" path
           );
         src = rust.cleanSource {
           root = ./.;
@@ -72,6 +69,10 @@
             fi
             if grep -R -n -E '\[\[[A-Z]|\((records|kinds|services|Listed) \[[A-Z]|\((byTopic|Projected|nodes) \{[A-Z]' ${src}/schemas ${src}/tests/fixtures; then
               echo "schema examples must use typed NOTA composite references: Vector.T, Map.(K V), Optional.T" >&2
+              exit 1
+            fi
+            if grep -R -n -E '\((Vector|Optional|ScopeOf|Map|Bytes) [A-Za-z0-9_$]' ${src}/schemas ${src}/tests/fixtures; then
+              echo "schema examples must not reintroduce parenthesized generic applications" >&2
               exit 1
             fi
             if grep -R -n -E '\((Vec|Option|KeyValue|Map) \[' ${src}/schemas ${src}/tests; then

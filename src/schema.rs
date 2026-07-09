@@ -6,8 +6,7 @@ use nota::{
 };
 
 use crate::{
-    MacroContext, MacroObject, MacroOutput, MacroPosition, MacroRegistry, SchemaError,
-    declarative::{MacroExpansionFields, MacroExpansionVariants},
+    SchemaError,
     macros::{BlockDebug, SchemaBlockExt},
 };
 
@@ -2355,36 +2354,14 @@ impl ApplicationHead {
     }
 }
 
-/// The legacy macro-expansion generic-application node `(Foo A B …)`, captured
-/// directly by nota's `#[shape(pascal_head, body)]` derive: a PascalCase head
-/// atom followed by a variable-arity tail of type-reference arguments. Authored
-/// schema source enters through the dotted [`crate::SourceReference`] reader;
-/// this node remains for macro-expanded/internal parenthesized data. The head
-/// decodes as a `Name` (always `Local` at decode time) and the tail decodes as
-/// a `Vec<TypeReference>`, then lowers into [`TypeReference::Application`].
-#[derive(Clone, Debug, Eq, PartialEq, nota::StructuralMacroNode)]
-enum ApplicationNode {
-    #[shape(pascal_head, body)]
-    Application(Name, Vec<TypeReference>),
-}
-
-/// The legacy macro-expansion fixed-width byte leaf `(Bytes N)`, captured
-/// through nota's headed-atom structural shape.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, nota::StructuralMacroNode)]
-enum FixedBytesNode {
-    #[shape(head = "Bytes", atom)]
-    FixedBytes(u64),
-}
-
 /// A declaration's type-name position: either a bare `Name` (the ordinary
 /// declaration head) or a pipe-parenthesized `(| Name Param Param … |)` head
 /// that introduces type-parameter binders. Authored use-site generic
 /// application is dotted (`Head.(Arg …)`); declaration binders use the pipe form
 /// so binding syntax and application syntax remain structurally distinct. The
-/// parameterized form still decodes through the captured-head +
-/// variable-arity tail seam (`ApplicationNode`) after the delimiter gate —
-/// each tail item must be a bare binder name (a `Plain` reference), since a
-/// parameter is a binder, not an applied type.
+/// parameterized form is deliberately gated by the pipe delimiter: each tail
+/// item must be a bare binder name, since a parameter is a binder, not an
+/// applied type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationHead {
     name: Name,
@@ -2465,8 +2442,8 @@ impl DeclarationHead {
 /// `ScopeOf.T` — the earlier aliases (`Vec`, `Option`, `Scope`, `KeyValue`)
 /// are gone and no longer parse. `Application` is the broad generic-application
 /// form `Foo.(A B …)`: any other PascalCase head carrying a tail of
-/// type-reference arguments. Built-in heads are dispatched first; the
-/// application form is the fallback.
+/// type-reference arguments. Built-in heads are dispatched by the source
+/// generic definition table before the application form is produced.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
@@ -2499,36 +2476,6 @@ pub enum TypeReference {
         #[rkyv(omit_bounds)]
         arguments: Vec<TypeReference>,
     },
-}
-
-/// Reserved built-in reference heads and their canonical arities.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReferenceHead {
-    Vector,
-    Optional,
-    ScopeOf,
-    Map,
-    Bytes,
-}
-
-impl ReferenceHead {
-    pub fn classify(head: &str) -> Option<Self> {
-        match head {
-            "Vector" => Some(Self::Vector),
-            "Optional" => Some(Self::Optional),
-            "ScopeOf" => Some(Self::ScopeOf),
-            "Map" => Some(Self::Map),
-            "Bytes" => Some(Self::Bytes),
-            _ => None,
-        }
-    }
-
-    pub fn node_arity(self) -> usize {
-        match self {
-            Self::Vector | Self::Optional | Self::ScopeOf | Self::Bytes => 2,
-            Self::Map => 3,
-        }
-    }
 }
 
 impl NotaDecode for TypeReference {
@@ -2801,321 +2748,11 @@ impl TypeReference {
     }
 
     /// Lower an already-parsed NOTA block at a reference position into
-    /// a `TypeReference`. The public authored-schema entry accepts the
-    /// strict dotted reference projection (`Vector.Topic`, `Map.(Key Value)`)
-    /// and rejects the legacy parenthesized generic surface. Macro expansion
-    /// internals that still need the legacy grammar call the private
-    /// `from_block_with_registry` entry directly until that pipeline is
-    /// retired.
+    /// a `TypeReference`. The authored-schema entry accepts the strict dotted
+    /// reference projection (`Vector.Topic`, `Map.(Key Value)`) and rejects
+    /// the retired parenthesized generic surface.
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
         Ok(crate::SourceReference::from_block(block)?.to_type_reference())
-    }
-
-    pub(crate) fn from_block_with_registry(
-        block: &Block,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        match block {
-            Block::Atom(_) => Ok(Self::from_name(block.schema_name()?)),
-            Block::Delimited {
-                delimiter: Delimiter::SquareBracket,
-                root_objects,
-                ..
-            } => Err(SchemaError::UnknownTypeReferenceForm {
-                head: "SquareBracket".to_owned(),
-                argument_count: root_objects.len(),
-            }),
-            Block::Delimited {
-                delimiter: Delimiter::Brace,
-                root_objects,
-                ..
-            } => Err(SchemaError::UnknownTypeReferenceForm {
-                head: "Brace".to_owned(),
-                argument_count: root_objects.len(),
-            }),
-            Block::Delimited {
-                delimiter: Delimiter::Parenthesis,
-                root_objects,
-                ..
-            } => Self::resolve_parenthesis_reference(block, root_objects, registry, context),
-            Block::PipeText(_) => Err(SchemaError::ExpectedSymbol {
-                found: block.reemit_fallback(),
-            }),
-            Block::Delimited {
-                delimiter: Delimiter::PipeBrace,
-                root_objects,
-                ..
-            } => Self::from_inline_struct(root_objects, registry, context),
-            Block::Delimited {
-                delimiter: Delimiter::PipeParenthesis,
-                root_objects,
-                ..
-            } => Self::from_inline_enum(root_objects, registry, context),
-        }
-    }
-
-    fn from_inline_struct(
-        objects: &[Block],
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        let name = Self::inline_declaration_name(objects, "inline struct declaration")?;
-        let fields = MacroExpansionFields::new(&objects[1..]).lower(registry, context)?;
-        if fields.len() == 1 {
-            let reference = fields.into_iter().next().expect("length checked").reference;
-            context.remember_inline_declaration(Declaration::private(TypeDeclaration::Newtype(
-                NewtypeDeclaration::new(name.clone(), reference),
-            )));
-        } else {
-            let declaration = StructDeclaration::new(name.clone(), fields);
-            context.remember_inline_declaration(Declaration::private(TypeDeclaration::Struct(
-                declaration,
-            )));
-        }
-        Ok(Self::Plain(name))
-    }
-
-    fn from_inline_enum(
-        objects: &[Block],
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        let name = Self::inline_declaration_name(objects, "inline enum declaration")?;
-        let variants = MacroExpansionVariants::new(&objects[1..]).lower(registry, context)?;
-        context.remember_inline_declaration(Declaration::private(TypeDeclaration::Enum(
-            EnumDeclaration::new(name.clone(), variants),
-        )));
-        Ok(Self::Plain(name))
-    }
-
-    fn inline_declaration_name(objects: &[Block], form: &'static str) -> Result<Name, SchemaError> {
-        let Some(name) = objects.first() else {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                form,
-                expected: "declaration name plus body",
-                found: 0,
-            });
-        };
-        name.schema_name()
-    }
-
-    /// Construct the legacy macro-path `Vector` built-in: `(Vector T)`.
-    ///
-    /// One of the uniform per-built-in resolvers the schema-language-cc-generated
-    /// parenthesis dispatch calls (see `reference_resolver_generated.rs`).
-    /// Every `resolve_*` method shares this signature so the generated call
-    /// site is uniform; this body is the construction lifted verbatim from
-    /// the former hand-written `(Vector, 2)` match arm.
-    fn resolve_vector(
-        _block: &Block,
-        objects: &[Block],
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        Ok(Self::Vector(Box::new(Self::from_block_with_registry(
-            &objects[1],
-            registry,
-            context,
-        )?)))
-    }
-
-    /// Construct the legacy macro-path `Optional` built-in: `(Optional T)`.
-    fn resolve_optional(
-        _block: &Block,
-        objects: &[Block],
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        Ok(Self::Optional(Box::new(Self::from_block_with_registry(
-            &objects[1],
-            registry,
-            context,
-        )?)))
-    }
-
-    /// Construct the legacy macro-path `ScopeOf` built-in: `(ScopeOf T)`.
-    fn resolve_scope_of(
-        _block: &Block,
-        objects: &[Block],
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        Ok(Self::ScopeOf(Box::new(Self::from_block_with_registry(
-            &objects[1],
-            registry,
-            context,
-        )?)))
-    }
-
-    /// Construct the legacy macro-path `Map` built-in: `(Map K V)`.
-    fn resolve_map(
-        _block: &Block,
-        objects: &[Block],
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        Ok(Self::Map(
-            Box::new(Self::from_block_with_registry(
-                &objects[1],
-                registry,
-                context,
-            )?),
-            Box::new(Self::from_block_with_registry(
-                &objects[2],
-                registry,
-                context,
-            )?),
-        ))
-    }
-
-    /// Construct the legacy macro-path `Bytes` built-in: `(Bytes N)` — the
-    /// fixed-width byte leaf decoded through the HeadedAtom seam.
-    fn resolve_bytes(
-        block: &Block,
-        _objects: &[Block],
-        _registry: &MacroRegistry,
-        _context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        Self::from_fixed_bytes_block(block)
-    }
-
-    /// The seam between a DECLARED head (a registered user macro) and the
-    /// broad generic-application form. A registered TypeReference macro is a
-    /// declared head and wins over the application fallback, so the registry
-    /// is consulted first; only when no macro matches does the broad
-    /// `(Foo A B …)` form decode through the structural-macro seam. This
-    /// ordering is the design's disambiguation and is NOT compiler-checked
-    /// (the application form structurally overlaps every PascalCase head), so
-    /// it is pinned by tests.
-    fn from_macro_or_application(
-        block: &Block,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        match Self::from_macro_invocation(block, registry, context) {
-            Ok(reference) => Ok(reference),
-            Err(SchemaError::MacroDidNotMatch { .. })
-            | Err(SchemaError::UnknownTypeReferenceForm { .. }) => Self::from_application(block),
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Decode the broad generic-application form `(Foo A B …)` through the
-    /// `#[shape(pascal_head, body)]` structural-macro seam ([`ApplicationNode`]).
-    /// The head is always `Local` at decode time; import resolution rewrites
-    /// it to `Imported` later.
-    fn from_application(block: &Block) -> Result<Self, SchemaError> {
-        match ApplicationNode::from_structural_block(block)? {
-            ApplicationNode::Application(head, arguments) => Ok(Self::Application {
-                head: ApplicationHead::Local(head),
-                arguments,
-            }),
-        }
-    }
-
-    /// Lower the legacy macro-path fixed-width byte leaf `(Bytes N)` through
-    /// the HeadedAtom seam.
-    fn from_fixed_bytes_block(block: &Block) -> Result<Self, SchemaError> {
-        match FixedBytesNode::from_structural_block(block)? {
-            FixedBytesNode::FixedBytes(width) => Ok(Self::FixedBytes(width)),
-        }
-    }
-
-    fn from_macro_invocation(
-        block: &Block,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<Self, SchemaError> {
-        let invocation = TypeReferenceMacroInvocation::from_block(block)?;
-        if !registry
-            .node_definition(MacroPosition::TypeReference)
-            .is_some_and(|definition| definition.accepts_tagged_invocation())
-        {
-            return Err(SchemaError::MacroDidNotMatch {
-                macro_name: invocation.name().to_owned(),
-            });
-        }
-        match registry.lower(
-            MacroObject::Block(block),
-            MacroPosition::TypeReference,
-            context,
-        ) {
-            Ok(MacroOutput::Reference(reference)) => Ok(reference),
-            Ok(_) => Err(SchemaError::UnexpectedMacroOutput {
-                macro_name: invocation.name().to_owned(),
-                expected: "type reference",
-            }),
-            Err(SchemaError::MacroDidNotMatch { .. }) => {
-                Err(SchemaError::UnknownTypeReferenceForm {
-                    head: invocation.name().to_owned(),
-                    argument_count: invocation.argument_count(),
-                })
-            }
-            Err(error) => Err(error),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct TypeReferenceMacroInvocation<'schema> {
-    name: Name,
-    data: MacroInvocationData<'schema>,
-}
-
-impl<'schema> TypeReferenceMacroInvocation<'schema> {
-    fn from_block(block: &'schema Block) -> Result<Self, SchemaError> {
-        if !block.is_parenthesis() {
-            return Err(SchemaError::ExpectedDelimiter {
-                expected: "(Macro [input])",
-            });
-        }
-        if block.holds_root_objects() != 2 {
-            let head = block
-                .root_object_at(0)
-                .and_then(Block::demote_to_string)
-                .unwrap_or("<missing>");
-            return Err(SchemaError::UnknownTypeReferenceForm {
-                head: head.to_owned(),
-                argument_count: block.holds_root_objects().saturating_sub(1),
-            });
-        }
-        let name = block
-            .root_object_at(0)
-            .ok_or(SchemaError::EmptyTypeReference)?
-            .schema_name()?;
-        let data = MacroInvocationData::from_block(block.root_object_at(1).expect("count checked"));
-        Ok(Self { name, data })
-    }
-
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    fn argument_count(&self) -> usize {
-        self.data.argument_count()
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum MacroInvocationData<'schema> {
-    Delimited(&'schema [Block]),
-    Single(&'schema Block),
-}
-
-impl<'schema> MacroInvocationData<'schema> {
-    fn from_block(block: &'schema Block) -> Self {
-        match block {
-            Block::Delimited { root_objects, .. } => Self::Delimited(root_objects),
-            Block::PipeText(_) | Block::Atom(_) => Self::Single(block),
-        }
-    }
-
-    fn argument_count(&self) -> usize {
-        match self {
-            Self::Delimited(objects) => objects.len(),
-            Self::Single(_) => 1,
-        }
     }
 }
 
@@ -3378,10 +3015,3 @@ impl SchemaNodeDelimitedNotation {
         }
     }
 }
-
-// The parenthesis-reference dispatch (`TypeReference::resolve_parenthesis_reference`)
-// is GENERATED by schema-language-cc from `schemas/reference-grammar.nota` and written to
-// the committed, freshness-gated `reference_resolver_generated.rs` by `build.rs`.
-// It dispatches each built-in head to the uniform `resolve_<snake>` construction
-// methods above, then the reserved-head guard, then `from_macro_or_application`.
-include!("reference_resolver_generated.rs");

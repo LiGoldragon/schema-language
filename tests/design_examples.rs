@@ -116,7 +116,7 @@ fn design_example_type_reference_macro_captures_use_dollar_sigils() {
         "
         (SchemaMacro Bag TypeReference
           (Bag $Type)
-          (Reference (Vector $Type)))
+          (Reference Vector. $Type))
         ",
     )
     .expect("user macro definitions parse");
@@ -471,7 +471,7 @@ fn design_example_user_declared_macros_extend_structural_and_named_slots() {
         "
         (SchemaMacro Bag TypeReference
           (Bag $Type)
-          (Reference (Vector $Type)))
+          (Reference Vector. $Type))
         ",
     )
     .expect("user macro definitions parse");
