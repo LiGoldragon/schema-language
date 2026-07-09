@@ -10,6 +10,6 @@ The active pipeline remains:
 .schema source -> SchemaSource -> TrueSchema -> schema-rust emission
 ```
 
-`TrueSchema` is the current semantic endpoint used by producers during this migration. The accepted end design separates `CoreTrueSchema` from its text projection, keeps `SchemaEvolution X_to_Y` as a separate concern, and treats renames as evolution no-ops.
+`TrueSchema` is the current semantic endpoint used by producers during this migration. The accepted end design splits the semantic model into a stringless `CoreSchema` substrate (each declaration carries a minted nominal identifier, preserved across every edit including rename), a `NameTable` from identifier to current name, and a `TrueSchema` that is a view assembled from the two. Schema identity is pulled out of the core hash so the core hash is a structural lineage address; schema evolution runs on the core, and a rename touches only the `NameTable` and emits zero migration code. The authored `.schema` source is moving to a strictly positional dotted projection. See `ARCHITECTURE.md` for the full target design, current-code state, and open items.
 
 Rust code emission is not here. It lives in `schema-rust`.
