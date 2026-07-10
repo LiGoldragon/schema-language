@@ -107,9 +107,8 @@ that arrived through an import is a declaration like any other — a minted
 identifier, a `NameTable` row, and names held in the table rather than the
 structure. A resolved import's frame body, its binder identifiers and its
 variant list, therefore decomposes exactly as a natively declared frame does,
-and any path segment that names a declaration — including a relation-path
-segment in the current, retired relations construct (see "Retired constructs") —
-always names a declaration in the whole, a local one or an imported one, and is
+and any path segment that names a declaration always names a declaration in the
+whole, a local one or an imported one, and is
 minted to that declaration's identifier, so a rename of the target follows into
 the referencing segment; a segment that resolves to no declaration is a typed
 error, never a silently retained name.
@@ -327,18 +326,6 @@ promise identical factoring, but the value always survives exactly. The depth ca
 is therefore not non-round-tripping: the value round-trips, and only the factoring
 is lossy.
 
-### Named-brace application is not valid schema
-
-The `Family { record.StoredRecord ... }` / `Stream { token.Token ... }`
-named-brace application form is confused-agent drift, not valid schema.
-Generic application is positional and dotted; parameter names live only in the
-definition. Schemas using the named-brace form must be rewritten to positional
-dotted application, for example `Family.(StoredRecord stored_records Domain)`
-or `Stream.(Token Opened Event Closed)`. This rejection invariant governs current
-code; the `Family` and `Stream` constructs it uses as examples are themselves
-retired (see "Retired constructs"), so the invariant applies to current source
-carrying retiring constructs, not to target shape.
-
 ### Blast radius
 
 The blast radius of the dotted-everywhere change is schema source only:
@@ -354,26 +341,27 @@ by the text change. Field order remains the compatibility surface.
 
 ## Retired constructs
 
-Three source constructs are RETIRED from the schema language by psyche decision.
-Their removal from grammar, parser, substrate, and fixtures is pending
-implementation, so the current code and the checked-in `.schema` fixtures still
-carry them; this is current-versus-target divergence, not settled shape.
+Four source constructs are RETIRED from the schema language by psyche decision,
+and their removal from grammar, parser, substrate, and fixtures has landed. The
+current code, the substrate, and the checked-in `.schema` fixtures no longer
+carry them; this is settled shape.
 
 - Relations / Equivalence. Declaring path-name equivalences does not belong in
   schema. The feature was traced to an uncited 2026-06-11 commit with no Spirit
   intent record backing it, and the psyche has settled that it leaves the
-  language. The relations block and its relation declarations are retired; the
-  current enforced document layout still reads a relations slot as its fifth
-  square-bracket block (see "The strict five-slot document layout is enforced"),
-  and that slot is removed with the construct.
+  language. The relations block and its relation declarations are gone: the
+  landed six-block document layout has no relations slot (see "The six-block
+  document layout is enforced"), and no relation reader survives in the source
+  model.
 - Streams. The `Stream.(…)` metadata head and the `streams` substrate vector are
-  retired; streams do not earn a dedicated per-kind block in the target.
+  removed; streams earn no dedicated per-kind block. The `Streaming` source
+  variant signature retired with them, so a variant is now `Unit` or `Data`.
 - Families. The `Family.(…)` metadata head, the `families` substrate vector, and
-  the `FamilyClosure` per-family hash domain are retired together; families do
-  not earn a dedicated per-kind block in the target. The `Family.(…)` construct
-  was the narrow, mis-shaped first implementation of per-component storage-type
-  declaration; its successor is not a block in any document but the separate
-  `sema.schema` document kind (see "Schema document kinds").
+  the `FamilyClosure` per-family hash domain are removed together; families earn
+  no dedicated per-kind block. The `Family.(…)` construct was the narrow,
+  mis-shaped first implementation of per-component storage-type declaration; its
+  successor is not a block in any document but the separate `sema.schema`
+  document kind (see "Schema document kinds").
 - Nested type-namespaces. The lowercase colon-qualified sub-namespace — a
   namespace entry whose value is another brace of declarations, keyed by a
   lowercase segmented name — is retired as drift by psyche decision. It was an
@@ -381,12 +369,11 @@ carry them; this is current-versus-target divergence, not settled shape.
   there are no aliases anywhere (see "No aliases anywhere"). No dotted sub-block
   survives: the `types` block holds only dotted `TypeName.Definition` entries,
   each keyed by a capitalized type name, and never a nested lowercase
-  sub-namespace. Removal from the source model and its fixtures is pending
-  implementation.
+  sub-namespace. Removal from the source model and its fixtures has landed.
 
 The surviving declared object classes are types, generics, and impls, and the
-settled target root-slot layout is built from those alone (see "Per-kind
-declaration blocks").
+landed root-slot layout is built from those alone (see "Per-kind declaration
+blocks").
 
 ## Per-kind declaration blocks
 
@@ -402,37 +389,36 @@ new generic is defining a new kind of data type, a meta-type; and when a whole n
 class of meta-objects arises, it earns its own dedicated block in the schema file
 rather than a marker, head, or tag squeezed into an existing block.
 
-This principle is settled. The construct set it partitions is now settled with
-it by psyche decision: relations, streams, and families are retired from the
+This principle is settled and landed. The construct set it partitions is settled
+with it by psyche decision: relations, streams, and families are retired from the
 language (see "Retired constructs"), so the surviving declared object classes are
 types, generics, and impls, and only those earn dedicated blocks:
 
-- The former namespace becomes the `types` block, holding only dotted
+- The former namespace is now the `types` block, holding only dotted
   `TypeName.Definition` entries and nothing else.
-- Generic definitions move into their own dedicated generics block.
-- The trailing `{| impl |}` object that today rides at the document tail is
-  superseded in the target source shape by entries in a dedicated impl block.
-- The `Stream.(…)` and `Family.(…)` metadata heads that today ride inside
-  namespace entries carry retired constructs; they do not move to dedicated
-  blocks, they leave the language with streams and families.
+- Generic definitions live in their own dedicated `generics` block.
+- The trailing `{| impl |}` object that rode at the document tail is gone,
+  superseded by entries in the dedicated `impls` block.
 
 The principle makes the source text match the model that lives underneath, minus
-the retired classes. The substrate today partitions more finely than the target
-keeps: `CoreSchema` (`src/core.rs`) carries separate `namespace`, `streams`,
-`families`, and `impl_blocks` vectors. That is current state; the `streams` and
-`families` vectors carry retired constructs and retire with them, removal pending
-implementation. The per-kind blocks give the surviving source text the same
-partition the stored model holds for the kept classes, so text shape and
-substrate agree instead of the source folding several object classes into one
-namespace and a trailing impl tail.
+the retired classes. The stored substrate now partitions more coarsely than the
+source text: `CoreSchema` (`src/core.rs`) carries a `namespace` vector and an
+`impl_blocks` vector, and the retired `streams` and `families` vectors are gone.
+Generic definitions are parameterized `namespace` declarations rather than a
+separate substrate vector; the source `generics` block projects exactly those
+parameterized declarations (`SchemaTree::generics_schema_text`, `src/schema.rs`),
+while plain types and generics share the one `namespace` vector. The source text
+therefore separates the kept object classes into their own blocks even where the
+substrate folds types and generics into one namespace vector and holds impls
+apart.
 
-### Target root-slot layout of the per-kind blocks
+### Landed root-slot layout of the per-kind blocks
 
-The construct set and the root-slot ordering are settled by psyche decision. The
-psyche has been given the ordering to veto, and it stands as the target. The
-target schema document is six per-kind blocks, in order: imports, input, output,
-types, generics, impls. Every slot is always present — optionality is an empty
-typed slot, never a changed root count. The `types` block holds only dotted
+The construct set and the root-slot ordering are settled by psyche decision and
+landed in the parser. The schema document is six per-kind blocks, in order:
+imports, input, output, types, generics, impls. Every slot is always present —
+optionality is an empty typed slot, never a changed root count. The `types`
+block holds only dotted
 `TypeName.Definition` entries, each keyed by a capitalized type name and never a
 nested lowercase sub-namespace (see "Retired constructs"); generics and impls
 each live in their own dedicated block. The `generics` block holds dotted
@@ -474,18 +460,22 @@ engine consumes without fixing their surface form.
 
 ## Current implementation and remaining work
 
-The source-facing layer has largely converged on the strict positional design.
-Reference reading, the generic-definition model, the document layout, and the
-use-site vocabularies are landed and witnessed; the remaining divergence is in
-the semantic `TypeReference` and the evolution model. Each item below is current
-fact plus, where work remains, the required change.
+The source-facing layer has converged on the strict positional design. Reference
+reading, the generic-definition model, the six-block document layout, the
+use-site vocabularies, the semantic `TypeReference`, and the evolution model
+(rename, hashing, and lineage) are all landed and witnessed. The remaining
+divergence is not in these surfaces but in the OPEN deterministic identifier and
+`NameTable` bootstrap (see above) and the undesigned `sema.schema` entry shape
+(see "Schema document kinds"). Each item below is current fact plus, where work
+remains, the required change.
 
 ### Reference parsing: the dotted source reader is the accepted mechanism
 
 The single source-facing reference entry is the hand-written dotted reader in
 `src/source.rs`: `SchemaSource::from_schema_text` / `from_document`,
 `SourceReference`, and the per-context readers (`SourceImports::from_block`,
-`SourceNamespace::from_block`, and the metadata, product, and relation readers).
+`SourceTypes::from_block`, `SourceGenerics::from_block`, `SourceImpls::from_block`,
+and the root product reader `SourceRootEnum::from_blocks`).
 `TypeReference::from_block` delegates to `SourceReference::from_block` and then
 projects to the temporary semantic `TypeReference`; macro template reference
 expansion re-parses its expanded object stream through the same reader.
@@ -499,14 +489,10 @@ by `tests/legacy_reference_pipeline.rs`. The rejected alternative — a
 programmable grammar-data dispatch table decoded and code-generated by a
 `schema-language-cc` pass — is explicitly not the target. Per-context
 hand-written reading, backed by single-source-of-truth vocabularies, is the
-accepted shape. This settles that the `Stream` and `Family` metadata heads are
-recognized by hand-written code (through `MetadataHead`); that hand-written
-recognition mechanism is accepted, not drift. The metadata-head form it reads is a
-current-state fact rather than the target source shape: the `Stream` and `Family`
-heads carry the retired streams and families constructs (see "Retired
-constructs") and leave the language rather than moving to dedicated blocks. Their
-hand-written recognition code is accepted as current-state parsing of a retiring
-construct.
+accepted shape. The `Stream` and `Family` metadata heads and the `MetadataHead`
+recognizer that once read them are gone with the retired streams and families
+constructs (see "Retired constructs"); the per-context readers now recognize only
+the surviving type, generic, and impl entry forms.
 
 What is hand-written and accepted is the per-context dispatch — which context
 expects which dotted-prefix expectation kind. The low-level dotted-prefix split
@@ -521,19 +507,14 @@ macro-template positions.
 
 ### Use-site vocabularies are single-source
 
-Each use-site vocabulary derives from one structural authority, so a name list
-is never re-matched by hand:
-
-- reserved scalar names come from `TypeReference::SCALAR_KINDS` paired with
-  `scalar_name` (`src/schema.rs`) — `String`, `Integer`, `Boolean`, `Path`,
-  `Bytes`; `from_name`, `is_reserved_scalar_name`, and the source-side reference
-  derivation all read it;
-- the `Stream` / `Family` metadata-head vocabulary is owned by the
-  `MetadataHead` enum (`src/source.rs`), read by kind through `from_head_name`
-  at every recognize, reject, dispatch, and re-emit site.
-
-Inline guard tests in `schema.rs` and `source.rs` fail if either vocabulary
-drifts.
+The use-site scalar vocabulary derives from one structural authority, so the name
+list is never re-matched by hand: reserved scalar names come from
+`TypeReference::SCALAR_KINDS` paired with `scalar_name` (`src/schema.rs`) —
+`String`, `Integer`, `Boolean`, `Path`, `Bytes`; `from_name`,
+`is_reserved_scalar_name`, and the source-side reference derivation all read it.
+The retired `Stream` / `Family` metadata-head vocabulary and its `MetadataHead`
+authority are gone (see "Retired constructs"). An inline guard test in
+`schema.rs` fails if the scalar vocabulary drifts.
 
 ### Generic definitions use the per-kind model on the source side
 
@@ -555,45 +536,44 @@ generic derives correctly without a Rust name match — witnessed by
 `topic_list`. `TypeReference::derived_field_name` no longer dispatches
 independently; it delegates to `SourceReference`.
 
-### The strict five-slot document layout is enforced
+### The six-block document layout is enforced
 
-`SchemaSource::from_document` (`src/source.rs`) reads a fixed five-slot layout
-through `SchemaDocumentLayout`: imports (a brace block), input, output,
-namespace (a brace block), and relations (a square-bracket block), in that
-order. A root-object count other than the five slots is rejected with
-`SchemaError::ExpectedRootObjectCount`. The imports slot is always present
-(possibly empty); the earlier variable four-to-six root count with brace-shape
-imports inference is gone. The imports section is read via
-`SourceImports::from_block` and the namespace section via
-`SourceNamespace::from_block` (both `src/source.rs`).
+`SchemaSource::from_document` (`src/source.rs`) reads the fixed six-slot layout
+through `SchemaDocumentLayout`: imports (a brace block), input, output, types (a
+brace block), generics (a brace block), and impls (a brace block), in that order.
+A root-object count other than the six slots is rejected with
+`SchemaError::ExpectedRootObjectCount`, whose message names the "6 root slots
+(imports input output types generics impls)". Every slot is always present,
+possibly empty; a wrong delimiter on a declaration block is rejected in the same
+pass. The imports section is read via `SourceImports::from_block`, the types
+section via `SourceTypes::from_block`, the generics section via
+`SourceGenerics::from_block`, and the impls section via `SourceImpls::from_block`
+(all `src/source.rs`).
 
-This five-slot layout is the current enforced shape, not the target. Its fifth
-slot is the relations square-bracket block; relations are retired by decision
-(see "Retired constructs"), so that slot is removed with the construct, removal
-pending implementation. Under the per-kind declaration block principle the single
-namespace slot becomes the TYPE namespace, and the settled target document is the
-six per-kind blocks — imports, input, output, types, generics, impls — with
-streams and families retired rather than promoted to blocks. The `Stream`/`Family`
-metadata heads and the trailing impl object described in this document are
-therefore current-state facts, not target shape. The target root-slot layout is
-settled (see "Per-kind declaration blocks").
+This six-block layout is landed, not pending. There is no relations slot: the
+retired relations square-bracket block, the retired nested lowercase
+sub-namespace inside the former single namespace slot, and the trailing `{| impl
+|}` tail are all removed, not migrated (see "Retired constructs"). The former
+single namespace slot is now the dotted `types` block; generic definitions and
+impl catalogs each read from their own dedicated block. Streams and families left
+the language rather than becoming blocks. The root-slot layout is settled and
+implemented (see "Per-kind declaration blocks").
 
 ### Enforced strict-positional rejections
 
-Two rejected source forms are landed and witnessed as invariants:
+The same-named self-tag variant shortcut `(Name)` is gone and witnessed as an
+invariant: `SourceVariantSignature` (`src/source.rs`) is now exactly `Unit` and
+`Data` — the `Streaming` variant retired with streams — so there is no self-tag
+path and a variant payload is written explicitly (`Name.Name`), witnessed by the
+`self-tagged-variant` fixture in `tests/lowering.rs` and the rejection in
+`tests/design_examples.rs`. Named-brace generic application was the rejection of
+the retired `Stream { … }` / `Family { … }` heads; that form and its
+`MetadataHead` rejector left the language with streams and families.
 
-- the same-named self-tag variant shortcut `(Name)` is gone;
-  `SourceVariantSignature` (`src/source.rs`) is now exactly `Unit`, `Data`, and
-  `Streaming`, so there is no self-tag path and a variant payload is written
-  explicitly (`Name.Name`);
-- named-brace generic application (`Stream { … }`, `Family { … }`) is rejected
-  through `MetadataHead::named_brace_application_error`, and semantic re-emission
-  never reintroduces it — witnessed in `tests/source_codec.rs` and
-  `tests/family_declarations.rs`.
-
-`SchemaError::DuplicateTypeParameter` (`src/engine.rs`) is now constructed in
-`DeclarationHead::from_parameterized` (`src/schema.rs`) and tested in
-`tests/generics.rs`, rejecting duplicate type parameters.
+`SchemaError::DuplicateTypeParameter` (`src/engine.rs`) is constructed in
+`SourceGenerics::read_parameters` (`src/source.rs`), which reads the dedicated
+`generics` block's binder group, and is tested in `tests/generics.rs`, rejecting
+duplicate type parameters.
 
 ### The semantic `TypeReference` is on the per-kind model
 
@@ -655,9 +635,8 @@ context is gone, not reused): `TrueSchema::core_hash` hashes the stringless
 name — and is the structural lineage address a rename never moves;
 `TrueSchema::true_name_hash` hashes the projected sidecar tree including
 `SchemaIdentity` and every name, and is the per-version human-view address that
-moves on rename. The per-family-closure hash domain is current-state only: it
-retires with families (see "Retired constructs"), removal pending implementation.
-Lineage is a graph
+moves on rename. The retired per-family-closure hash domain is gone with families
+(see "Retired constructs"), leaving these two domains. Lineage is a graph
 of receipt edges (`SchemaEditReceipt`, keyed by the parent-core-hash-to-child-
 core-hash pair) walked by `LineageGraph` (`src/lineage.rs`): the
 historical-to-current conversion chain is the composition of the structural
@@ -673,9 +652,10 @@ daemon persists it later and this crate invents no persistence of its own.
   `flake.nix` lint depend on it. It describes the collapsed per-kind
   `TypeReference` partition (a `SingleType` / `MultiType` / `Value` application
   variant carrying a projection enum), not the retired per-name variants.
-- `schemas/core.schema` is the builtin-macro-library schema. Its namespace
+- `schemas/core.schema` is the builtin-macro-library schema. Its `types` block
   declares a type named `BuiltinMacroLibrary`, the macro library, which is
-  unrelated to the target stringless `CoreSchema` substrate. The earlier name
+  unrelated to the stringless `CoreSchema` substrate; its `generics` and `impls`
+  blocks are present and empty. The earlier name
   collision — the macro library was itself once named `CoreSchema` — has been
   resolved: the macro-library type was renamed to `BuiltinMacroLibrary`, so the
   substrate name is free.
