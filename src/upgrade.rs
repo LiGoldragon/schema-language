@@ -367,7 +367,7 @@ impl SchemaEditor {
                 Declaration::private(TypeDeclaration::Struct(declaration))
             }
         };
-        Ok((self.into_true_schema(), previous_type))
+        Ok((self.into_true_schema()?, previous_type))
     }
 
     fn update_enum(
@@ -395,10 +395,10 @@ impl SchemaEditor {
             crate::Visibility::Public => Declaration::public(TypeDeclaration::Enum(declaration)),
             crate::Visibility::Private => Declaration::private(TypeDeclaration::Enum(declaration)),
         };
-        Ok(self.into_true_schema())
+        self.into_true_schema()
     }
 
-    fn into_true_schema(self) -> TrueSchema {
+    fn into_true_schema(self) -> Result<TrueSchema, SchemaError> {
         let tree = crate::schema::SchemaTree::new(
             self.identity,
             self.imports,

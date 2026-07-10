@@ -261,8 +261,8 @@ fn migrated_nexus_lowers_to_application_roots_over_the_imported_frame() {
     // The imported frame heads carry their arity across the crate boundary:
     // Work is a 4-parameter import, Action a 5-parameter import.
     for (local, arity) in [("Work", 4usize), ("Action", 5usize)] {
-        let import = migrated
-            .resolved_imports()
+        let resolved = migrated.resolved_imports();
+        let import = resolved
             .iter()
             .find(|import| import.local_name().as_str() == local)
             .unwrap_or_else(|| panic!("{local} import resolved"));

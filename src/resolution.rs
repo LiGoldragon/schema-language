@@ -129,6 +129,28 @@ pub struct ResolvedImport {
 }
 
 impl ResolvedImport {
+    /// Reassemble a resolved import from the parts a substrate
+    /// [`crate::CoreResolvedImport`] projects back through the name table. The
+    /// substrate holds an imported declaration as a minted identifier with a
+    /// name-table row and its frame body as identifier-carrying structure — the
+    /// same shape a native frame decomposes into — so projection rebuilds this
+    /// name-bearing sidecar form from the resolved names.
+    pub(crate) fn from_projected_parts(
+        local_name: Name,
+        source: ImportSource,
+        parameter_count: Option<u32>,
+        parameters: Vec<Name>,
+        variants: Vec<EnumVariant>,
+    ) -> Self {
+        Self {
+            local_name,
+            source,
+            parameter_count,
+            parameters,
+            variants,
+        }
+    }
+
     pub fn local_name(&self) -> &Name {
         &self.local_name
     }

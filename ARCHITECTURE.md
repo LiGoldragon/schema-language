@@ -84,13 +84,26 @@ and generic binders — are anchored to their owner's identifier rather than the
 owner's current name: a member's identifier is minted from its owner identifier
 and its own local name, so renaming the owner leaves every member identifier and
 therefore every substrate byte fixed, and the name table row for a member never
-carries a stale owner-name prefix. A closed set of reference and contract values
-stays as data inside the substrate — imports, resolved imports, impl catalogs,
-table names, and any relation-path segment that names no local declaration —
-under the tenet that a use-site name may be a reference/path/name value; a
-relation-path segment that does name a local declaration is minted to that
-declaration's identifier like every other local reference, so a rename of a
-relation's target follows into the relation.
+carries a stale owner-name prefix.
+
+A loaded schema is one WHOLE. Import resolution happens at load, and after it
+there is one substrate, one identifier space, and one `NameTable`, with no
+differentiation between "local" and "imported" anywhere inside: a declaration
+that arrived through an import is a declaration like any other — a minted
+identifier, a `NameTable` row, and names held in the table rather than the
+structure. A resolved import's frame body, its binder identifiers and its
+variant list, therefore decomposes exactly as a natively declared frame does,
+and a relation-path segment always names a declaration in the whole — a local
+one or an imported one — and is minted to that declaration's identifier, so a
+rename of a relation's target follows into the relation; a segment that resolves
+to no declaration is a typed error, never a silently retained name.
+Rename-stability of the substrate is therefore universal over the loaded whole,
+not a local-only property: renaming any declaration, imported ones included,
+moves only the `NameTable` and leaves every substrate byte fixed. What stays as
+data inside the substrate is only what is genuinely not a declaration in the
+whole — the cross-crate import SOURCE path a resolved import carries, which is
+provenance the principle leaves in source form; impl catalogs; and table names —
+under the tenet that a use-site name may be a reference/path/name value.
 
 ### Target model
 

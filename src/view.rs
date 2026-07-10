@@ -63,13 +63,13 @@ pub struct TrueSchema {
 impl TrueSchema {
     /// Wrap a lowered name-bearing tree into the split model, re-associating
     /// identifiers against `prior`.
-    pub(crate) fn from_tree(tree: &SchemaTree, prior: &NameTable) -> Self {
-        let (core, names) = tree.decompose(prior);
-        Self {
+    pub(crate) fn from_tree(tree: &SchemaTree, prior: &NameTable) -> Result<Self, SchemaError> {
+        let (core, names) = tree.decompose(prior)?;
+        Ok(Self {
             identity: tree.identity().clone(),
             core,
             names,
-        }
+        })
     }
 
     /// Project the full name-bearing sidecar tree. This is the codec and hash
@@ -128,10 +128,12 @@ impl TrueSchema {
         &self.core.imports
     }
 
-    /// The imports resolved against dependency crate schemas — cross-crate
-    /// contract data carried on the substrate.
-    pub fn resolved_imports(&self) -> &[ResolvedImport] {
-        &self.core.resolved_imports
+    /// The imports resolved against dependency crate schemas, projected from the
+    /// substrate. Each imported declaration lives in the whole as a minted
+    /// identifier with a name-table row and its frame body as identifier-carrying
+    /// structure; projection rebuilds the name-bearing sidecar form.
+    pub fn resolved_imports(&self) -> Vec<ResolvedImport> {
+        self.tree().resolved_imports().to_vec()
     }
 
     /// The relation declarations, projected. Each relation-path segment that
@@ -399,10 +401,7 @@ impl TrueSchema {
     }
 
     pub fn from_binary_bytes(bytes: &[u8]) -> Result<Self, SchemaError> {
-        Ok(Self::from_tree(
-            &SchemaTree::from_binary_bytes(bytes)?,
-            &NameTable::empty(),
-        ))
+        Self::from_tree(&SchemaTree::from_binary_bytes(bytes)?, &NameTable::empty())
     }
 }
 
@@ -411,10 +410,13 @@ impl TrueSchema {
 /// encoding projects the sidecar tree. Round trips are value-exact.
 impl NotaDecode for TrueSchema {
     fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
-        Ok(Self::from_tree(
-            &SchemaTree::from_nota_block(block)?,
-            &NameTable::empty(),
-        ))
+        Self::from_tree(&SchemaTree::from_nota_block(block)?, &NameTable::empty()).map_err(
+            |error| NotaDecodeError::InvalidValue {
+                type_name: "TrueSchema",
+                value: String::new(),
+                reason: error.to_string(),
+            },
+        )
     }
 }
 

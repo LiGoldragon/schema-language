@@ -153,6 +153,8 @@ pub enum SchemaError {
         module: String,
         type_name: String,
     },
+    #[error("relation-path segment {segment} resolves to no declaration in the loaded schema")]
+    RelationSegmentUnresolved { segment: String },
     #[error("expected a raw declaration name, found {found}")]
     ExpectedRawDeclarationName { found: String },
     #[error("raw declaration name mismatch: key {key} declared {declared}")]
@@ -440,7 +442,7 @@ impl SchemaEngine {
         prior: &crate::NameTable,
     ) -> Result<(crate::CoreSchema, crate::NameTable), SchemaError> {
         let schema = self.lower_true_schema_source(source, identity)?;
-        Ok(schema.tree().decompose(prior))
+        schema.tree().decompose(prior)
     }
 
     /// The resolver-carrying twin of [`SchemaEngine::lower_core_source`], for
@@ -453,7 +455,7 @@ impl SchemaEngine {
         prior: &crate::NameTable,
     ) -> Result<(crate::CoreSchema, crate::NameTable), SchemaError> {
         let schema = self.lower_true_schema_source_with_resolver(source, identity, resolver)?;
-        Ok(schema.tree().decompose(prior))
+        schema.tree().decompose(prior)
     }
 
     pub fn lower_schema_source(

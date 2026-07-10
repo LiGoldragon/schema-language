@@ -19,8 +19,8 @@ pub use instance::InstanceSchemaText;
 
 pub use crate::core::{
     CoreApplicationHead, CoreDeclaration, CoreEnum, CoreFamily, CoreField, CoreImplBlock,
-    CoreNewtype, CoreReference, CoreRoot, CoreRootApplication, CoreSchema, CoreStream,
-    CoreStreamRelation, CoreStruct, CoreType, CoreVariant,
+    CoreNewtype, CoreReference, CoreResolvedImport, CoreRoot, CoreRootApplication, CoreSchema,
+    CoreStream, CoreStreamRelation, CoreStruct, CoreType, CoreVariant,
 };
 pub use declarative::{
     MacroDelimiter, MacroLibrary, MacroLibraryArtifact, MacroLibrarySourceEntry, MacroPattern,

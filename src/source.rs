@@ -143,10 +143,7 @@ impl SchemaSource {
         .and_then(SchemaTree::product_components_verified)
         .and_then(SchemaTree::arities_verified)
         .and_then(SchemaTree::impls_verified)?;
-        Ok(crate::TrueSchema::from_tree(
-            &tree,
-            &crate::NameTable::empty(),
-        ))
+        crate::TrueSchema::from_tree(&tree, &crate::NameTable::empty())
     }
 }
 
