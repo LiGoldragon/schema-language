@@ -498,6 +498,58 @@ pub struct SchemaTree {
     impl_blocks: Vec<ImplBlock>,
 }
 
+/// A declaration head that introduces a flat list of type-parameter binders.
+/// Both a native [`Declaration`] and an imported [`super::ResolvedImport`] carry
+/// their binders this way, and both mint one member identifier per binder when
+/// decomposed (`CoreResolvedImport::from_resolved_import` uses the same
+/// `declare_member` path a native frame does), so a repeated binder mints
+/// the same colliding identifier regardless of which shape carries it. Naming
+/// the shared head lets the semantic boundary reject a duplicate through one walk
+/// over every binder-bearing shape instead of a per-shape special case.
+trait ParameterizedHead {
+    /// The name the duplicate-binder error reports as the offending declaration.
+    fn head_name(&self) -> &Name;
+
+    /// The flat binder list the head introduces.
+    fn binders(&self) -> &[Name];
+
+    /// Reject the first repeated binder with the typed error the source reader
+    /// constructs for the same fault; accept a list whose binders are distinct.
+    fn verify_distinct_binders(&self) -> Result<(), SchemaError> {
+        let mut seen: Vec<&Name> = Vec::new();
+        for binder in self.binders() {
+            if seen.contains(&binder) {
+                return Err(SchemaError::DuplicateTypeParameter {
+                    declaration: self.head_name().as_str().to_owned(),
+                    parameter: binder.as_str().to_owned(),
+                });
+            }
+            seen.push(binder);
+        }
+        Ok(())
+    }
+}
+
+impl ParameterizedHead for Declaration {
+    fn head_name(&self) -> &Name {
+        self.name()
+    }
+
+    fn binders(&self) -> &[Name] {
+        self.parameters()
+    }
+}
+
+impl ParameterizedHead for super::ResolvedImport {
+    fn head_name(&self) -> &Name {
+        self.local_name()
+    }
+
+    fn binders(&self) -> &[Name] {
+        self.parameters()
+    }
+}
+
 impl SchemaTree {
     // The schema-language's fields are each a distinct typed section of the model;
     // the constructor takes them as separate typed vectors rather than a
@@ -784,8 +836,8 @@ impl SchemaTree {
         Ok(self)
     }
 
-    /// Verify that every parameterized declaration's binder list is distinct:
-    /// no declaration head repeats a type-parameter name. The source reader
+    /// Verify that every binder-bearing head's binder list is distinct: no
+    /// declaration head repeats a type-parameter name. The source reader
     /// (`SourceGenerics::read_parameters`) already rejects a duplicate binder as
     /// it parses the `generics` block, but that guard sits on the text path
     /// alone. This is the same rule enforced at the SEMANTIC boundary — the
@@ -793,23 +845,18 @@ impl SchemaTree {
     /// ([`crate::TrueSchema::from_tree`], reached by the programmatic tree
     /// constructor, binary decode, and NOTA decode) — so a schema value that
     /// never touched the source reader still cannot carry a duplicate generic or
-    /// frame binder. The binder home is one `Declaration::parameters` list
-    /// whether the body is a plain generic or a parameterized enum frame, so the
-    /// single walk covers both duplicate generic parameters and duplicate frame
-    /// parameters, and it constructs the same [`SchemaError::DuplicateTypeParameter`]
-    /// the source form does.
+    /// frame binder. Two shapes carry binders: a native `Declaration` (plain
+    /// generic or parameterized enum frame) in `self.namespace`, and an imported
+    /// frame head in `self.resolved_imports`. Both decompose their binders through
+    /// the same member-minting path, so both are walked here through the shared
+    /// [`ParameterizedHead`] check, and both construct the same
+    /// [`SchemaError::DuplicateTypeParameter`] the source form does.
     pub(crate) fn parameters_verified(&self) -> Result<(), SchemaError> {
         for declaration in &self.namespace {
-            let mut seen: Vec<&Name> = Vec::new();
-            for parameter in declaration.parameters() {
-                if seen.contains(&parameter) {
-                    return Err(SchemaError::DuplicateTypeParameter {
-                        declaration: declaration.name().as_str().to_owned(),
-                        parameter: parameter.as_str().to_owned(),
-                    });
-                }
-                seen.push(parameter);
-            }
+            declaration.verify_distinct_binders()?;
+        }
+        for import in &self.resolved_imports {
+            import.verify_distinct_binders()?;
         }
         Ok(())
     }
@@ -2989,7 +3036,9 @@ mod scalar_vocabulary_guard {
 #[cfg(test)]
 mod semantic_duplicate_parameter_rejection {
     use super::*;
-    use crate::{NameTable, SchemaEngine, SchemaIdentity, TrueSchema};
+    use crate::{
+        ImportSource, NameTable, ResolvedImport, SchemaEngine, SchemaIdentity, TrueSchema,
+    };
 
     /// Lower a valid single-block `generics` document and hand back the
     /// crate-internal sidecar tree the codec surfaces project through.
@@ -3036,10 +3085,17 @@ mod semantic_duplicate_parameter_rejection {
                 parameter: expected_parameter.to_owned(),
             },
         );
+        assert_tree_rejected_across_surfaces(&tree, &expected);
+    }
 
+    /// Assert a tampered tree — one carrying a duplicate binder the source
+    /// reader would never emit — is rejected with `expected` at every surface
+    /// that funnels through [`TrueSchema::from_tree`]: the programmatic tree
+    /// constructor, binary (rkyv) decode, and structured NOTA decode.
+    fn assert_tree_rejected_across_surfaces(tree: &SchemaTree, expected: &SchemaError) {
         // Programmatic construction surface.
         assert_eq!(
-            TrueSchema::from_tree(&tree, &NameTable::empty())
+            &TrueSchema::from_tree(tree, &NameTable::empty())
                 .expect_err("from_tree must reject a duplicate binder"),
             expected,
         );
@@ -3049,7 +3105,7 @@ mod semantic_duplicate_parameter_rejection {
             .to_binary_bytes()
             .expect("tampered tree encodes to binary");
         assert_eq!(
-            TrueSchema::from_binary_bytes(&bytes)
+            &TrueSchema::from_binary_bytes(&bytes)
                 .expect_err("binary decode must reject a duplicate binder"),
             expected,
         );
@@ -3081,5 +3137,34 @@ mod semantic_duplicate_parameter_rejection {
             "Work",
             "Event",
         );
+    }
+
+    /// The other binder-bearing shape: an imported frame head carries its
+    /// binders on a `ResolvedImport`, not the namespace. Inject one whose binder
+    /// list repeats a name — the tamper the resolver would never emit — into an
+    /// otherwise-valid tree, and assert the semantic boundary rejects it with the
+    /// same typed error across every decode surface. Without the
+    /// `resolved_imports` walk in `parameters_verified`, a crafted binary or NOTA
+    /// value carrying this import would mint the same colliding member identifier
+    /// the guard exists to prevent.
+    #[test]
+    fn duplicate_imported_frame_parameters_are_rejected_at_the_semantic_boundary() {
+        let mut tree = lowered_tree("Plane.((Wing) { Wing })");
+        let binder = Name::new("Frame");
+        let source = ImportSource::try_from(&Name::new("dependency-core:mail:Beacon"))
+            .expect("well-formed import source parses");
+        tree.resolved_imports
+            .push(ResolvedImport::from_projected_parts(
+                Name::new("Beacon"),
+                source,
+                Some(2),
+                vec![binder.clone(), binder.clone()],
+                Vec::new(),
+            ));
+        let expected = SchemaError::DuplicateTypeParameter {
+            declaration: "Beacon".to_owned(),
+            parameter: binder.as_str().to_owned(),
+        };
+        assert_tree_rejected_across_surfaces(&tree, &expected);
     }
 }
