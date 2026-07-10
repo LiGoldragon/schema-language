@@ -618,8 +618,12 @@ rename- and order-stability), not absolute values, so they survive the reshape.
 
 Vocabulary resolution — `FixedBytes` versus `Bytes`: the model now spells the
 fixed-width value kind `Bytes`, matching the source head and grammar (the
-psyche-designed surface), and the `FixedBytes` name is retired everywhere. The
-dynamic-length bytes scalar remains the separate `TypeReference::Bytes` leaf. The
+psyche-designed surface), and the `FixedBytes` name is retired throughout
+schema-language. The retirement is schema-language-scoped, not universal: nota
+keeps a nota-local `TypeReference::FixedBytes` width leaf
+(`nota/src/instance_schema.rs`), which schema-language projects into its own
+`Bytes` value application rather than mirroring the nota name. The dynamic-length
+bytes scalar remains the separate `TypeReference::Bytes` leaf. The
 two are distinguished by kind — a value application (`Bytes.N`, a width leaf)
 versus a scalar leaf (bare `Bytes`) — exactly as the grammar already
 distinguishes them by the presence of the width leaf. Fixed-width bytes is

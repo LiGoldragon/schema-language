@@ -633,9 +633,9 @@ impl SourceImport {
             }
         }
         for target in &targets {
-            if !SourceIdentifierCase::new(target).is_type() {
-                return Err(SchemaError::MalformedImportSource {
-                    found: target.to_nota(),
+            if !SourceIdentifierCase::new(target).is_simple_type() {
+                return Err(SchemaError::MalformedImportTarget {
+                    target: target.to_nota(),
                 });
             }
         }
@@ -2313,11 +2313,14 @@ impl SourceEnumBody {
     }
 
     fn from_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
+        // A data variant whose payload is a grouped reference spans two sibling
+        // blocks (`Projected.` then `(Map.(Key Value))`), so the reader threads a
+        // consumed-count cursor exactly as `TypeReference::from_blocks_at` does
+        // for struct fields, rather than iterating one block per variant.
         let mut variants = Vec::new();
-        for block in blocks {
-            variants.push(
-                SourceVariantSignature::from_structural_block(block).map_err(SchemaError::from)?,
-            );
+        let mut index = 0;
+        while index < blocks.len() {
+            variants.push(SourceVariantSignature::from_blocks_at(blocks, &mut index)?);
         }
         Ok(Self { variants })
     }
@@ -2591,11 +2594,18 @@ impl StructuralMacroNode for SourceVariantSignature {
         match self {
             Self::Unit(name) => name.to_structural_nota(),
             Self::Data(name, SourceVariantPayload::Reference(reference)) => {
-                format!(
-                    "{}.{}",
-                    name.to_structural_nota(),
-                    reference.to_schema_text()
-                )
+                // Minimal grouping, matching the struct-field application
+                // emitter: a payload that stays a single inline token emits bare
+                // (`Projected.ProjectedPayload`, `Listed.Vector.NodeName`), while
+                // a multi-token payload is wrapped in the group the dot rule
+                // requires (`Projected.(Map.(NodeName NodeConfig))`) so it
+                // re-parses.
+                let payload = reference.to_schema_text();
+                if SourceDottedArgumentText::new(&payload).can_inline() {
+                    format!("{}.{}", name.to_structural_nota(), payload)
+                } else {
+                    format!("{}.({})", name.to_structural_nota(), payload)
+                }
             }
             Self::Data(name, SourceVariantPayload::Declaration(payload)) => {
                 Delimiter::Parenthesis.wrap([name.to_structural_nota(), payload.to_schema_text()])
@@ -2605,6 +2615,48 @@ impl StructuralMacroNode for SourceVariantSignature {
 }
 
 impl SourceVariantSignature {
+    /// Read one variant from the head of a block sequence, advancing `index` by
+    /// the blocks it consumes. A unit variant or an inline data variant is a
+    /// single atom; a data variant whose payload is a grouped reference
+    /// (`Projected.(Map.(Key Value))`, `Listed.(Vector.NodeName)`) is a
+    /// dot-terminated head atom plus the following group, which the shared
+    /// dotted reader binds through its consumed count — the same machinery
+    /// `SourceReference::from_blocks_at` uses, so the two payload shapes never
+    /// grow parallel walks.
+    fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
+        let block = blocks.get(*index).ok_or(SchemaError::ExpectedEnumVariant)?;
+        match block {
+            Block::Atom(atom) => match DottedExpectation::Capitalized.read_entry(&blocks[*index..])
+            {
+                Ok(entry) => {
+                    let name =
+                        SourceVariantName::from_text(SourceReference::dotted_key_text(&entry))?;
+                    let payload =
+                        SourceReference::from_variant_payload(name.name(), entry.value())?;
+                    *index += entry.consumed();
+                    Ok(Self::Data(name, SourceVariantPayload::Reference(payload)))
+                }
+                // No top-level dot: the atom is a plain unit variant.
+                Err(NotaDecodeError::ExpectedDottedEntry { .. }) => {
+                    *index += 1;
+                    Ok(Self::Unit(SourceVariantName::from_text(atom.text())?))
+                }
+                Err(error) => Err(SchemaError::from(error)),
+            },
+            Block::Delimited {
+                delimiter: Delimiter::Parenthesis,
+                root_objects,
+                ..
+            } => {
+                *index += 1;
+                Self::from_parenthesis(root_objects)
+            }
+            _ => Err(SchemaError::ExpectedSyntaxEnumVariant {
+                found: block.reemit_fallback(),
+            }),
+        }
+    }
+
     fn from_atom_text(text: &str) -> Result<Self, SchemaError> {
         // A data variant is a CAPITALIZED variant head dotted onto its payload
         // reference; the split is the shared string-level dotted reader's. No
@@ -3548,6 +3600,40 @@ impl SourceReference {
             std::slice::from_ref(value),
             &mut cursor,
         )?])
+    }
+
+    /// Read the payload reference a variant head's dot bound as its value. A
+    /// grouped value `(Map.(Key Value))` unwraps to the single reference it
+    /// wraps; a plain inline value (`ProjectedPayload`, `Vector.Leaf`) is that
+    /// reference directly. An inline value that is itself an incomplete
+    /// application head (`Projected.Map.` sitting before a sibling group) is the
+    /// ungrouped multi-argument spelling the dot rule forbids, and it is
+    /// rejected here with the grouped form named rather than silently mis-bound.
+    fn from_variant_payload(variant: &Name, value: &Block) -> Result<Self, SchemaError> {
+        match value {
+            Block::Delimited {
+                delimiter: Delimiter::Parenthesis,
+                root_objects,
+                ..
+            } => {
+                let mut cursor = 0;
+                let reference = Self::from_blocks_at(root_objects, &mut cursor)?;
+                if cursor == root_objects.len() {
+                    Ok(reference)
+                } else {
+                    Err(SchemaError::ExpectedSyntaxReference {
+                        found: value.reemit_fallback(),
+                    })
+                }
+            }
+            Block::Atom(atom) if atom.text().ends_with('.') => {
+                Err(SchemaError::UngroupedVariantPayloadApplication {
+                    variant: variant.to_nota(),
+                    head: atom.text().trim_end_matches('.').to_owned(),
+                })
+            }
+            _ => Self::from_block(value),
+        }
     }
 
     fn from_atom_text(text: &str) -> Result<Self, SchemaError> {
@@ -4516,6 +4602,14 @@ impl<'name> SourceIdentifierCase<'name> {
             .chars()
             .next()
             .is_some_and(|character| character.is_ascii_uppercase())
+    }
+
+    /// A simple capitalized type identifier: a type name with no interior dotted
+    /// path. Import targets require this stricter shape so a dotted atom such as
+    /// the `X.Y` of `crate.module.[X.Y Z]` — which `is_type` would pass on its
+    /// leading uppercase alone — is rejected instead of silently kept whole.
+    fn is_simple_type(&self) -> bool {
+        self.is_type() && !self.0.as_str().contains('.')
     }
 
     fn is_namespace(&self) -> bool {

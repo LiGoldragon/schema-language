@@ -21,7 +21,7 @@
   MacroTemplateDelimited.{ MacroDelimiter MacroTemplateObjects }
   MacroCaptureName.String
   MacroAtom.String
-  MacroDelimiter.[SquareBracket Brace Parenthesis PipeParenthesis PipeBrace]
+  MacroDelimiter.[SquareBracket Brace Parenthesis]
   MacroPosition.[RootImports RootInput RootOutput RootNamespace NamespaceDeclaration StructFields EnumVariants TypeReference]
   MacroShape.[BraceMap ParenthesisEnum SquareStruct KeyValueDeclaration VariantDefinition Symbol]
   MacroOutputKind.[Imports RootEnum Types Type Fields Variants Reference References AssembledSchema]

@@ -363,3 +363,93 @@ fn map_with_wrong_argument_count_is_rejected() {
         }
     );
 }
+
+#[test]
+fn inline_grouped_multi_arg_variant_payload_lowers_to_map() {
+    // The grouped payload the dot rule prescribes — `Projected.(Map.(K V))` —
+    // now parses inline, with no intermediate named `ProjectedPayload` type. It
+    // lowers straight to the map reference. The named-type workaround stays
+    // legal (see `collection_payload_lowers_in_an_output_variant`); this proves
+    // the inline grouped form is a second legal path, not a replacement.
+    let schema = lower(
+        "{}\n[]\n[Projected.(Map.(NodeName NodeConfig))]\n{\n  NodeName.String\n  NodeConfig.String\n}\n{}\n{}",
+    );
+    let output_root = schema.output();
+    let payload = output_root
+        .as_enum()
+        .expect("output is the enum-body form")
+        .variants[0]
+        .payload
+        .as_ref()
+        .expect("projected payload");
+    assert_eq!(
+        payload,
+        &TypeReference::map(
+            TypeReference::new("NodeName"),
+            TypeReference::new("NodeConfig")
+        )
+    );
+}
+
+#[test]
+fn grouped_single_arg_variant_payload_lowers_to_vector() {
+    // The grouped single-argument payload `Listed.(Vector.NodeName)` parses
+    // through the same consumed-count reader and lowers to the vector reference.
+    let schema = lower("{}\n[]\n[Listed.(Vector.NodeName)]\n{\n  NodeName.String\n}\n{}\n{}");
+    let output_root = schema.output();
+    let payload = output_root
+        .as_enum()
+        .expect("output is the enum-body form")
+        .variants[0]
+        .payload
+        .as_ref()
+        .expect("listed payload");
+    assert_eq!(
+        payload,
+        &TypeReference::vector(TypeReference::new("NodeName"))
+    );
+}
+
+#[test]
+fn ungrouped_multi_arg_variant_payload_is_rejected() {
+    // The ungrouped spelling `Projected.Map.(NodeName NodeConfig)` is the
+    // left-associative form the dot rule forbids for a multi-argument payload.
+    // It is a typed rejection that names the required grouped form, not a raw
+    // decode error and not a silent mis-binding.
+    let error = SchemaEngine::default()
+        .lower_source(
+            "{}\n[]\n[Projected.Map.(NodeName NodeConfig)]\n{\n  NodeName.String\n  NodeConfig.String\n}\n{}\n{}",
+            SchemaIdentity::new("collections:lib", "0.1.0"),
+        )
+        .expect_err("a multi-argument variant payload must be grouped");
+    assert_eq!(
+        error,
+        schema_language::SchemaError::UngroupedVariantPayloadApplication {
+            variant: "Projected".to_owned(),
+            head: "Map".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn grouped_variant_payload_round_trips_canonical_source() {
+    // The emitter re-emits the grouped multi-argument payload with minimal
+    // grouping, matching the struct-field application emitter: the multi-token
+    // payload keeps its group, the single-token payload emits bare. Both forms
+    // re-parse to the same artifact.
+    let source = "{}\n[]\n[Projected.(Map.(NodeName NodeConfig)) Listed.(Vector.NodeName)]\n{\n  NodeName.String\n  NodeConfig.String\n}\n{}\n{}\n";
+    let artifact =
+        schema_language::SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
+    let canonical = artifact.to_schema_text();
+    assert!(
+        canonical.contains("Projected.(Map.(NodeName NodeConfig))"),
+        "multi-argument payload keeps its group: {canonical}"
+    );
+    assert!(
+        canonical.contains("Listed.Vector.NodeName"),
+        "single-token payload emits ungrouped: {canonical}"
+    );
+    let recovered = schema_language::SchemaSourceArtifact::from_schema_text(&canonical)
+        .expect("canonical schema text decodes again");
+    assert_eq!(recovered.to_schema_text(), canonical);
+}

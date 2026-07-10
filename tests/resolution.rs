@@ -37,6 +37,26 @@ fn import_source_rejects_target_without_crate_module_type() {
 }
 
 #[test]
+fn dotted_import_target_in_a_bracket_is_rejected() {
+    // A trailing-dot import path collects its bracket atoms as targets. A target
+    // must be a simple capitalized type name; a dotted atom like `Deep.Type` is
+    // not a target — its path segments belong before the bracket. The leading
+    // uppercase alone must not pass it.
+    let error = SchemaEngine::default()
+        .lower_source(
+            "{ crate.module.[Deep.Type Plain] }\n[]\n[]\n{ Local.String }\n{}\n{}",
+            SchemaIdentity::new("import-target:lib", "0.1.0"),
+        )
+        .expect_err("a dotted import target is malformed");
+    assert_eq!(
+        error,
+        SchemaError::MalformedImportTarget {
+            target: "Deep.Type".to_owned(),
+        }
+    );
+}
+
+#[test]
 fn resolver_resolves_import_against_dependency_schema_directory() {
     let resolver = ImportResolver::new().with_dependency(
         "marker-core",

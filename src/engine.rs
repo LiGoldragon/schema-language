@@ -142,6 +142,12 @@ pub enum SchemaError {
     ReservedScalarTypeName { name: String },
     #[error("malformed import source: {found}")]
     MalformedImportSource { found: String },
+    #[error(
+        "malformed import target {target}; an import target must be a simple capitalized type \
+         name, not a dotted path — write the path segments before the bracket, as in \
+         crate.module.[Type]"
+    )]
+    MalformedImportTarget { target: String },
     #[error("unresolved import crate {crate_name}")]
     UnresolvedImportCrate { crate_name: String },
     #[error("imported type {type_name} not found in {crate_name}:{module}")]
@@ -173,6 +179,13 @@ pub enum SchemaError {
     },
     #[error("expected a syntax enum variant, found {found}")]
     ExpectedSyntaxEnumVariant { found: String },
+    #[error(
+        "ungrouped multi-argument variant payload for variant {variant}: the application head \
+         {head} carries multiple arguments, which the dot rule requires be grouped — write the \
+         grouped payload {variant}.({head}.(…)), for example Projected.(Map.(Key Value)), never \
+         the left-associative {variant}.{head}.(…)"
+    )]
+    UngroupedVariantPayloadApplication { variant: String, head: String },
     #[error("duplicate source declaration {name}")]
     DuplicateSourceDeclaration { name: String },
     #[error("schema edit target {type_name} not found")]
