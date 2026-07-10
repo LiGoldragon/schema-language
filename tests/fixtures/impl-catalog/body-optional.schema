@@ -2,6 +2,9 @@
 []
 []
 {
-  StatementText String
-  StatementText {| Display (word_count {} Integer) |}
+  StatementText.String
+}
+{}
+{
+  StatementText.[ Display (word_count {} Integer) ]
 }

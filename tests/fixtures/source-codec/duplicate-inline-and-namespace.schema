@@ -1,4 +1,8 @@
 {}
 [(Record { topic Topic })]
 []
-{ Topic String }
+{
+  Topic.String
+}
+{}
+{}

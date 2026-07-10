@@ -14,42 +14,44 @@
  Rejected.RejectedPayload
  Indexed.IndexedPayload]
 {
-  RecordPayload Entry
-  CorrectPayload Correction
-  ObservePayload Query
-  WatchPayload WatchRequest
-  UnwatchPayload SubscriptionToken
-  RecordedPayload RecordReceipt
-  CorrectedPayload CorrectionReceipt
-  ObservedPayload RecordSet
-  WatchingPayload SubscriptionReceipt
-  UnwatchedPayload SubscriptionReceipt
-  RejectedPayload Rejection
-  IndexedPayload IndexReceipt
-  Topic String
-  Topics Vector.Topic
-  Description String
-  AgentName String
-  Timestamp Integer
-  RecordIdentifier Integer
-  SubscriptionToken Integer
-  CommitSequence Integer
-  DatabaseDigest Integer
-  Kinds Vector.Kind
-  Limit Optional.Integer
-  Records Vector.Entry
-  ByTopic Map.(Topic RecordIdentifier)
-  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
-  Kind [Decision Principle Correction Clarification Constraint Observation Question]
-  RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion]
-  Entry { Topics Kind Description Magnitude AgentName Timestamp }
-  Correction { RecordIdentifier Description Magnitude AgentName Timestamp }
-  Query { Topics Kinds Limit }
-  WatchRequest { Topics Kinds AgentName }
-  RecordReceipt { RecordIdentifier CommitSequence DatabaseDigest }
-  CorrectionReceipt { RecordIdentifier CommitSequence DatabaseDigest }
-  RecordSet { Records ByTopic }
-  SubscriptionReceipt { SubscriptionToken CommitSequence }
-  Rejection { RejectionReason Description }
-  IndexReceipt { CommitSequence DatabaseDigest }
+  RecordPayload.Entry
+  CorrectPayload.Correction
+  ObservePayload.Query
+  WatchPayload.WatchRequest
+  UnwatchPayload.SubscriptionToken
+  RecordedPayload.RecordReceipt
+  CorrectedPayload.CorrectionReceipt
+  ObservedPayload.RecordSet
+  WatchingPayload.SubscriptionReceipt
+  UnwatchedPayload.SubscriptionReceipt
+  RejectedPayload.Rejection
+  IndexedPayload.IndexReceipt
+  Topic.String
+  Topics.Vector.Topic
+  Description.String
+  AgentName.String
+  Timestamp.Integer
+  RecordIdentifier.Integer
+  SubscriptionToken.Integer
+  CommitSequence.Integer
+  DatabaseDigest.Integer
+  Kinds.Vector.Kind
+  Limit.Optional.Integer
+  Records.Vector.Entry
+  ByTopic.Map.(Topic RecordIdentifier)
+  Magnitude.[Minimum VeryLow Low Medium High VeryHigh Maximum]
+  Kind.[Decision Principle Correction Clarification Constraint Observation Question]
+  RejectionReason.[Malformed Unauthorized Conflict Unsupported StaleVersion]
+  Entry.{ Topics Kind Description Magnitude AgentName Timestamp }
+  Correction.{ RecordIdentifier Description Magnitude AgentName Timestamp }
+  Query.{ Topics Kinds Limit }
+  WatchRequest.{ Topics Kinds AgentName }
+  RecordReceipt.{ RecordIdentifier CommitSequence DatabaseDigest }
+  CorrectionReceipt.{ RecordIdentifier CommitSequence DatabaseDigest }
+  RecordSet.{ Records ByTopic }
+  SubscriptionReceipt.{ SubscriptionToken CommitSequence }
+  Rejection.{ RejectionReason Description }
+  IndexReceipt.{ CommitSequence DatabaseDigest }
 }
+{}
+{}

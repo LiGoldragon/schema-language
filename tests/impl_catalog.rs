@@ -2,8 +2,8 @@ use std::fs;
 
 use schema_language::{
     ImplFact, ImplReference, MethodParameter, MethodSignature, Name, RustSurface, SchemaEngine,
-    SchemaError, SchemaIdentity, SchemaSourceArtifact, SourceImplEntry, SourceNamespaceEntry,
-    SourceReference, TrueSchema, TypeDeclaration, TypeReference,
+    SchemaError, SchemaIdentity, SchemaSourceArtifact, SourceImplEntry, SourceReference,
+    TrueSchema, TypeDeclaration, TypeReference,
 };
 
 fn impl_catalog_fixture(name: &str) -> String {
@@ -13,13 +13,9 @@ fn impl_catalog_fixture(name: &str) -> String {
         .to_owned()
 }
 
-fn namespace_entries(artifact: &SchemaSourceArtifact) -> Vec<SourceNamespaceEntry> {
-    artifact.source().namespace().entries().to_vec()
-}
-
 /// Lower a fixture through the typed source archive into a `TrueSchema`, the
-/// path that carries the full impl catalog onto each `Declaration` and the
-/// standalone `ImplBlock`s.
+/// path that carries every impl catalog as a standalone `ImplBlock` keyed by
+/// its target type.
 fn lower_fixture(name: &str) -> TrueSchema {
     let artifact = SchemaSourceArtifact::from_schema_text(&impl_catalog_fixture(name))
         .expect("source decodes");
@@ -29,22 +25,22 @@ fn lower_fixture(name: &str) -> TrueSchema {
 }
 
 /// The canonical schema-source text must be byte-stable through
-/// decode -> to_schema_text -> re-decode, with the `{| … |}` impl block
-/// surfaced verbatim. This is the same round-trip contract the source codec
-/// tests assert, extended to the new trailing impl-block syntax.
+/// decode -> to_schema_text -> re-decode, with the `impls` block entry
+/// `TypeName.[ … ]` surfaced verbatim. This is the same round-trip contract the
+/// source codec tests assert, extended to the six-block impls surface.
 #[test]
-fn fused_marker_impls_round_trip() {
+fn marker_impls_round_trip() {
     let source = impl_catalog_fixture("fused-markers");
     let artifact = SchemaSourceArtifact::from_schema_text(&source).expect("schema source decodes");
     let canonical = artifact.to_schema_text();
 
     assert_eq!(
         canonical, source,
-        "fused marker impls should write a byte-stable canonical surface"
+        "marker impls should write a byte-stable canonical surface"
     );
     assert!(
-        canonical.contains("RecordIdentifier String {| Display Ord |}"),
-        "canonical surface must carry the fused marker impl block: {canonical}"
+        canonical.contains("RecordIdentifier.[ Display Ord ]"),
+        "canonical surface must carry the impls-block entry: {canonical}"
     );
 
     let recovered =
@@ -56,18 +52,18 @@ fn fused_marker_impls_round_trip() {
 }
 
 #[test]
-fn body_optional_impls_round_trip() {
+fn method_signature_impls_round_trip() {
     let source = impl_catalog_fixture("body-optional");
     let artifact = SchemaSourceArtifact::from_schema_text(&source).expect("schema source decodes");
     let canonical = artifact.to_schema_text();
 
     assert_eq!(
         canonical, source,
-        "body-optional impls should write a byte-stable canonical surface"
+        "method-signature impls should write a byte-stable canonical surface"
     );
     assert!(
-        canonical.contains("StatementText {| Display (word_count {} Integer) |}"),
-        "canonical surface must carry the body-optional impl block: {canonical}"
+        canonical.contains("StatementText.[ Display (word_count {} Integer) ]"),
+        "canonical surface must carry the impls-block entry: {canonical}"
     );
 
     let recovered =
@@ -86,7 +82,7 @@ fn trait_method_signature_impls_round_trip() {
         "trait + method-signature impls should write a byte-stable canonical surface"
     );
     assert!(
-        canonical.contains("{| QueryMatcher [ (matches { candidate.Node } Boolean) ] |}"),
+        canonical.contains("NodeQuery.[ QueryMatcher [ (matches { candidate.Node } Boolean) ] ]"),
         "canonical surface must carry the trait impl with method signatures: {canonical}"
     );
 
@@ -95,10 +91,10 @@ fn trait_method_signature_impls_round_trip() {
     assert_eq!(artifact, recovered);
 }
 
-/// The new typed impl-catalog nouns must survive the rkyv archive boundary —
-/// the same binary round-trip the source codec asserts for every typed
-/// source noun. This is what proves `SourceImplCatalog` / `SourceImplEntry` /
-/// `SourceMethodSignature` are real archive members, not parser-only state.
+/// The typed impl-catalog nouns must survive the rkyv archive boundary — the
+/// same binary round-trip the source codec asserts for every typed source noun.
+/// This is what proves `SourceImpls` / `SourceImplsEntry` / `SourceImplCatalog`
+/// / `SourceImplEntry` are real archive members, not parser-only state.
 #[test]
 fn impl_catalog_round_trips_through_binary_archive() {
     for name in ["fused-markers", "body-optional", "trait-method-sigs"] {
@@ -120,18 +116,20 @@ fn impl_catalog_round_trips_through_binary_archive() {
     }
 }
 
-/// The decoded catalog must expose its entries as typed data: markers as
-/// trait names, trait impls with their method signatures, and inherent
-/// method signatures with typed return references.
+/// The decoded `impls` block must expose its entries as typed data: markers as
+/// trait names, trait impls with their method signatures, and inherent method
+/// signatures with typed return references. Each entry is keyed by the type it
+/// targets.
 #[test]
 fn impl_catalog_decodes_each_entry_kind() {
     let fused = SchemaSourceArtifact::from_schema_text(&impl_catalog_fixture("fused-markers"))
         .expect("schema source decodes");
-    let entries = namespace_entries(&fused);
-    let [record_identifier] = entries.as_slice() else {
-        panic!("expected one namespace entry, found {}", entries.len());
+    let entries = fused.source().impls().entries();
+    let [record_identifier] = entries else {
+        panic!("expected one impls entry, found {}", entries.len());
     };
-    let markers = record_identifier.impls().entries();
+    assert_eq!(record_identifier.target().as_str(), "RecordIdentifier");
+    let markers = record_identifier.catalog().entries();
     assert_eq!(markers.len(), 2, "two marker impls");
     assert!(matches!(&markers[0], SourceImplEntry::Marker(name) if name.as_str() == "Display"));
     assert!(matches!(&markers[1], SourceImplEntry::Marker(name) if name.as_str() == "Ord"));
@@ -139,20 +137,12 @@ fn impl_catalog_decodes_each_entry_kind() {
     let body_optional =
         SchemaSourceArtifact::from_schema_text(&impl_catalog_fixture("body-optional"))
             .expect("schema source decodes");
-    let entries = namespace_entries(&body_optional);
-    // Two entries share the name `StatementText`: the body-bearing declaration
-    // and the body-optional impl block (Ruling 1: the impl target is declared
-    // elsewhere). The catalog rides on the body-optional entry.
-    assert_eq!(
-        entries.len(),
-        2,
-        "a declaration entry plus a body-optional impl entry"
-    );
-    let statement_text = entries
-        .iter()
-        .find(|entry| !entry.impls().is_empty())
-        .expect("the body-optional entry carries the catalog");
-    let catalog = statement_text.impls().entries();
+    let entries = body_optional.source().impls().entries();
+    let [statement_text] = entries else {
+        panic!("expected one impls entry, found {}", entries.len());
+    };
+    assert_eq!(statement_text.target().as_str(), "StatementText");
+    let catalog = statement_text.catalog().entries();
     assert_eq!(catalog.len(), 2, "one marker plus one inherent method");
     assert!(matches!(&catalog[0], SourceImplEntry::Marker(name) if name.as_str() == "Display"));
     let SourceImplEntry::InherentMethod(signature) = &catalog[1] else {
@@ -168,11 +158,12 @@ fn impl_catalog_decodes_each_entry_kind() {
     let trait_sigs =
         SchemaSourceArtifact::from_schema_text(&impl_catalog_fixture("trait-method-sigs"))
             .expect("schema source decodes");
-    let entries = namespace_entries(&trait_sigs);
-    let [node_query] = entries.as_slice() else {
-        panic!("expected one namespace entry, found {}", entries.len());
+    let entries = trait_sigs.source().impls().entries();
+    let [node_query] = entries else {
+        panic!("expected one impls entry, found {}", entries.len());
     };
-    let catalog = node_query.impls().entries();
+    assert_eq!(node_query.target().as_str(), "NodeQuery");
+    let catalog = node_query.catalog().entries();
     assert_eq!(catalog.len(), 1, "one trait impl");
     let SourceImplEntry::TraitImpl(trait_name, signatures) = &catalog[0] else {
         panic!("expected a trait impl, found {:?}", catalog[0]);
@@ -196,39 +187,34 @@ fn impl_catalog_decodes_each_entry_kind() {
     );
 }
 
-/// The macro/engine namespace walk (the second of the two parallel parsers)
-/// must accept the same fused and body-optional shapes: a fused entry lowers
-/// its inline body to a type declaration while the trailing `{| … |}` block
-/// is skipped, and a body-optional `TypeName {| … |}` mints no declaration on
-/// this path. This proves the engine walk and the source walk segment entries
-/// identically — the boundary the plan flags as the riskiest divergence.
+/// The macro/engine path and the typed-source path must segment the six-block
+/// declaration and impls blocks identically: type entries lower to declarations
+/// and every impls entry lowers to a standalone `ImplBlock` keyed by its target.
 #[test]
-fn engine_namespace_walk_accepts_fused_and_body_optional_entries() {
-    // The body-optional `StatementText {| … |}` references a `StatementText`
-    // declared by a separate body-bearing entry (Ruling 1).
-    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} StatementText String StatementText {| Display |} Topic String }";
+fn engine_walk_accepts_type_and_impls_entries() {
+    let source = "{}\n[]\n[]\n{ RecordIdentifier.String StatementText.String Topic.String }\n{}\n{ RecordIdentifier.[ Display Ord ] StatementText.[ Display ] }";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
-        .expect("engine lowers fused and body-optional entries");
+        .expect("engine lowers type and impls entries");
 
     let TypeDeclaration::Newtype(record_identifier) = schema
         .type_named("RecordIdentifier")
-        .expect("fused body lowers")
+        .expect("type entry lowers")
     else {
-        panic!("RecordIdentifier should lower to a newtype from its inline body");
+        panic!("RecordIdentifier should lower to a newtype from its type entry");
     };
     assert_eq!(record_identifier.reference, TypeReference::String);
 
     let TypeDeclaration::Newtype(topic) = schema
         .type_named("Topic")
-        .expect("entry after an impl block still lowers")
+        .expect("entry after other entries still lowers")
     else {
         panic!("Topic should lower to a newtype");
     };
     assert_eq!(topic.reference, TypeReference::String);
 
-    // The body-optional entry mints no *second* declaration; the target is
-    // the one declared by the body-bearing entry.
+    // Every declared type is minted exactly once; the impls block mints no
+    // second declaration for its target.
     assert_eq!(
         schema
             .namespace()
@@ -236,66 +222,79 @@ fn engine_namespace_walk_accepts_fused_and_body_optional_entries() {
             .filter(|declaration| declaration.name().as_str() == "StatementText")
             .count(),
         1,
-        "the body-optional target is declared once, by its body-bearing entry"
+        "the impls target is declared once, by its type entry"
     );
 
-    // The macro/engine path now carries the impl catalog too (Ruling/Fix 3
-    // parity): the fused markers ride on RecordIdentifier, and the
-    // body-optional block targets StatementText.
-    let namespace = schema.namespace();
-    let record_identifier_impls = namespace
+    // Impls always live in standalone blocks, keyed by the type they target.
+    let mut blocks: Vec<(String, usize)> = schema
+        .impl_blocks()
         .iter()
-        .find(|declaration| declaration.name().as_str() == "RecordIdentifier")
-        .expect("RecordIdentifier declared")
-        .impls()
-        .entries();
+        .map(|block| {
+            (
+                block.target().as_str().to_owned(),
+                block.catalog().entries().len(),
+            )
+        })
+        .collect();
+    blocks.sort();
     assert_eq!(
-        record_identifier_impls.len(),
-        2,
-        "the engine path carries the fused marker catalog"
+        blocks,
+        vec![
+            ("RecordIdentifier".to_owned(), 2),
+            ("StatementText".to_owned(), 1)
+        ],
+        "the engine path carries every catalog as a standalone impl block"
     );
 
-    let impl_blocks = schema.impl_blocks();
-    let [block] = impl_blocks.as_slice() else {
-        panic!("expected one standalone impl block on the engine path, found {impl_blocks:?}");
-    };
-    assert_eq!(block.target().as_str(), "StatementText");
+    // No catalog rides on a declaration under the uniform-standalone model.
+    assert!(
+        schema
+            .namespace()
+            .iter()
+            .all(|declaration| declaration.impls().entries().is_empty()),
+        "no declaration carries a fused catalog"
+    );
 }
 
-/// A `{| … |}` impl block must trail a type name — a leading impl block with
-/// no preceding head is rejected, proving the entry walk does not silently
-/// swallow a stray pipe-brace.
+/// An `impls` block entry keyed by a lowercase, undotted name is rejected — an
+/// impls entry must be a capitalized `TypeName.[ … ]`, so the reader never
+/// silently accepts a malformed key.
 #[test]
-fn leading_impl_block_is_rejected() {
-    let source = "{}\n[]\n[]\n{\n  {| Display |}\n}";
+fn undotted_impls_entry_is_rejected() {
+    let source = "{}\n[]\n[]\n{ RecordIdentifier.String }\n{}\n{ recordIdentifier }";
     let error =
-        SchemaSourceArtifact::from_schema_text(source).expect_err("leading impl block is rejected");
-    let message = error.to_string();
+        SchemaSourceArtifact::from_schema_text(source).expect_err("an undotted impls entry fails");
     assert!(
-        message.contains("impl block") && message.contains("trail"),
-        "error should name the leading-impl-block boundary, got: {message}"
+        matches!(error, SchemaError::ExpectedSyntaxDeclaration { .. }),
+        "expected an ExpectedSyntaxDeclaration error, got: {error}"
     );
 }
 
 // ---- STEP 3: lowering the catalog to an enumerable manifest ----
 
-/// A fused `RecordIdentifier String {| Display Ord |}` lowers to a newtype
-/// declaration whose `impls()` enumerates both marker traits, in order.
+/// A `RecordIdentifier.[ Display Ord ]` impls entry lowers to a standalone
+/// `ImplBlock` whose catalog enumerates both marker traits, in order, and the
+/// declaration it targets carries no fused catalog.
 #[test]
-fn fused_markers_lower_onto_the_declaration() {
+fn markers_lower_to_a_standalone_block() {
     let schema = lower_fixture("fused-markers");
     let namespace = schema.namespace();
     let declaration = namespace
         .iter()
         .find(|declaration| declaration.name().as_str() == "RecordIdentifier")
         .expect("RecordIdentifier lowers");
-
-    let entries = declaration.impls().entries();
-    assert_eq!(
-        entries.len(),
-        2,
-        "two marker impls attach to the declaration"
+    assert!(
+        declaration.impls().entries().is_empty(),
+        "impls do not ride on the declaration under the uniform-standalone model"
     );
+
+    let blocks = schema.impl_blocks();
+    let [block] = blocks.as_slice() else {
+        panic!("expected one standalone impl block, found {blocks:?}");
+    };
+    assert_eq!(block.target().as_str(), "RecordIdentifier");
+    let entries = block.catalog().entries();
+    assert_eq!(entries.len(), 2, "two marker impls attach to the block");
     assert!(matches!(&entries[0], ImplReference::Marker(name) if name.as_str() == "Display"));
     assert!(matches!(&entries[1], ImplReference::Marker(name) if name.as_str() == "Ord"));
 
@@ -306,7 +305,7 @@ fn fused_markers_lower_onto_the_declaration() {
         manifest
             .iter()
             .all(|reference| reference.target().as_str() == "RecordIdentifier"),
-        "every fused entry targets RecordIdentifier"
+        "every entry targets RecordIdentifier"
     );
 }
 
@@ -316,13 +315,13 @@ fn fused_markers_lower_onto_the_declaration() {
 #[test]
 fn trait_method_signatures_lower_with_resolved_references() {
     let schema = lower_fixture("trait-method-sigs");
-    let namespace = schema.namespace();
-    let declaration = namespace
-        .iter()
-        .find(|declaration| declaration.name().as_str() == "NodeQuery")
-        .expect("NodeQuery lowers");
+    let blocks = schema.impl_blocks();
+    let [block] = blocks.as_slice() else {
+        panic!("expected one standalone impl block, found {blocks:?}");
+    };
+    assert_eq!(block.target().as_str(), "NodeQuery");
 
-    let entries = declaration.impls().entries();
+    let entries = block.catalog().entries();
     let [ImplReference::TraitImpl(trait_name, methods)] = entries else {
         panic!("expected one trait impl, found {entries:?}");
     };
@@ -344,17 +343,16 @@ fn trait_method_signatures_lower_with_resolved_references() {
     );
 }
 
-/// A body-optional `StatementText {| … |}` mints no type declaration of its
-/// own but surfaces as a standalone `ImplBlock` targeting `StatementText` —
-/// the type declared by a separate body-bearing entry (Ruling 1: the target
-/// must resolve to a type declared elsewhere in the same schema). Its catalog
-/// is enumerable through the schema-wide manifest.
+/// A `StatementText.[ … ]` impls entry surfaces as a standalone `ImplBlock`
+/// targeting `StatementText` — the type declared by a separate type entry
+/// (Ruling 1: the target must resolve to a type declared elsewhere in the same
+/// schema). Its catalog is enumerable through the schema-wide manifest.
 #[test]
-fn body_optional_lowers_to_a_standalone_impl_block() {
+fn impls_entry_lowers_to_a_standalone_impl_block() {
     let schema = lower_fixture("body-optional");
 
-    // The target is declared exactly once, by the body-bearing entry — the
-    // body-optional impl entry adds no second declaration.
+    // The target is declared exactly once, by its type entry — the impls entry
+    // adds no second declaration.
     assert_eq!(
         schema
             .namespace()
@@ -362,12 +360,12 @@ fn body_optional_lowers_to_a_standalone_impl_block() {
             .filter(|declaration| declaration.name().as_str() == "StatementText")
             .count(),
         1,
-        "the body-optional target is declared by a separate entry, not minted twice"
+        "the impls target is declared by a type entry, not minted twice"
     );
 
-    let impl_blocks = schema.impl_blocks();
-    let [block] = impl_blocks.as_slice() else {
-        panic!("expected one standalone impl block, found {impl_blocks:?}");
+    let blocks = schema.impl_blocks();
+    let [block] = blocks.as_slice() else {
+        panic!("expected one standalone impl block, found {blocks:?}");
     };
     assert_eq!(block.target().as_str(), "StatementText");
     let entries = block.catalog().entries();
@@ -380,18 +378,14 @@ fn body_optional_lowers_to_a_standalone_impl_block() {
     assert!(signature.parameters().is_empty(), "nullary method");
     assert_eq!(signature.return_reference(), &TypeReference::Integer);
 
-    // The manifest reaches the body-optional block's entries by their target.
+    // The manifest reaches the block's entries by their target.
     let manifest = schema.referenced_impls();
-    assert_eq!(
-        manifest.len(),
-        2,
-        "manifest reaches the body-optional entries"
-    );
+    assert_eq!(manifest.len(), 2, "manifest reaches the impls entries");
     assert!(
         manifest
             .iter()
             .all(|reference| reference.target().as_str() == "StatementText"),
-        "the body-optional entries target StatementText"
+        "the impls entries target StatementText"
     );
 }
 
@@ -420,9 +414,7 @@ fn node_query_surface() -> RustSurface {
 }
 
 /// The trust boundary: when every referenced trait/method signature is
-/// present on the declared Rust surface, verification passes. This is the
-/// out-of-band catalog check the seam needs — the schema references impls
-/// that live on the Rust side, and the boundary confirms they exist.
+/// present on the declared Rust surface, verification passes.
 #[test]
 fn present_signatures_pass_verification() {
     let schema = lower_fixture("trait-method-sigs");
@@ -433,13 +425,10 @@ fn present_signatures_pass_verification() {
 
 /// The falsifiable half of the trust boundary: a reference to an ABSENT
 /// method signature must FAIL with a typed error naming the exact missing
-/// signature. Here the surface knows the `QueryMatcher` trait impl but is
-/// missing the `matches` method — the catalog references a method the crate
-/// does not provide, and verification rejects it.
+/// signature.
 #[test]
 fn absent_method_signature_fails_verification() {
     let schema = lower_fixture("trait-method-sigs");
-    // A surface with the trait impl but WITHOUT the `matches` method.
     let surface = RustSurface::new(vec![ImplFact::trait_impl(
         Name::new("NodeQuery"),
         Name::new("QueryMatcher"),
@@ -459,8 +448,6 @@ fn absent_method_signature_fails_verification() {
     };
     assert_eq!(target, "NodeQuery");
     assert_eq!(*kind, "method signature");
-    // Fix 5: the error carries the FULL signature, not just the method name —
-    // name plus parameter (candidate.Node) plus return type (Boolean).
     assert!(
         signature.contains("matches")
             && signature.contains("candidate")
@@ -475,7 +462,6 @@ fn absent_method_signature_fails_verification() {
 #[test]
 fn absent_trait_impl_fails_verification() {
     let schema = lower_fixture("fused-markers");
-    // The surface knows `Display` for `RecordIdentifier` but not `Ord`.
     let surface = RustSurface::new(vec![ImplFact::trait_impl(
         Name::new("RecordIdentifier"),
         Name::new("Display"),
@@ -502,8 +488,7 @@ fn absent_trait_impl_fails_verification() {
 
 /// Project a schema's whole impl manifest to comparable owned data: each
 /// `(target, entry)` pair from `referenced_impls`, cloned so it outlives the
-/// borrowed schema. The order is the manifest's walk order (declarations
-/// first, then standalone blocks), which both lowering paths share.
+/// borrowed schema.
 fn manifest_pairs(schema: &TrueSchema) -> Vec<(String, ImplReference)> {
     schema
         .referenced_impls()
@@ -532,10 +517,9 @@ fn lower_via_source_path(source: &str) -> TrueSchema {
         .expect("source path lowers")
 }
 
-/// Ruling 1: a body-optional `TypeName {| … |}` whose target is NOT declared
-/// anywhere in the schema is a typed error — not an accepted free-standing
-/// impl over an arbitrary name. The fixture references `StatementText`, which
-/// is never declared (only `Topic` is), so lowering rejects it.
+/// Ruling 1: an `impls` entry whose target is NOT declared anywhere in the
+/// schema is a typed error. The fixture references `StatementText`, which is
+/// never declared (only `Topic` is), so lowering rejects it.
 #[test]
 fn unresolved_impl_target_is_rejected() {
     let artifact =
@@ -543,7 +527,7 @@ fn unresolved_impl_target_is_rejected() {
             .expect("source decodes");
     let error = SchemaEngine::default()
         .lower_schema_source(artifact.source(), SchemaIdentity::new("example", "0.1.0"))
-        .expect_err("an impl block over an undeclared type must be rejected");
+        .expect_err("an impls entry over an undeclared type must be rejected");
 
     let SchemaError::UnresolvedImplTarget { name } = &error else {
         panic!("expected an UnresolvedImplTarget error, got: {error}");
@@ -554,14 +538,13 @@ fn unresolved_impl_target_is_rejected() {
     );
 }
 
-/// The same unresolved-target rejection holds on the macro/document path —
-/// neither path silently accepts an impl over an undeclared type.
+/// The same unresolved-target rejection holds on the macro/document path.
 #[test]
 fn unresolved_impl_target_is_rejected_on_both_paths() {
     let source = impl_catalog_fixture("unresolved-target");
     let error = SchemaEngine::default()
         .lower_source(&source, SchemaIdentity::new("example", "0.1.0"))
-        .expect_err("the macro path must reject an impl over an undeclared type");
+        .expect_err("the macro path must reject an impls entry over an undeclared type");
     assert!(
         matches!(&error, SchemaError::UnresolvedImplTarget { name } if name == "StatementText"),
         "macro path names the undeclared target, got: {error}"
@@ -570,14 +553,12 @@ fn unresolved_impl_target_is_rejected_on_both_paths() {
 
 // ---- STEP A, Fix 2: duplicate vs. composing impl blocks ----
 
-/// Ruling 2: multiple impl blocks for the SAME target COMPOSE — their
-/// distinct entries union. Here two body-optional blocks target the
-/// elsewhere-declared `StatementText`, one carrying `Display`, the other
-/// `Ord`; the manifest enumerates both.
+/// Ruling 2: multiple impls entries for the SAME target COMPOSE — their
+/// distinct entries union. Here two entries target `StatementText`, one
+/// carrying `Display`, the other `Ord`; the manifest enumerates both.
 #[test]
-fn distinct_impl_blocks_for_one_target_compose() {
-    let source =
-        "{} [] [] { StatementText String StatementText {| Display |} StatementText {| Ord |} }";
+fn distinct_impls_entries_for_one_target_compose() {
+    let source = "{}\n[]\n[]\n{ StatementText.String }\n{}\n{ StatementText.[ Display ] StatementText.[ Ord ] }";
     let schema = lower_via_source_path(source);
 
     let pairs = manifest_pairs(&schema);
@@ -597,12 +578,10 @@ fn distinct_impl_blocks_for_one_target_compose() {
 }
 
 /// Ruling 2: a TRUE duplicate — the same trait marker twice on one target,
-/// across two blocks — is a typed error. Distinct entries compose; an
-/// identical entry collides.
+/// across two entries — is a typed error.
 #[test]
-fn duplicate_marker_across_blocks_is_rejected() {
-    let source =
-        "{} [] [] { StatementText String StatementText {| Display |} StatementText {| Display |} }";
+fn duplicate_marker_across_entries_is_rejected() {
+    let source = "{}\n[]\n[]\n{ StatementText.String }\n{}\n{ StatementText.[ Display ] StatementText.[ Display ] }";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let error = artifact
         .source()
@@ -619,12 +598,10 @@ fn duplicate_marker_across_blocks_is_rejected() {
     assert_eq!(entry, "Display", "the error names the duplicated marker");
 }
 
-/// A true duplicate of the same method SIGNATURE on one target is rejected —
-/// here the same inherent method appears in a fused catalog and again in a
-/// separate body-optional block.
+/// A true duplicate of the same method SIGNATURE on one target is rejected.
 #[test]
 fn duplicate_method_signature_on_one_target_is_rejected() {
-    let source = "{} [] [] { StatementText String {| (word_count {} Integer) |} StatementText {| (word_count {} Integer) |} }";
+    let source = "{}\n[]\n[]\n{ StatementText.String }\n{}\n{ StatementText.[ (word_count {} Integer) ] StatementText.[ (word_count {} Integer) ] }";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let error = artifact
         .source()
@@ -645,11 +622,10 @@ fn duplicate_method_signature_on_one_target_is_rejected() {
 }
 
 /// Two methods with the SAME name but DIFFERENT signatures are distinct, not a
-/// duplicate — they compose. This guards the composition key against
-/// collapsing on the method name alone.
+/// duplicate — they compose.
 #[test]
 fn distinct_method_signatures_same_name_compose() {
-    let source = "{} [] [] { Topic String StatementText String {| (length {} Integer) (length { unit.Topic } Integer) |} }";
+    let source = "{}\n[]\n[]\n{ Topic.String StatementText.String }\n{}\n{ StatementText.[ (length {} Integer) (length { unit.Topic } Integer) ] }";
     let schema = lower_via_source_path(source);
     let pairs = manifest_pairs(&schema);
     assert_eq!(
@@ -663,11 +639,10 @@ fn distinct_method_signatures_same_name_compose() {
 
 /// The load-bearing correctness witness: one schema text lowered through the
 /// macro/document path and through the typed-source path must produce the SAME
-/// impl manifest AND the same standalone impl blocks. Before the fix the macro
-/// path dropped the catalog entirely; now both carry it identically.
+/// impl manifest AND the same standalone impl blocks.
 #[test]
 fn both_lowering_paths_produce_the_same_impls() {
-    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} StatementText String StatementText {| Display (word_count {} Integer) |} }";
+    let source = "{}\n[]\n[]\n{ RecordIdentifier.String StatementText.String }\n{}\n{ RecordIdentifier.[ Display Ord ] StatementText.[ Display (word_count {} Integer) ] }";
 
     let macro_schema = lower_via_macro_path(source);
     let source_schema = lower_via_source_path(source);
@@ -703,19 +678,18 @@ fn both_lowering_paths_produce_the_same_impls() {
         "the two paths must surface the same standalone impl blocks"
     );
 
-    // And the manifest is non-empty — the witness would be vacuous if both
-    // paths simply produced no impls.
     assert!(
         !manifest_pairs(&macro_schema).is_empty(),
         "the parity witness must compare a non-empty manifest"
     );
 }
 
-/// Parity also holds for the fused-only shape (no standalone blocks): the
-/// markers ride on the declaration's `impls()` identically on both paths.
+/// Parity also holds for a single-target impls block: the entry lowers to the
+/// same standalone block on both paths, and no catalog rides on a declaration.
 #[test]
-fn both_lowering_paths_carry_fused_catalogs() {
-    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} }";
+fn both_lowering_paths_carry_standalone_catalogs() {
+    let source =
+        "{}\n[]\n[]\n{ RecordIdentifier.String }\n{}\n{ RecordIdentifier.[ Display Ord ] }";
     let macro_schema = lower_via_macro_path(source);
     let source_schema = lower_via_source_path(source);
 
@@ -726,56 +700,48 @@ fn both_lowering_paths_carry_fused_catalogs() {
     assert_eq!(
         manifest_pairs(&macro_schema).len(),
         2,
-        "both paths carry the two fused markers"
+        "both paths carry the two markers"
+    );
+    assert_eq!(
+        macro_schema.impl_blocks().len(),
+        1,
+        "the catalog lowers to one standalone block"
+    );
+    assert_eq!(
+        macro_schema.impl_blocks().len(),
+        source_schema.impl_blocks().len()
     );
     assert!(
-        macro_schema.impl_blocks().is_empty() && source_schema.impl_blocks().is_empty(),
-        "a fused-only schema mints no standalone blocks on either path"
+        macro_schema
+            .namespace()
+            .iter()
+            .all(|declaration| declaration.impls().entries().is_empty()),
+        "no declaration carries a fused catalog on either path"
     );
 }
 
-/// Report 702: the collapse to one lowering engine. A nested-namespace
-/// document must lower IDENTICALLY through the document entry point
-/// (`lower_source`) and the typed-source entry point. The retired second
-/// engine had NO nested-namespace case — it lowered a colon-keyed brace as a
-/// plain struct — so this exact document used to lower to two different
-/// schemas. Now the document path delegates to the source path, so a nested
-/// namespace flattens to fully-qualified type names on both entry points.
+/// Report 702: the collapse to one lowering engine. A six-block document must
+/// lower IDENTICALLY through the document entry point (`lower_source`) and the
+/// typed-source entry point — the single load-bearing witness that there is one
+/// engine.
 #[test]
-fn both_lowering_paths_flatten_a_nested_namespace_identically() {
+fn both_lowering_paths_agree_on_a_six_block_schema() {
     let source = "\
 {}
-[Deliver.router:routed_object:Envelope]
+[]
 []
 {
-  ActorIdentifier String
-  ContractName String
-  router:routed_object {
-    Destination ActorIdentifier
-    Contract ContractName
-    Envelope { Destination Contract }
-  }
+  ActorIdentifier.String
+  ContractName.String
+  Envelope.{ ActorIdentifier ContractName }
 }
+{}
+{ Envelope.[ Display ] }
 ";
 
     let macro_schema = lower_via_macro_path(source);
     let source_schema = lower_via_source_path(source);
 
-    // The nested local `Envelope` flattens to a fully-qualified name on both
-    // paths, and the bare local name leaks into neither top-level namespace.
-    for (label, schema) in [("document", &macro_schema), ("source", &source_schema)] {
-        assert!(
-            schema.type_named("router:routed_object:Envelope").is_some(),
-            "{label} path flattens the nested Envelope to a qualified type"
-        );
-        assert!(
-            schema.type_named("Envelope").is_none(),
-            "{label} path must not leak the bare nested name"
-        );
-    }
-
-    // The full lowered type vocabulary is identical between the two entry
-    // points — the single load-bearing witness that there is one engine.
     let macro_types: Vec<String> = macro_schema
         .namespace()
         .iter()
@@ -788,7 +754,7 @@ fn both_lowering_paths_flatten_a_nested_namespace_identically() {
         .collect();
     assert_eq!(
         macro_types, source_types,
-        "both entry points must lower the nested namespace to the same types"
+        "both entry points must lower the schema to the same types"
     );
     assert_eq!(
         macro_schema.core_hash(),
@@ -799,12 +765,11 @@ fn both_lowering_paths_flatten_a_nested_namespace_identically() {
 
 // ---- STEP B, Fix 4: trait-name validation ----
 
-/// Fix 4: a trait atom inside `{| … |}` must be a PascalCase type name, like
-/// every other type reference. A lowercase trait atom is a typed error, not a
-/// silently-accepted trait marker.
+/// Fix 4: a trait atom inside an impls catalog must be a PascalCase type name,
+/// like every other type reference. A lowercase trait atom is a typed error.
 #[test]
 fn lowercase_trait_name_is_rejected() {
-    let source = "{} [] [] { RecordIdentifier String {| display |} }";
+    let source = "{}\n[]\n[]\n{ RecordIdentifier.String }\n{}\n{ RecordIdentifier.[ display ] }";
     let error =
         SchemaSourceArtifact::from_schema_text(source).expect_err("a lowercase trait is rejected");
 
@@ -814,13 +779,10 @@ fn lowercase_trait_name_is_rejected() {
     assert_eq!(found, "display", "the error names the non-type-name trait");
 }
 
-/// The same trait-name gate holds on a body-bearing trait impl entry — a
-/// lowercase trait carrying a method-signature vector is still rejected, so the
-/// validation is not limited to bare markers.
+/// The same trait-name gate holds on a body-bearing trait impl entry.
 #[test]
 fn lowercase_trait_name_with_methods_is_rejected() {
-    let source =
-        "{} [] [] { NodeQuery String {| queryMatcher [ (matches { candidate.Node } Boolean) ] |} }";
+    let source = "{}\n[]\n[]\n{ NodeQuery.String }\n{}\n{ NodeQuery.[ queryMatcher [ (matches { candidate.Node } Boolean) ] ] }";
     let error =
         SchemaSourceArtifact::from_schema_text(source).expect_err("a lowercase trait is rejected");
     assert!(
@@ -833,19 +795,11 @@ fn lowercase_trait_name_with_methods_is_rejected() {
 
 /// Fix 5: a reference whose method NAME matches a present method but whose
 /// PARAMETERS or RETURN type differ is a real mismatch. The verification error
-/// must carry the full referenced signature — name, parameters, and return —
-/// so the mismatch is legible, not a bare "missing `matches`". Here the surface
-/// provides `matches(candidate: Node) -> Boolean` but the catalog references
-/// `matches(candidate: Node) -> Boolean`'s name with a different return type on
-/// the schema side, so verification fails against the surface's signature.
+/// must carry the full referenced signature.
 #[test]
 fn signature_mismatch_reports_the_full_signature() {
     let schema = lower_fixture("trait-method-sigs");
 
-    // The surface implements the trait and a `matches` method, but with a
-    // DIFFERENT signature than the catalog references: the surface returns a
-    // `Node`, while the catalog references the `Boolean`-returning `matches`.
-    // Same name, wrong return type — a mismatch, not a missing method.
     let surface = RustSurface::new(vec![
         ImplFact::trait_impl(Name::new("NodeQuery"), Name::new("QueryMatcher")),
         ImplFact::method(
@@ -875,8 +829,6 @@ fn signature_mismatch_reports_the_full_signature() {
     };
     assert_eq!(target, "NodeQuery");
     assert_eq!(*kind, "method signature");
-    // The error reports the FULL referenced signature, not just `matches`: the
-    // method name, the `candidate.Node` parameter, and the `Boolean` return.
     assert!(
         signature.contains("matches")
             && signature.contains("candidate")
@@ -891,16 +843,11 @@ fn signature_mismatch_reports_the_full_signature() {
 }
 
 /// Finding 4 (validation): a method parameter's TYPE is a type reference, so its
-/// leaf must be capitalized per the capitalization tenet — a capitalized-leading
-/// atom is a type/object, a lowercase one is a name/reference. The seam
-/// conversion had dropped this gate, letting a lowercase parameter type through;
-/// it is restored with a typed error. Negative witness plus a positive control.
+/// leaf must be capitalized per the capitalization tenet. A lowercase parameter
+/// type is a typed error. Negative witness plus a positive control.
 #[test]
 fn lowercase_method_parameter_type_is_a_typed_rejection() {
-    // `candidate.node` — a lowercase parameter type — must be rejected.
-    let lowercase = "{}\n[]\n[]\n{\n  \
-        NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.node } Boolean) ] |}\n\
-        }\n";
+    let lowercase = "{}\n[]\n[]\n{ NodeQuery.{ Differentiator } }\n{}\n{ NodeQuery.[ QueryMatcher [ (matches { candidate.node } Boolean) ] ] }";
     let error = SchemaSourceArtifact::from_schema_text(lowercase)
         .expect_err("a lowercase method-parameter type is rejected at parse");
     assert!(
@@ -908,10 +855,7 @@ fn lowercase_method_parameter_type_is_a_typed_rejection() {
         "expected ExpectedTypeReferenceLeaf, got: {error}"
     );
 
-    // The capitalized control `candidate.Node` still parses cleanly.
-    let capitalized = "{}\n[]\n[]\n{\n  \
-        NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.Node } Boolean) ] |}\n\
-        }\n";
+    let capitalized = "{}\n[]\n[]\n{ NodeQuery.{ Differentiator } }\n{}\n{ NodeQuery.[ QueryMatcher [ (matches { candidate.Node } Boolean) ] ] }";
     SchemaSourceArtifact::from_schema_text(capitalized)
         .expect("a capitalized method-parameter type parses");
 }

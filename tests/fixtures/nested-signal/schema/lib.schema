@@ -2,5 +2,7 @@
 []
 [Observed.Observation]
 {
-  Observation String
+  Observation.String
 }
+{}
+{}

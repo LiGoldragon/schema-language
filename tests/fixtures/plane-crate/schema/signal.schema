@@ -2,7 +2,9 @@
 [Send.Message]
 [Sent.Receipt]
 {
-  Text String
-  Message { Text }
-  Receipt Integer
+  Text.String
+  Message.{ Text }
+  Receipt.Integer
 }
+{}
+{}

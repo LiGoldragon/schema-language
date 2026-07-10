@@ -2,7 +2,9 @@
 []
 []
 {
-  Correction { Topic }
-  Topic String
-  Kind [Decision Correction]
+  Correction.{ Topic }
+  Topic.String
+  Kind.[Decision Correction]
 }
+{}
+{}

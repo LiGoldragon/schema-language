@@ -2,7 +2,9 @@
 [Reserved Record.Entry Inline.InlinePayload]
 []
 {
-  Entry { Topic }
-  InlinePayload { Topic }
-  Topic String
+  Entry.{ Topic }
+  InlinePayload.{ Topic }
+  Topic.String
 }
+{}
+{}

@@ -24,7 +24,9 @@ pub struct SchemaSource {
     imports: SourceImports,
     input: SourceRootEnum,
     output: SourceRootEnum,
-    namespace: SourceNamespace,
+    types: SourceTypes,
+    generics: SourceGenerics,
+    impls: SourceImpls,
 }
 
 impl SchemaSource {
@@ -46,7 +48,9 @@ impl SchemaSource {
                 Name::new("Output"),
                 layout.output().blocks(document),
             )?,
-            namespace: SourceNamespace::from_block(layout.namespace().block(document))?,
+            types: SourceTypes::from_block(layout.types().block(document))?,
+            generics: SourceGenerics::from_block(layout.generics().block(document))?,
+            impls: SourceImpls::from_block(layout.impls().block(document))?,
         })
     }
 
@@ -62,8 +66,16 @@ impl SchemaSource {
         &self.output
     }
 
-    pub fn namespace(&self) -> &SourceNamespace {
-        &self.namespace
+    pub fn types(&self) -> &SourceTypes {
+        &self.types
+    }
+
+    pub fn generics(&self) -> &SourceGenerics {
+        &self.generics
+    }
+
+    pub fn impls(&self) -> &SourceImpls {
+        &self.impls
     }
 
     pub fn to_schema_text(&self) -> String {
@@ -71,7 +83,9 @@ impl SchemaSource {
             self.imports.to_schema_text(),
             self.input.body().to_schema_text(),
             self.output.body().to_schema_text(),
-            self.namespace.to_schema_text(),
+            self.types.to_schema_text(),
+            self.generics.to_schema_text(),
+            self.impls.to_schema_text(),
         ]
         .join("\n")
     }
@@ -101,7 +115,12 @@ impl SchemaSource {
         resolved_imports: Vec<ResolvedImport>,
     ) -> Result<crate::TrueSchema, SchemaError> {
         let resolver = SourceTypeResolver::from_source(self);
-        let mut namespace = SourceLoweredNamespace::from_source(&self.namespace, &resolver)?;
+        let mut namespace = SourceLoweredNamespace::from_source(
+            &self.types,
+            &self.generics,
+            &self.impls,
+            &resolver,
+        )?;
         namespace.push_public_declarations(self.input.public_inline_declarations(&resolver)?)?;
         namespace.push_public_declarations(self.output.public_inline_declarations(&resolver)?)?;
         let input = self.input.to_root(&namespace)?;
@@ -131,7 +150,9 @@ pub(crate) struct SchemaDocumentLayout {
     imports: SchemaDocumentSlot,
     input: SchemaDocumentSlot,
     output: SchemaDocumentSlot,
-    namespace: SchemaDocumentSlot,
+    types: SchemaDocumentSlot,
+    generics: SchemaDocumentSlot,
+    impls: SchemaDocumentSlot,
 }
 
 impl SchemaDocumentLayout {
@@ -146,15 +167,19 @@ impl SchemaDocumentLayout {
         )?;
         let input = SchemaDocumentSlot::consume_root_body(objects, &mut cursor, "input")?;
         let output = SchemaDocumentSlot::consume_root_body(objects, &mut cursor, "output")?;
-        let namespace = SchemaDocumentSlot::consume_delimited(
+        let types =
+            SchemaDocumentSlot::consume_delimited(objects, &mut cursor, Delimiter::Brace, "types")?;
+        let generics = SchemaDocumentSlot::consume_delimited(
             objects,
             &mut cursor,
             Delimiter::Brace,
-            "namespace",
+            "generics",
         )?;
+        let impls =
+            SchemaDocumentSlot::consume_delimited(objects, &mut cursor, Delimiter::Brace, "impls")?;
         if cursor != objects.len() {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "4 root slots (imports input output namespace)",
+                expected: "6 root slots (imports input output types generics impls)",
                 found: document.holds_root_objects(),
             });
         }
@@ -162,7 +187,9 @@ impl SchemaDocumentLayout {
             imports,
             input,
             output,
-            namespace,
+            types,
+            generics,
+            impls,
         })
     }
 
@@ -178,8 +205,16 @@ impl SchemaDocumentLayout {
         self.output
     }
 
-    pub(crate) fn namespace(&self) -> SchemaDocumentSlot {
-        self.namespace
+    pub(crate) fn types(&self) -> SchemaDocumentSlot {
+        self.types
+    }
+
+    pub(crate) fn generics(&self) -> SchemaDocumentSlot {
+        self.generics
+    }
+
+    pub(crate) fn impls(&self) -> SchemaDocumentSlot {
+        self.impls
     }
 }
 
@@ -203,7 +238,7 @@ impl SchemaDocumentSlot {
         let start = *cursor;
         let Some(block) = objects.get(start) else {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "4 root slots (imports input output namespace)",
+                expected: "6 root slots (imports input output types generics impls)",
                 found: objects.len(),
             });
         };
@@ -228,7 +263,7 @@ impl SchemaDocumentSlot {
         let start = *cursor;
         if objects.get(start).is_none() {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "4 root slots (imports input output namespace)",
+                expected: "6 root slots (imports input output types generics impls)",
                 found: objects.len(),
             });
         }
@@ -416,15 +451,7 @@ impl SourceDeclaration {
                 found: "empty source declaration".to_owned(),
             });
         };
-        let (name, parameters) = DeclarationHead::from_block(head)?.into_parts();
-        if !parameters.is_empty() {
-            return Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!(
-                    "parameterized help declaration head {}",
-                    head.reemit_fallback()
-                ),
-            });
-        }
+        let (name, _parameters) = DeclarationHead::from_block(head)?.into_parts();
         let value = match tail {
             [] => None,
             body => Some(SourceDeclarationValue::from_blocks(body)?),
@@ -816,368 +843,451 @@ impl SourceRootBody {
     }
 }
 
+/// The `types` per-kind block: a brace of dotted `TypeName.Definition` entries,
+/// each keyed by a capitalized type name (see ARCHITECTURE "Per-kind
+/// declaration blocks"). It holds only type declarations — no generics, no
+/// impls, and no retired nested lowercase sub-namespace.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct SourceNamespace {
-    entries: Vec<SourceNamespaceEntry>,
+pub struct SourceTypes {
+    entries: Vec<SourceTypeEntry>,
 }
 
-impl SourceNamespace {
-    pub fn entries(&self) -> &[SourceNamespaceEntry] {
+impl SourceTypes {
+    pub fn entries(&self) -> &[SourceTypeEntry] {
         &self.entries
     }
 
     fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Brace, "source namespace")?;
+        let body = NotaBody::from_delimited(block, Delimiter::Brace, "source types")?;
+        let objects = body.root_objects();
         let mut entries = Vec::new();
-        let mut walk = SourceNamespaceWalk::new(body.root_objects());
-        while let Some(entry) = walk.next_entry()? {
-            entries.push(entry);
+        let mut cursor = 0;
+        while cursor < objects.len() {
+            let entry = SourceKindEntry::read(objects, cursor)?;
+            if entry.value_blocks().is_empty() {
+                return Err(SchemaError::ExpectedSyntaxDeclaration {
+                    found: format!("type {} with no definition", entry.key().to_nota()),
+                });
+            }
+            let width = SourceDeclarationValue::block_span_width_at(entry.value_blocks(), 0)?;
+            let value = SourceDeclarationValue::from_blocks(&entry.value_blocks()[..width])?;
+            cursor += entry.advance(width);
+            entries.push(SourceTypeEntry {
+                name: entry.into_key(),
+                value,
+            });
         }
         Ok(Self { entries })
     }
 
     fn to_schema_text(&self) -> String {
+        SourceKindBlockText::new(self.entries.iter().map(SourceTypeEntry::to_schema_text)).text()
+    }
+
+    fn type_declaration_names(&self) -> Vec<Name> {
+        self.entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    }
+}
+
+/// One `types` entry: a capitalized `TypeName` and its declaration definition.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[rkyv(
+    bytecheck(bounds(
+        __C: rkyv::validation::ArchiveContext,
+        __C::Error: rkyv::rancor::Source
+    )),
+    serialize_bounds(
+        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+        __S::Error: rkyv::rancor::Source
+    ),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source)
+)]
+pub struct SourceTypeEntry {
+    name: Name,
+    #[rkyv(omit_bounds)]
+    value: SourceDeclarationValue,
+}
+
+impl SourceTypeEntry {
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn value(&self) -> &SourceDeclarationValue {
+        &self.value
+    }
+
+    fn to_schema_text(&self) -> String {
+        format!("{}.{}", self.name.to_nota(), self.value.to_schema_text())
+    }
+
+    fn to_declaration_group(
+        &self,
+        resolver: &SourceTypeResolver,
+    ) -> Result<SourceDeclarationGroup, SchemaError> {
+        self.value
+            .to_namespace_declaration_group(self.name.clone(), resolver, None)
+    }
+}
+
+/// The `generics` per-kind block: a brace of dotted
+/// `GenericName.((Params …) Body)` entries, each a capitalized generic name
+/// carrying its binder group and body (see ARCHITECTURE "Target root-slot
+/// layout of the per-kind blocks").
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct SourceGenerics {
+    entries: Vec<SourceGenericEntry>,
+}
+
+impl SourceGenerics {
+    pub fn entries(&self) -> &[SourceGenericEntry] {
+        &self.entries
+    }
+
+    fn from_block(block: &Block) -> Result<Self, SchemaError> {
+        let body = NotaBody::from_delimited(block, Delimiter::Brace, "source generics")?;
+        let objects = body.root_objects();
+        let mut entries = Vec::new();
+        let mut cursor = 0;
+        while cursor < objects.len() {
+            let entry = SourceKindEntry::read(objects, cursor)?;
+            let value_block = entry.value_blocks().first().ok_or_else(|| {
+                SchemaError::ExpectedSyntaxDeclaration {
+                    found: format!("generic {} with no binder group", entry.key().to_nota()),
+                }
+            })?;
+            let generic = SourceGenericEntry::from_key_and_block(entry.key().clone(), value_block)?;
+            cursor += entry.advance(1);
+            entries.push(generic);
+        }
+        Ok(Self { entries })
+    }
+
+    fn to_schema_text(&self) -> String {
+        SourceKindBlockText::new(self.entries.iter().map(SourceGenericEntry::to_schema_text)).text()
+    }
+
+    fn type_declaration_names(&self) -> Vec<Name> {
+        self.entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect()
+    }
+}
+
+/// One `generics` entry: a capitalized `GenericName`, its ordered binder
+/// parameters, and the body they parameterize.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[rkyv(
+    bytecheck(bounds(
+        __C: rkyv::validation::ArchiveContext,
+        __C::Error: rkyv::rancor::Source
+    )),
+    serialize_bounds(
+        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+        __S::Error: rkyv::rancor::Source
+    ),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source)
+)]
+pub struct SourceGenericEntry {
+    name: Name,
+    parameters: Vec<Name>,
+    #[rkyv(omit_bounds)]
+    value: SourceDeclarationValue,
+}
+
+impl SourceGenericEntry {
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn parameters(&self) -> &[Name] {
+        &self.parameters
+    }
+
+    pub fn value(&self) -> &SourceDeclarationValue {
+        &self.value
+    }
+
+    /// Decode the `((Params …) Body)` value of a generic entry: the leading
+    /// group is the binder parameter list, the trailing blocks are the body
+    /// read as an ordinary declaration value.
+    fn from_key_and_block(name: Name, block: &Block) -> Result<Self, SchemaError> {
+        let body = NotaBody::from_delimited(
+            block,
+            Delimiter::Parenthesis,
+            "generic binder group and body",
+        )?;
+        let objects = body.root_objects();
+        let Some((binder_block, body_blocks)) = objects.split_first() else {
+            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+                form: "generic definition GenericName.((Params …) Body)",
+                expected: "a binder group and a body",
+                found: 0,
+            });
+        };
+        let parameters = Self::read_parameters(&name, binder_block)?;
+        if body_blocks.is_empty() {
+            return Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!("generic {} with no body", name.to_nota()),
+            });
+        }
+        let value = SourceDeclarationValue::from_blocks(body_blocks)?;
+        Ok(Self {
+            name,
+            parameters,
+            value,
+        })
+    }
+
+    /// Read the `(Params …)` binder group into its ordered type-parameter
+    /// names, rejecting a lowercase binder and a duplicate binder.
+    fn read_parameters(name: &Name, block: &Block) -> Result<Vec<Name>, SchemaError> {
+        let body =
+            NotaBody::from_delimited(block, Delimiter::Parenthesis, "generic parameter binders")?;
+        let mut parameters = Vec::new();
+        for object in body.root_objects() {
+            let parameter = SourceAtom::from_block(object)?.into_name()?;
+            if !SourceIdentifierCase::new(&parameter).is_type() {
+                return Err(SchemaError::ExpectedTypeParameterName {
+                    declaration: name.as_str().to_owned(),
+                    found: parameter.to_nota(),
+                });
+            }
+            if parameters.iter().any(|existing| existing == &parameter) {
+                return Err(SchemaError::DuplicateTypeParameter {
+                    declaration: name.as_str().to_owned(),
+                    parameter: parameter.as_str().to_owned(),
+                });
+            }
+            parameters.push(parameter);
+        }
+        Ok(parameters)
+    }
+
+    fn to_schema_text(&self) -> String {
+        let binders = self
+            .parameters
+            .iter()
+            .map(Name::to_nota)
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "{}.(({}) {})",
+            self.name.to_nota(),
+            binders,
+            self.value.to_schema_text()
+        )
+    }
+
+    fn to_declaration_group(
+        &self,
+        resolver: &SourceTypeResolver,
+    ) -> Result<SourceDeclarationGroup, SchemaError> {
+        self.value
+            .to_namespace_declaration_group(self.name.clone(), resolver, None)
+            .map(|group| group.with_parameters(self.parameters.clone()))
+    }
+}
+
+/// The `impls` per-kind block: a brace of dotted `TypeName.[ … ]` entries, each
+/// a capitalized type name carrying a square-bracket catalog of impl entries
+/// (see ARCHITECTURE "Target root-slot layout of the per-kind blocks"). Every
+/// entry lowers to a standalone [`ImplBlock`] keyed by its `TypeName`; the
+/// old fused-versus-standalone distinction is gone — impls always live in this
+/// block, keyed by the type they target.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct SourceImpls {
+    entries: Vec<SourceImplsEntry>,
+}
+
+impl SourceImpls {
+    pub fn entries(&self) -> &[SourceImplsEntry] {
+        &self.entries
+    }
+
+    fn from_block(block: &Block) -> Result<Self, SchemaError> {
+        let body = NotaBody::from_delimited(block, Delimiter::Brace, "source impls")?;
+        let objects = body.root_objects();
+        let mut entries = Vec::new();
+        let mut cursor = 0;
+        while cursor < objects.len() {
+            let entry = SourceKindEntry::read(objects, cursor)?;
+            let catalog_block = entry.value_blocks().first().ok_or_else(|| {
+                SchemaError::ExpectedSyntaxDeclaration {
+                    found: format!("impls entry {} with no catalog", entry.key().to_nota()),
+                }
+            })?;
+            let catalog = SourceImplCatalog::from_block(catalog_block)?;
+            cursor += entry.advance(1);
+            entries.push(SourceImplsEntry {
+                target: entry.into_key(),
+                catalog,
+            });
+        }
+        Ok(Self { entries })
+    }
+
+    fn to_schema_text(&self) -> String {
+        SourceKindBlockText::new(self.entries.iter().map(SourceImplsEntry::to_schema_text)).text()
+    }
+}
+
+/// One `impls` entry: the capitalized `TypeName` it targets and the
+/// square-bracket impl catalog attached to it.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+#[rkyv(
+    bytecheck(bounds(
+        __C: rkyv::validation::ArchiveContext,
+        __C::Error: rkyv::rancor::Source
+    )),
+    serialize_bounds(
+        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+        __S::Error: rkyv::rancor::Source
+    ),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source)
+)]
+pub struct SourceImplsEntry {
+    target: Name,
+    #[rkyv(omit_bounds)]
+    catalog: SourceImplCatalog,
+}
+
+impl SourceImplsEntry {
+    pub fn target(&self) -> &Name {
+        &self.target
+    }
+
+    pub fn catalog(&self) -> &SourceImplCatalog {
+        &self.catalog
+    }
+
+    fn to_schema_text(&self) -> String {
+        format!(
+            "{}.{}",
+            self.target.to_nota(),
+            self.catalog.to_schema_text()
+        )
+    }
+
+    /// Lower this entry to a standalone [`ImplBlock`] keyed by its target type
+    /// name. Every impls-block entry lowers the same way; the target must name
+    /// a type declared in the `types` (or `generics`) block, verified by
+    /// `SchemaTree::impls_verified`.
+    fn to_impl_block(&self, resolver: &SourceTypeResolver) -> ImplBlock {
+        ImplBlock::new(self.target.clone(), self.catalog.lower(resolver, None))
+    }
+}
+
+/// One capitalized dotted entry read from a per-kind block body under the
+/// shared CAPITALIZED dotted expectation. The key is split off the leading
+/// atom's first top-level dot (the shared NOTA primitive
+/// [`nota::Atom::split_at_first_dot`]); the value block sequence is the inline
+/// remainder atom — when the key atom carries text past its dot — followed by
+/// the blocks after the key atom. The three per-kind readers share this split
+/// and differ only in how they consume the value front, so the old special
+/// cases dissolve into one uniform walk.
+struct SourceKindEntry {
+    key: Name,
+    value_blocks: Vec<Block>,
+    inline_remainder: bool,
+}
+
+impl SourceKindEntry {
+    fn read(objects: &[Block], cursor: usize) -> Result<Self, SchemaError> {
+        let block = objects
+            .get(cursor)
+            .ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
+                found: "missing per-kind declaration entry".to_owned(),
+            })?;
+        let atom = block
+            .atom()
+            .ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
+                found: format!("non-atom declaration key {}", block.reemit_fallback()),
+            })?;
+        let (prefix, remainder) =
+            atom.split_at_first_dot()
+                .ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
+                    found: format!("undotted declaration key {}", atom.text()),
+                })?;
+        let key = Name::new(prefix.text());
+        // The key names a type/generic: its local part must be PascalCase. A
+        // colon-qualified name (`schema:spirit:Topic`) is judged by its final
+        // segment, so a namespaced type key is accepted while the retired
+        // lowercase nested-namespace key (`router:routed_object`) stays rejected.
+        if !key.qualifies_as_pascal_case() {
+            return Err(SchemaError::ExpectedSyntaxDeclaration {
+                found: format!("uncapitalized declaration key {}", key.to_nota()),
+            });
+        }
+        let inline_remainder = remainder.is_some();
+        let mut value_blocks = Vec::new();
+        if let Some(rest) = remainder {
+            value_blocks.push(Block::Atom(rest));
+        }
+        value_blocks.extend(objects[cursor + 1..].iter().cloned());
+        Ok(Self {
+            key,
+            value_blocks,
+            inline_remainder,
+        })
+    }
+
+    fn key(&self) -> &Name {
+        &self.key
+    }
+
+    fn into_key(self) -> Name {
+        self.key
+    }
+
+    fn value_blocks(&self) -> &[Block] {
+        &self.value_blocks
+    }
+
+    /// The original-cursor advance after the value spanned `value_width`
+    /// reconstructed value blocks: the key atom (1) plus the following blocks
+    /// the value consumed. The inline remainder atom is synthesized from the
+    /// key atom, so it never advances the original cursor.
+    fn advance(&self, value_width: usize) -> usize {
+        1 + value_width - usize::from(self.inline_remainder)
+    }
+}
+
+/// The brace-block text projection shared by the three per-kind blocks: an
+/// empty block re-emits as `{}`, a non-empty block as one indented entry per
+/// line inside `{ … }`.
+struct SourceKindBlockText {
+    entries: Vec<String>,
+}
+
+impl SourceKindBlockText {
+    fn new(entries: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            entries: entries.into_iter().collect(),
+        }
+    }
+
+    fn text(&self) -> String {
         if self.entries.is_empty() {
             return "{}".to_owned();
         }
         let entries = self
             .entries
             .iter()
-            .map(|entry| format!("  {}", entry.to_schema_text()))
+            .map(|entry| format!("  {entry}"))
             .collect::<Vec<_>>();
         format!("{{\n{}\n}}", entries.join("\n"))
     }
-
-    fn type_declaration_names(&self) -> Vec<Name> {
-        self.type_declaration_names_in_namespace(None)
-    }
-
-    fn type_declaration_names_in_namespace(&self, namespace: Option<&Name>) -> Vec<Name> {
-        self.entries
-            .iter()
-            .flat_map(|entry| entry.type_declaration_names(namespace))
-            .collect()
-    }
 }
 
-/// A cursor over a namespace body's root objects that segments them into
-/// entries. Each entry is a head (declaration-head block), an optional inline
-/// body (one block, or a dotted-application head plus its payload block), and
-/// an optional trailing `{| … |}` impl block. The trailing pipe-brace is a
-/// *separate* root object — it never nests inside the body — so the classic
-/// `chunks_exact(2)` map-pairing cannot see it; this stateful walk is what
-/// replaces it. The same grammar is mirrored on the engine/macro path by
-/// [`crate::engine`]'s entry walk.
-struct SourceNamespaceWalk<'block> {
-    objects: &'block [Block],
-    cursor: usize,
-}
-
-impl<'block> SourceNamespaceWalk<'block> {
-    fn new(objects: &'block [Block]) -> Self {
-        Self { objects, cursor: 0 }
-    }
-
-    /// Read the next entry, or `None` at the end of the body. An entry head
-    /// is always present; a pipe-brace head is illegal (an impl block must
-    /// trail a type name). After the head, an inline body is taken when the
-    /// next object is a non-pipe-brace; grouped dotted application bodies
-    /// consume their payload block too. A trailing pipe-brace impl block is
-    /// taken when present. At least one of body/impl-block is guaranteed
-    /// because a lone head with neither is a missing value.
-    fn next_entry(&mut self) -> Result<Option<SourceNamespaceEntry>, SchemaError> {
-        let Some(head) = self.objects.get(self.cursor) else {
-            return Ok(None);
-        };
-        if head.is_pipe_brace() {
-            return Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!(
-                    "leading impl block {}; a {{| … |}} block must trail a type name",
-                    head.reemit_fallback()
-                ),
-            });
-        }
-        self.cursor += 1;
-        let (name, parameters) = DeclarationHead::from_block(head)?.into_parts();
-
-        let body = match self.objects.get(self.cursor) {
-            Some(next) if !next.is_pipe_brace() => {
-                let start = self.cursor;
-                let width = SourceDeclarationValue::block_span_width_at(self.objects, start)?;
-                self.cursor += width;
-                Some(&self.objects[start..self.cursor])
-            }
-            _ => None,
-        };
-
-        let impls = match self.objects.get(self.cursor) {
-            Some(next) if next.is_pipe_brace() => {
-                self.cursor += 1;
-                Some(next)
-            }
-            _ => None,
-        };
-
-        if body.is_none() && impls.is_none() {
-            return Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!(
-                    "namespace entry {} with neither a body nor a {{| … |}} impl block",
-                    name.to_nota()
-                ),
-            });
-        }
-
-        SourceNamespaceEntry::from_parts(name, parameters, body, impls).map(Some)
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-#[rkyv(
-    bytecheck(bounds(
-        __C: rkyv::validation::ArchiveContext,
-        __C::Error: rkyv::rancor::Source
-    )),
-    serialize_bounds(
-        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
-        __S::Error: rkyv::rancor::Source
-    ),
-    deserialize_bounds(__D::Error: rkyv::rancor::Source)
-)]
-pub struct SourceNamespaceEntry {
-    name: Name,
-    parameters: Vec<Name>,
-    #[rkyv(omit_bounds)]
-    value: SourceNamespaceEntryValue,
-    #[rkyv(omit_bounds)]
-    impls: SourceImplCatalog,
-}
-
-impl SourceNamespaceEntry {
-    /// Build an entry from its parsed parts. `body` is the optional inline
-    /// body block slice (`String`, `{ … }`, `[ … ]`, `Map.(K V)`, …); `impls`
-    /// is the optional trailing `{| … |}` block. At least one must be present — the
-    /// stateful namespace walk guarantees that. A body-optional entry
-    /// (`TypeName {| … |}`, no inline body) carries only impls and
-    /// references the type declared elsewhere by name.
-    fn from_parts(
-        name: Name,
-        parameters: Vec<Name>,
-        body: Option<&[Block]>,
-        impls: Option<&Block>,
-    ) -> Result<Self, SchemaError> {
-        let value = match body {
-            Some(body) => Self::value_from_body(&name, &parameters, body)?,
-            None => SourceNamespaceEntryValue::ImplsOnly,
-        };
-        let impls = match impls {
-            Some(block) => SourceImplCatalog::from_block(block)?,
-            None => SourceImplCatalog::empty(),
-        };
-        Ok(Self {
-            name,
-            parameters,
-            value,
-            impls,
-        })
-    }
-
-    fn value_from_body(
-        name: &Name,
-        parameters: &[Name],
-        body: &[Block],
-    ) -> Result<SourceNamespaceEntryValue, SchemaError> {
-        if let [block] = body
-            && parameters.is_empty()
-            && SourceIdentifierCase::new(name).is_namespace()
-            && block.is_brace()
-        {
-            Ok(SourceNamespaceEntryValue::Namespace(
-                SourceNamespace::from_block(block)?,
-            ))
-        } else {
-            Ok(SourceNamespaceEntryValue::Declaration(
-                SourceDeclarationValue::from_blocks(body)?,
-            ))
-        }
-    }
-
-    pub fn impls(&self) -> &SourceImplCatalog {
-        &self.impls
-    }
-
-    pub fn name(&self) -> &Name {
-        &self.name
-    }
-
-    /// The declared type parameters from a parameterized entry head
-    /// `(| Name Param … |)`. Empty for a bare-name entry.
-    pub fn parameters(&self) -> &[Name] {
-        &self.parameters
-    }
-
-    pub fn value(&self) -> Option<&SourceDeclarationValue> {
-        self.value.as_declaration()
-    }
-
-    pub fn namespace(&self) -> Option<&SourceNamespace> {
-        self.value.as_namespace()
-    }
-
-    fn namespace_name(&self, parent: Option<&Name>) -> Name {
-        self.name.qualified_under(parent)
-    }
-
-    fn declaration_name(&self, namespace: Option<&Name>) -> Name {
-        self.name.qualified_under(namespace)
-    }
-
-    fn to_schema_text(&self) -> String {
-        let mut parts = vec![self.head_schema_text()];
-        if let Some(body) = self.value.to_schema_text() {
-            parts.push(body);
-        }
-        if !self.impls.is_empty() {
-            parts.push(self.impls.to_schema_text());
-        }
-        parts.join(" ")
-    }
-
-    /// Project the entry's key position back to source text: a bare name,
-    /// or a parameterized head `(| Name Param … |)` re-emitting each binder.
-    fn head_schema_text(&self) -> String {
-        if self.parameters.is_empty() {
-            return self.name.to_nota();
-        }
-        let mut items = Vec::with_capacity(self.parameters.len() + 1);
-        items.push(self.name.to_nota());
-        items.extend(self.parameters.iter().map(Name::to_nota));
-        Delimiter::PipeParenthesis.wrap(items)
-    }
-
-    fn to_declaration_group(
-        &self,
-        resolver: &SourceTypeResolver,
-        namespace: Option<&Name>,
-    ) -> Result<SourceDeclarationGroup, SchemaError> {
-        self.value
-            .to_namespace_declaration_group(self.declaration_name(namespace), resolver, namespace)
-            .map(|group| {
-                group
-                    .with_parameters(self.parameters.clone())
-                    .with_impls(self.lower_impls(resolver, namespace))
-            })
-    }
-
-    /// Lower this entry's trailing `{| … |}` catalog to the enumerable
-    /// schema-side [`ImplCatalog`]. Method references resolve under the
-    /// entry's namespace like every other reference.
-    fn lower_impls(&self, resolver: &SourceTypeResolver, namespace: Option<&Name>) -> ImplCatalog {
-        self.impls.lower(resolver, namespace)
-    }
-
-    /// A body-optional `TypeName {| … |}` entry has no inline body — it
-    /// references a type declared elsewhere. Lower it to a standalone
-    /// [`ImplBlock`] keyed by that type name; the schema-wide manifest
-    /// unions it with the fused catalogs. Entries with an inline body, or an
-    /// empty trailing catalog, contribute no standalone block.
-    fn to_impl_block(
-        &self,
-        resolver: &SourceTypeResolver,
-        namespace: Option<&Name>,
-    ) -> Option<ImplBlock> {
-        if !matches!(self.value, SourceNamespaceEntryValue::ImplsOnly) || self.impls.is_empty() {
-            return None;
-        }
-        Some(ImplBlock::new(
-            self.declaration_name(namespace),
-            self.lower_impls(resolver, namespace),
-        ))
-    }
-
-    fn type_declaration_names(&self, namespace: Option<&Name>) -> Vec<Name> {
-        self.value.type_declaration_names(self, namespace)
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-#[rkyv(
-    bytecheck(bounds(
-        __C: rkyv::validation::ArchiveContext,
-        __C::Error: rkyv::rancor::Source
-    )),
-    serialize_bounds(
-        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
-        __S::Error: rkyv::rancor::Source
-    ),
-    deserialize_bounds(__D::Error: rkyv::rancor::Source)
-)]
-pub enum SourceNamespaceEntryValue {
-    Declaration(#[rkyv(omit_bounds)] SourceDeclarationValue),
-    Namespace(#[rkyv(omit_bounds)] SourceNamespace),
-    /// A body-optional entry `TypeName {| … |}`: no inline body, only a
-    /// trailing impl catalog. The named type is declared elsewhere; this
-    /// entry references it and carries impls. It mints no type declaration.
-    ImplsOnly,
-}
-
-impl SourceNamespaceEntryValue {
-    fn as_declaration(&self) -> Option<&SourceDeclarationValue> {
-        match self {
-            Self::Declaration(value) => Some(value),
-            Self::Namespace(_) | Self::ImplsOnly => None,
-        }
-    }
-
-    fn as_namespace(&self) -> Option<&SourceNamespace> {
-        match self {
-            Self::Namespace(namespace) => Some(namespace),
-            Self::Declaration(_) | Self::ImplsOnly => None,
-        }
-    }
-
-    fn to_schema_text(&self) -> Option<String> {
-        match self {
-            Self::Declaration(value) => Some(value.to_schema_text()),
-            Self::Namespace(namespace) => Some(namespace.to_schema_text()),
-            Self::ImplsOnly => None,
-        }
-    }
-
-    fn to_namespace_declaration_group(
-        &self,
-        name: Name,
-        resolver: &SourceTypeResolver,
-        namespace: Option<&Name>,
-    ) -> Result<SourceDeclarationGroup, SchemaError> {
-        match self {
-            Self::Declaration(value) => {
-                value.to_namespace_declaration_group(name, resolver, namespace)
-            }
-            Self::Namespace(_) | Self::ImplsOnly => Ok(SourceDeclarationGroup::empty()),
-        }
-    }
-
-    fn type_declaration_names(
-        &self,
-        entry: &SourceNamespaceEntry,
-        namespace: Option<&Name>,
-    ) -> Vec<Name> {
-        match self {
-            Self::Declaration(_) => vec![entry.declaration_name(namespace)],
-            Self::ImplsOnly => Vec::new(),
-            Self::Namespace(nested) => {
-                let nested_namespace = entry.namespace_name(namespace);
-                nested.type_declaration_names_in_namespace(Some(&nested_namespace))
-            }
-        }
-    }
-}
-
-/// The decoded `{| … |}` pipe-brace impl block that trails a type
-/// declaration. It is a *catalog* of impl references, not a generated body:
+/// The decoded `[ … ]` square-bracket impl catalog an impls-block entry
+/// carries. It is a *catalog* of impl references, not a generated body:
 /// each entry names an impl/trait/method that already exists on the Rust
-/// side. An empty catalog is the absence of a trailing block — a plain
-/// declaration carries `SourceImplCatalog::empty()`.
+/// side.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
@@ -1196,12 +1306,6 @@ pub struct SourceImplCatalog {
 }
 
 impl SourceImplCatalog {
-    fn empty() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
-
     pub fn entries(&self) -> &[SourceImplEntry] {
         &self.entries
     }
@@ -1210,15 +1314,16 @@ impl SourceImplCatalog {
         self.entries.is_empty()
     }
 
-    /// Decode a `Block::Delimited { delimiter: PipeBrace, .. }`. Each root
-    /// object inside the pipe-brace is exactly one impl entry — a bare trait
-    /// atom (marker), a trait atom followed by a `[ method-sigs ]` vector,
-    /// or a bare `(name { params } Return)` inherent method signature.
-    /// Unlike a namespace body, entries are NOT paired: the walk reads one
-    /// object, then peeks the next to decide whether it is the trait's
+    /// Decode a `Block::Delimited { delimiter: SquareBracket, .. }` — the
+    /// square-bracket catalog carried by one `impls` block entry
+    /// `TypeName.[ … ]`. Each root object inside the bracket is exactly one
+    /// impl entry — a bare trait atom (marker), a trait atom followed by a
+    /// `[ method-sigs ]` vector, or a bare `(name { params } Return)` inherent
+    /// method signature. Entries are NOT paired: the walk reads one object,
+    /// then peeks the next to decide whether it is the trait's
     /// `[ method-sigs ]` partner.
     fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::PipeBrace, "impl catalog")?;
+        let body = NotaBody::from_delimited(block, Delimiter::SquareBracket, "impl catalog")?;
         let objects = body.root_objects();
         let mut entries = Vec::new();
         let mut index = 0;
@@ -1262,7 +1367,7 @@ impl SourceImplCatalog {
 
     fn to_schema_text(&self) -> String {
         SourceDelimitedText::new(
-            Delimiter::PipeBrace,
+            Delimiter::SquareBracket,
             self.entries
                 .iter()
                 .map(SourceImplEntry::to_schema_text)
@@ -1285,7 +1390,7 @@ impl SourceImplCatalog {
     }
 }
 
-/// One entry inside a `{| … |}` impl catalog.
+/// One entry inside an `[ … ]` impl catalog.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
@@ -1623,21 +1728,18 @@ impl SourceDeclarationValue {
                 delimiter: Delimiter::SquareBracket,
                 ..
             } => Ok(Self::Enum(SourceEnumBody::from_block(block)?)),
-            // A pipe-brace at a value position is consumed by the namespace
-            // entry walk (`SourceNamespaceWalk`) as a trailing impl block, so
-            // it never reaches the value path. If one does, the head it
-            // should have trailed is missing its type body.
+            // Pipe delimiters carry no surviving construct — the `{| … |}`
+            // impl tail and the `(| … |)` binder head are retired, so either
+            // is rejected at a value position.
             Block::Delimited {
                 delimiter: Delimiter::PipeBrace,
                 ..
             } => Err(SchemaError::ExpectedSyntaxDeclaration {
                 found: format!(
-                    "stray impl block {} at a value position",
+                    "retired impl block {} at a value position",
                     block.reemit_fallback()
                 ),
             }),
-            // A pipe-parenthesis declares type-parameter binders at a head
-            // position, never a value; still rejected here.
             Block::Delimited {
                 delimiter: Delimiter::PipeParenthesis,
                 ..
@@ -3647,11 +3749,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A depth-capped indirection projection over a [`SourceReference`].
 ///
-/// An indirection name is one construct with two authors: the lowercase alias a
-/// human writes in the namespace section to avoid writing a deeply nested
-/// datatype, and the linkname this projection synthesizes when it decomposes a
-/// deep structure. Both name a hoisted subtree, both stay in the lowercase
-/// "name" register of the capitalization semantics, and both inline at lowering.
+/// An indirection name is exclusively encoder-synthesized: the linkname this
+/// projection synthesizes when it decomposes a deep structure. It names a
+/// hoisted subtree, stays in the lowercase "name" register of the
+/// capitalization semantics, and inlines at lowering.
 ///
 /// The projection carries two independent depths. The main-structure depth cap
 /// is the nesting depth beyond which a composite subtree is replaced by a
@@ -4146,7 +4247,8 @@ struct SourceTypeResolver {
 
 impl SourceTypeResolver {
     fn from_source(source: &SchemaSource) -> Self {
-        let mut names = source.namespace().type_declaration_names();
+        let mut names = source.types().type_declaration_names();
+        names.extend(source.generics().type_declaration_names());
         names.extend(source.input().body().inline_declaration_names());
         names.extend(source.output().body().inline_declaration_names());
         names.extend(
@@ -4182,55 +4284,48 @@ impl SourceVariantResolver for SourceTypeResolver {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SourceLoweredNamespace {
     declarations: Vec<Declaration>,
-    /// Standalone impl blocks lowered from body-optional `TypeName {| … |}`
-    /// entries. They mint no type declaration; they attach a catalog to a
-    /// type declared elsewhere, surfaced through `TrueSchema::impl_blocks`.
+    /// Standalone impl blocks lowered from `impls` block entries
+    /// `TypeName.[ … ]`. They mint no type declaration; they attach a catalog
+    /// to a type declared in the `types` (or `generics`) block, surfaced
+    /// through `TrueSchema::impl_blocks`.
     impl_blocks: Vec<ImplBlock>,
 }
 
 impl SourceLoweredNamespace {
     fn from_source(
-        source: &SourceNamespace,
+        types: &SourceTypes,
+        generics: &SourceGenerics,
+        impls: &SourceImpls,
         resolver: &SourceTypeResolver,
     ) -> Result<Self, SchemaError> {
         let mut namespace = Self {
             declarations: Vec::new(),
             impl_blocks: Vec::new(),
         };
-        namespace.push_source_namespace(source, resolver, None)?;
+        for entry in types.entries() {
+            namespace.reject_reserved_scalar(entry.name())?;
+            namespace.push_public_group(entry.to_declaration_group(resolver)?)?;
+        }
+        for entry in generics.entries() {
+            namespace.reject_reserved_scalar(entry.name())?;
+            namespace.push_public_group(entry.to_declaration_group(resolver)?)?;
+        }
+        for entry in impls.entries() {
+            namespace.impl_blocks.push(entry.to_impl_block(resolver));
+        }
         Ok(namespace)
     }
 
-    fn push_source_namespace(
-        &mut self,
-        source: &SourceNamespace,
-        resolver: &SourceTypeResolver,
-        namespace: Option<&Name>,
-    ) -> Result<(), SchemaError> {
-        for entry in source.entries() {
-            match entry.namespace() {
-                Some(nested) => {
-                    let nested_namespace = entry.namespace_name(namespace);
-                    self.push_source_namespace(nested, resolver, Some(&nested_namespace))?;
-                }
-                None => {
-                    // A reserved scalar name (`String`, `Integer`, …) cannot be
-                    // user-declared at the namespace declaration position. The
-                    // field-position machinery already gates these names; this
-                    // is the matching declaration-position gate, so the single
-                    // lowering path rejects `{ String Integer }` the same way
-                    // the retired second engine did.
-                    if TypeReference::is_reserved_scalar_name(entry.name()) {
-                        return Err(SchemaError::ReservedScalarTypeName {
-                            name: entry.name().as_str().to_owned(),
-                        });
-                    }
-                    if let Some(block) = entry.to_impl_block(resolver, namespace) {
-                        self.impl_blocks.push(block);
-                    }
-                    self.push_public_group(entry.to_declaration_group(resolver, namespace)?)?;
-                }
-            }
+    /// A reserved scalar name (`String`, `Integer`, …) cannot be user-declared
+    /// at a declaration-block position. The field-position machinery already
+    /// gates these names; this is the matching declaration-position gate, so
+    /// the single lowering path rejects `{ String.… }` the same way the retired
+    /// second engine did.
+    fn reject_reserved_scalar(&self, name: &Name) -> Result<(), SchemaError> {
+        if TypeReference::is_reserved_scalar_name(name) {
+            return Err(SchemaError::ReservedScalarTypeName {
+                name: name.as_str().to_owned(),
+            });
         }
         Ok(())
     }
@@ -4291,14 +4386,10 @@ struct SourceDeclarationGroup {
     public: Vec<TypeDeclaration>,
     private: Vec<TypeDeclaration>,
     primary: Option<TypeDeclaration>,
-    /// Declared type parameters carried from a parameterized entry head.
+    /// Declared type parameters carried from a generics entry's binder group.
     /// They attach to the group's primary declaration; the inline helper
     /// declarations (public / private) are not parameterized.
     parameters: Vec<Name>,
-    /// The lowered trailing `{| … |}` catalog. It attaches to the group's
-    /// primary declaration, beside the parameters. Empty for an entry with
-    /// no trailing impl block.
-    impls: ImplCatalog,
 }
 
 impl SourceDeclarationGroup {
@@ -4308,7 +4399,6 @@ impl SourceDeclarationGroup {
             private: Vec::new(),
             primary: None,
             parameters: Vec::new(),
-            impls: ImplCatalog::empty(),
         }
     }
 
@@ -4318,7 +4408,6 @@ impl SourceDeclarationGroup {
             private: Vec::new(),
             primary: Some(primary),
             parameters: Vec::new(),
-            impls: ImplCatalog::empty(),
         }
     }
 
@@ -4332,23 +4421,14 @@ impl SourceDeclarationGroup {
             private,
             primary: Some(primary),
             parameters: Vec::new(),
-            impls: ImplCatalog::empty(),
         }
     }
 
     /// Attach declared type parameters to the group's primary
-    /// declaration. The binders belong to the named declaration the entry
-    /// head introduced, not to its inline helpers.
+    /// declaration. The binders belong to the named declaration the generics
+    /// entry introduced, not to its inline helpers.
     fn with_parameters(mut self, parameters: Vec<Name>) -> Self {
         self.parameters = parameters;
-        self
-    }
-
-    /// Attach the lowered impl catalog to the group's primary declaration.
-    /// Like parameters, the catalog belongs to the named declaration the
-    /// entry head introduced, not to its inline helpers.
-    fn with_impls(mut self, impls: ImplCatalog) -> Self {
-        self.impls = impls;
         self
     }
 
@@ -4360,11 +4440,7 @@ impl SourceDeclarationGroup {
             .collect::<Vec<_>>();
         declarations.extend(self.private.into_iter().map(Declaration::private));
         if let Some(primary) = self.primary {
-            declarations.push(
-                Declaration::public(primary)
-                    .with_parameters(self.parameters)
-                    .with_impls(self.impls),
-            );
+            declarations.push(Declaration::public(primary).with_parameters(self.parameters));
         }
         declarations
     }

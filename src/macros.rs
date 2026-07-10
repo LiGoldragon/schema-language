@@ -419,54 +419,6 @@ impl MacroNodeDefinition {
                     PatternElement::any(Some(CaptureName::new("reference"))),
                     "symbol key followed by type reference value",
                 ),
-                // Parameterized declaration heads `(| Name Param … |)` carry
-                // the binders in the key position. The key is the same
-                // captured-head + variable-arity-tail shape the application
-                // form uses, gated by the pipe-parenthesis delimiter so
-                // declarations and use-site applications stay distinct. Each
-                // body shape gets its own parameterized case so the dispatch
-                // stays exhaustive over struct / enum / newtype bodies.
-                Self::pair_case(
-                    MacroPosition::NamespaceDeclaration,
-                    "parameterized struct declaration",
-                    PatternElement::delimited(DelimitedShape::new(
-                        MacroDelimiter::PipeParenthesis,
-                        NotaMacroObjectCount::Any,
-                        Some(CaptureName::new("type_head")),
-                    )),
-                    PatternElement::delimited(DelimitedShape::new(
-                        MacroDelimiter::Brace,
-                        NotaMacroObjectCount::Any,
-                        Some(CaptureName::new("body")),
-                    )),
-                    "parameterized pipe head followed by brace value",
-                ),
-                Self::pair_case(
-                    MacroPosition::NamespaceDeclaration,
-                    "parameterized enum declaration",
-                    PatternElement::delimited(DelimitedShape::new(
-                        MacroDelimiter::PipeParenthesis,
-                        NotaMacroObjectCount::Any,
-                        Some(CaptureName::new("type_head")),
-                    )),
-                    PatternElement::delimited(DelimitedShape::new(
-                        MacroDelimiter::SquareBracket,
-                        NotaMacroObjectCount::Any,
-                        Some(CaptureName::new("body")),
-                    )),
-                    "parameterized pipe head followed by square bracket value",
-                ),
-                Self::pair_case(
-                    MacroPosition::NamespaceDeclaration,
-                    "parameterized newtype declaration",
-                    PatternElement::delimited(DelimitedShape::new(
-                        MacroDelimiter::PipeParenthesis,
-                        NotaMacroObjectCount::Any,
-                        Some(CaptureName::new("type_head")),
-                    )),
-                    PatternElement::any(Some(CaptureName::new("reference"))),
-                    "parameterized pipe head followed by type reference value",
-                ),
             ],
         )
     }

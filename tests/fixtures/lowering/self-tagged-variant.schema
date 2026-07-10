@@ -1,4 +1,9 @@
 {}
 [Entry.Entry]
 []
-{ Value String Entry { Value } }
+{
+  Value.String
+  Entry.{ Value }
+}
+{}
+{}

@@ -81,7 +81,7 @@ fn lowers_spirit_schema_into_ordered_schema() {
 
 #[test]
 fn strict_key_value_declarations_lower_to_structs_and_enums() {
-    let source = "{} [] [] { Topic String Entry { Topic Kind } Kind [Decision Constraint] }";
+    let source = "{} [] [] { Topic.String Entry.{ Topic Kind } Kind.[Decision Constraint] } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("schema lowers");
@@ -100,7 +100,7 @@ fn strict_key_value_declarations_lower_to_structs_and_enums() {
 fn bare_reference_declarations_lower_to_newtypes() {
     // The bare `Name Type` form declares a distinct newtype, not a transparent
     // alias (record qz6j: aliases offer no correctness and are not used).
-    let source = "{} [] [] { Topic String Topics Vector.Topic }";
+    let source = "{} [] [] { Topic.String Topics.Vector.Topic } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("bare reference forms lower");
@@ -143,7 +143,7 @@ fn same_named_direct_variant_payloads_are_rejected() {
 
 #[test]
 fn distinct_leaf_variant_payload_is_accepted() {
-    let source = "{} [Entry.EntryLeaf] [] { Value String EntryLeaf { Value } }";
+    let source = "{} [Entry.EntryLeaf] [] { Value.String EntryLeaf.{ Value } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("distinct leaf payload lowers");
@@ -166,7 +166,7 @@ fn distinct_leaf_variant_payload_is_accepted() {
 fn bytes_is_a_reserved_scalar_leaf_not_a_declared_name() {
     let schema = SchemaEngine::default()
         .lower_source(
-            "{} [] [] { Digest Bytes }",
+            "{} [] [] { Digest.Bytes } {} {}",
             SchemaIdentity::new("example", "0.1.0"),
         )
         .expect("bytes scalar lowers");
@@ -181,7 +181,7 @@ fn bytes_is_a_reserved_scalar_leaf_not_a_declared_name() {
 fn fixed_size_bytes_lowers_to_a_fixed_bytes_reference() {
     let schema = SchemaEngine::default()
         .lower_source(
-            "{} [] [] { Digest Bytes.32 }",
+            "{} [] [] { Digest.Bytes.32 } {} {}",
             SchemaIdentity::new("example", "0.1.0"),
         )
         .expect("fixed-size bytes lowers");
@@ -195,7 +195,7 @@ fn fixed_size_bytes_lowers_to_a_fixed_bytes_reference() {
 
 #[test]
 fn single_field_brace_declarations_lower_to_newtypes() {
-    let source = "{} [] [] { Topic String Entry { Topic } Wrapper { Topic } }";
+    let source = "{} [] [] { Topic.String Entry.{ Topic } Wrapper.{ Topic } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("single-field brace declarations lower");
@@ -214,7 +214,7 @@ fn single_field_brace_declarations_lower_to_newtypes() {
 
 #[test]
 fn redundant_dot_field_roles_are_rejected() {
-    let source = "{} [] [] { Topic String Entry { topic.Topic } }";
+    let source = "{} [] [] { Topic.String Entry.{ topic.Topic } } {} {}";
     let error = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect_err("redundant explicit field role is rejected");
@@ -235,7 +235,7 @@ fn optional_enum_variant_payload_is_rejected() {
     // case must instead be modeled as an explicit member carrying a required
     // payload (for example a leaf enum with an explicit `All` member). Named
     // brace-record fields keep `Optional.T` (see `tests/collections.rs`).
-    let source = "{} [] [] { Leaf String Category [Plain Sub.Optional.Leaf] }";
+    let source = "{} [] [] { Leaf.String Category.[Plain Sub.Optional.Leaf] } {} {}";
     let error = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect_err("optional enum-variant payload is rejected");
@@ -251,8 +251,7 @@ fn optional_enum_variant_payload_is_rejected() {
 
 #[test]
 fn single_field_inline_pascal_declarations_lower_to_newtypes() {
-    let source =
-        "{} [] [] { RecordIdentifier Integer Receipt { RecordIdentifier } Entry { Receipt } }";
+    let source = "{} [] [] { RecordIdentifier.Integer Receipt.{ RecordIdentifier } Entry.{ Receipt } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("inline single-field declaration lowers");
@@ -287,16 +286,18 @@ fn single_field_inline_pascal_declarations_lower_to_newtypes() {
 
 #[test]
 fn brace_namespace_rejects_parenthesized_named_objects() {
-    let source = "{} [] [] { (Entry Entry { Topic Kind }) }";
+    let source = "{} [] [] { (Entry Entry { Topic Kind }) } {} {}";
     let error = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect_err("brace namespaces contain key/value declarations only");
 
     // The single lowering engine (the typed-source path) rejects a
-    // parenthesized named object in a namespace as a non-symbol head.
+    // parenthesized named object in the types block: a per-kind entry key must
+    // be a dotted-capitalized atom, not a parenthesis.
     assert!(matches!(
         error,
-        schema_language::SchemaError::ExpectedSymbol { .. }
+        schema_language::SchemaError::ExpectedSyntaxDeclaration { .. }
+            | schema_language::SchemaError::ExpectedSymbol { .. }
             | schema_language::SchemaError::NotaDecode(_)
             | schema_language::SchemaError::ExpectedDelimiter { .. }
             | schema_language::SchemaError::MacroDidNotMatch { .. }
@@ -306,16 +307,18 @@ fn brace_namespace_rejects_parenthesized_named_objects() {
 
 #[test]
 fn brace_namespace_rejects_redundant_key_value_declarations() {
-    let source = "{} [] [] { Entry Entry { Topic Kind } }";
+    let source = "{} [] [] { Entry Entry { Topic Kind } } {} {}";
     let error = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect_err("namespace declarations must be key/value pairs without duplicated names");
 
     // The single lowering engine (the typed-source path) rejects a redundant
-    // `Entry Entry { … }` triple as a non-symbol reference body.
+    // `Entry Entry { … }` triple: a per-kind entry key must be a dotted
+    // `TypeName.Definition` atom, so the undotted space-separated form fails.
     assert!(matches!(
         error,
-        schema_language::SchemaError::ExpectedSymbol { .. }
+        schema_language::SchemaError::ExpectedSyntaxDeclaration { .. }
+            | schema_language::SchemaError::ExpectedSymbol { .. }
             | schema_language::SchemaError::NotaDecode(_)
             | schema_language::SchemaError::ExpectedDelimiter { .. }
             | schema_language::SchemaError::UnsupportedMacroNodeStructure { .. }
@@ -324,7 +327,7 @@ fn brace_namespace_rejects_redundant_key_value_declarations() {
 
 #[test]
 fn colon_qualified_names_lower_as_schema_names() {
-    let source = "{} [Record.schema:spirit:Entry] [] { schema:spirit:Topic String schema:spirit:Entry schema:spirit:Topic }";
+    let source = "{} [Record.schema:spirit:Entry] [] { schema:spirit:Topic.String schema:spirit:Entry.schema:spirit:Topic } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("schema:spirit:lib", "0.1.0"))
         .expect("schema lowers");
@@ -718,7 +721,7 @@ fn macro_lowering_receives_macro_position() {
 
 #[test]
 fn field_names_are_derived_from_type_names() {
-    let source = "{} [] [] { RecordIdentifier Integer Description String Entry { RecordIdentifier Description } }";
+    let source = "{} [] [] { RecordIdentifier.Integer Description.String Entry.{ RecordIdentifier Description } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("schema lowers");
@@ -822,7 +825,7 @@ fn schema_engine_can_be_built_from_a_macro_registry() {
     let engine = SchemaEngine::with_registry(MacroRegistry::with_schema_defaults());
     let schema = engine
         .lower_source(
-            "{} [] [] { Topic String }",
+            "{} [] [] { Topic.String } {} {}",
             SchemaIdentity::new("example", "0.1.0"),
         )
         .expect("an engine built from a registry lowers through the single path");
@@ -839,8 +842,7 @@ fn schema_engine_can_be_built_from_a_macro_registry() {
 
 #[test]
 fn brace_body_lowers_as_struct_map_with_inline_private_types() {
-    let source =
-        "{} [] [] { Address String ToInbox Address ToOutbox Address Routing { ToInbox ToOutbox } }";
+    let source = "{} [] [] { Address.String ToInbox.Address ToOutbox.Address Routing.{ ToInbox ToOutbox } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("brace values are struct maps, not enum sugar");
@@ -866,7 +868,7 @@ fn brace_body_lowers_as_struct_map_with_inline_private_types() {
 
 #[test]
 fn strict_declaration_field_pairs_lower_through_default_engine() {
-    let source = "{} [] [] { RecordIdentifier Integer Description String Entry { RecordIdentifier Description } }";
+    let source = "{} [] [] { RecordIdentifier.Integer Description.String Entry.{ RecordIdentifier Description } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("at declaration lowers");
@@ -950,7 +952,7 @@ fn star_shorthand_derives_fields_and_data_variant_payloads_from_real_schema() {
 
 #[test]
 fn inline_pascal_declaration_creates_ordered_namespace_type() {
-    let source = "{} [] [] { RecordIdentifier Integer Receipt { RecordIdentifier } Entry { current.Receipt later.Receipt } }";
+    let source = "{} [] [] { RecordIdentifier.Integer Receipt.{ RecordIdentifier } Entry.{ current.Receipt later.Receipt } } {} {}";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("inline declaration lowers");
@@ -987,7 +989,7 @@ fn inline_pascal_declaration_creates_ordered_namespace_type() {
 fn root_enum_positions_supply_input_and_output_names() {
     let schema = SchemaEngine::default()
         .lower_source(
-            "{} [Record.Entry] [] {}",
+            "{} [Record.Entry] [] {} {} {}",
             SchemaIdentity::new("example", "0.1.0"),
         )
         .expect("bare input root lowers because the root position names it");
@@ -999,7 +1001,10 @@ fn root_enum_positions_supply_input_and_output_names() {
     assert_eq!(schema.output().name().as_str(), "Output");
 
     let error = SchemaEngine::default()
-        .lower_source("{} [] Reply {}", SchemaIdentity::new("example", "0.1.0"))
+        .lower_source(
+            "{} [] Reply {} {} {}",
+            SchemaIdentity::new("example", "0.1.0"),
+        )
         .expect_err("labeled root wrapper should not be accepted");
     // The single lowering engine (the typed-source path) reads the output
     // slot as either an enum body or a dotted application root; a bare

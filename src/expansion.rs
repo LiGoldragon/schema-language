@@ -43,7 +43,7 @@ impl<'registry> MacroExpansionPass<'registry> {
 
     /// Run the pass over a parsed document. The returned document is the
     /// macro-expanded re-parse; `context` accumulates the recorded firings and
-    /// bindings. The entry contract is the strict five-slot document layout
+    /// bindings. The entry contract is the strict six-slot document layout
     /// shared with the source path; grouped dotted root applications occupy one
     /// typed slot even when raw NOTA currently parses them as two blocks.
     pub(crate) fn expand(
@@ -86,9 +86,16 @@ impl<'registry> MacroExpansionPass<'registry> {
             MacroPosition::RootOutput,
             context,
         );
-        let namespace = layout.namespace().block(document);
-        self.record_block_firing(namespace, MacroPosition::RootNamespace, context);
-        self.record_namespace_declaration_firings(namespace, context)?;
+        // The former single namespace slot is now three per-kind declaration
+        // blocks (types, generics, impls). The `RootNamespace` macro position
+        // still names the declaration region; it is recorded on the `types`
+        // block — the type namespace the position always described — and the
+        // per-declaration `NamespaceDeclaration` walk covers the type and
+        // generic declaration blocks, whose entries mint declarations.
+        let types = layout.types().block(document);
+        self.record_block_firing(types, MacroPosition::RootNamespace, context);
+        self.record_namespace_declaration_firings(types, context)?;
+        self.record_namespace_declaration_firings(layout.generics().block(document), context)?;
         Ok(())
     }
 
@@ -107,21 +114,21 @@ impl<'registry> MacroExpansionPass<'registry> {
         }
     }
 
-    /// Record one `KeyValueDeclaration` firing per namespace key/value pair the
-    /// registry dispatches at the namespace-declaration position. The pair
-    /// segmentation mirrors the source path's namespace walk (a head plus an
-    /// optional inline body, with a trailing `{| … |}` impl block skipped) so
-    /// the recorded firings match the declarations the source path lowers.
+    /// Record one `NamespaceDeclaration` firing per per-kind declaration entry
+    /// the registry dispatches. The entry segmentation mirrors the source
+    /// path's per-kind block reader (a capitalized dotted key split off the
+    /// leading atom, then the value block sequence walked by width) so the
+    /// recorded firings match the declarations the source path lowers.
     fn record_namespace_declaration_firings(
         &self,
-        namespace: &Block,
+        block: &Block,
         context: &mut MacroContext,
     ) -> Result<(), SchemaError> {
         let Block::Delimited {
             delimiter: Delimiter::Brace,
             root_objects,
             ..
-        } = namespace
+        } = block
         else {
             return Ok(());
         };
@@ -197,12 +204,15 @@ impl<'registry> MacroExpansionPass<'registry> {
     }
 }
 
-/// A cursor over a namespace body that segments it into key/value pairs using
-/// the head / optional-body / optional-pipe-brace grammar the source-path
-/// namespace walk uses, including grouped dotted bodies that occupy a head
-/// block plus a payload block. Used only to count the `KeyValueDeclaration`
-/// firings for the macro context; segmentation errors are left for the source
-/// path to report, so the walk yields what it can and stops.
+/// A cursor over a per-kind declaration block body that segments it into one
+/// key/value pair per dotted entry, mirroring the source-path per-kind reader:
+/// a capitalized dotted key is split off the leading atom, and the value is the
+/// following block when the key atom ends at its dot, or the inline remainder
+/// carried in the key atom itself. Used only to dispatch the
+/// `NamespaceDeclaration` firings for the macro context; segmentation errors
+/// are left for the source path to report, so the walk yields what it can and
+/// stops. When the value stays inline in the key atom the pair's `name` and
+/// `definition` are the same atom, so the registry sees one dispatch per entry.
 #[derive(Clone, Copy, Debug)]
 struct NamespacePairWalk<'schema> {
     objects: &'schema [Block],
@@ -215,53 +225,24 @@ impl<'schema> NamespacePairWalk<'schema> {
     }
 
     fn next_pair(&mut self) -> Option<MacroPair<'schema>> {
-        loop {
-            let head = self.objects.get(self.cursor)?;
-            if head.is_pipe_brace() {
-                return None;
-            }
-            self.cursor += 1;
-            let definition = match self.objects.get(self.cursor) {
-                Some(next) if !next.is_pipe_brace() => {
-                    let definition = next;
-                    self.cursor += self.definition_width_at(self.cursor);
-                    Some(definition)
+        let head = self.objects.get(self.cursor)?;
+        self.cursor += 1;
+        let ends_at_dot = matches!(head, Block::Atom(atom) if atom.text().ends_with('.'));
+        let definition = if ends_at_dot {
+            match self.objects.get(self.cursor) {
+                Some(next) => {
+                    self.cursor += 1;
+                    next
                 }
-                _ => None,
-            };
-            if let Some(next) = self.objects.get(self.cursor)
-                && next.is_pipe_brace()
-            {
-                self.cursor += 1;
+                None => head,
             }
-            match definition {
-                Some(definition) => {
-                    return Some(MacroPair {
-                        name: head,
-                        definition,
-                    });
-                }
-                // A body-optional `TypeName {| … |}` entry mints no
-                // declaration on the macro path; skip it and keep walking.
-                None => continue,
-            }
-        }
-    }
-
-    fn definition_width_at(&self, index: usize) -> usize {
-        let Some(Block::Atom(atom)) = self.objects.get(index) else {
-            return 1;
-        };
-        if atom.text().strip_suffix('.').is_some()
-            && self
-                .objects
-                .get(index + 1)
-                .is_some_and(|block| !block.is_pipe_brace())
-        {
-            2
         } else {
-            1
-        }
+            head
+        };
+        Some(MacroPair {
+            name: head,
+            definition,
+        })
     }
 }
 

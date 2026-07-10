@@ -129,8 +129,7 @@ fn schema_source_reference_fields_lower_to_canonical_field_names() {
 
 #[test]
 fn schema_source_explicit_structural_fields_round_trip() {
-    let source =
-        "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.Vector.Topic Limit.Optional.Integer }\n}";
+    let source = "{}\n[]\n[]\n{\n  Topic.String\n  Query.{ Topics.Vector.Topic Limit.Optional.Integer }\n}\n{}\n{}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("schema source decodes");
     let canonical = artifact.to_schema_text();
     let recovered = SchemaSourceArtifact::from_schema_text(&canonical)
@@ -148,7 +147,7 @@ fn schema_source_explicit_structural_fields_round_trip() {
 
     assert_eq!(
         canonical,
-        "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.Vector.Topic Limit.Optional.Integer }\n}"
+        "{}\n[]\n[]\n{\n  Topic.String\n  Query.{ Topics.Vector.Topic Limit.Optional.Integer }\n}\n{}\n{}"
     );
     assert_eq!(query.fields[0].name.as_str(), "topics");
     assert_eq!(query.fields[1].name.as_str(), "limit");
@@ -156,7 +155,7 @@ fn schema_source_explicit_structural_fields_round_trip() {
 
 #[test]
 fn schema_source_exposes_one_level_help_projection_inputs() {
-    let source = "{}\n[(Record { Entry Justification })]\n[RecordAccepted]\n{\n  Entry { Domains Kind Description }\n  Domains Vector.Domain\n  Description String\n  Kind [Decision Principle]\n  RecordIdentifier String\n}";
+    let source = "{}\n[(Record { Entry Justification })]\n[RecordAccepted]\n{\n  Entry.{ Domains Kind Description }\n  Domains.Vector.Domain\n  Description.String\n  Kind.[Decision Principle]\n  RecordIdentifier.String\n}\n{}\n{}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("schema source decodes");
     let input = artifact
         .source()
@@ -179,14 +178,13 @@ fn schema_source_exposes_one_level_help_projection_inputs() {
 
     assert_eq!(field_text, vec!["*", "*"]);
 
-    let namespace = artifact.source().namespace();
-    let domains = namespace
+    let types = artifact.source().types();
+    let domains = types
         .entries()
         .iter()
         .find(|entry| entry.name().as_str() == "Domains")
         .expect("Domains declaration");
-    let Some(schema_language::SourceDeclarationValue::Reference(reference)) = domains.value()
-    else {
+    let schema_language::SourceDeclarationValue::Reference(reference) = domains.value() else {
         panic!("Domains should expose its reference body");
     };
 
@@ -217,7 +215,7 @@ fn nested_namespace_router_envelope_round_trips_and_lowers() {
     );
     assert!(
         canonical.contains(
-            "Envelope { Destination Contract Operation Exchange PayloadSize PayloadOctets }"
+            "Envelope.{ Destination Contract Operation Exchange PayloadSize PayloadOctets }"
         ),
         "canonical source keeps the envelope fields positional and bare"
     );
@@ -251,17 +249,15 @@ fn nested_namespace_router_envelope_round_trips_and_lowers() {
         "source projection details must not move the core structural identity"
     );
     assert!(
-        schema.type_named("router:routed_object:Envelope").is_some(),
-        "nested Envelope should flatten to a fully qualified schema type"
+        schema.type_named("Envelope").is_some(),
+        "the flattened Envelope is an ordinary top-level schema type"
     );
     assert!(
-        schema.type_named("Envelope").is_none(),
-        "nested local names must not leak into the top-level type namespace"
+        schema.type_named("router:routed_object:Envelope").is_none(),
+        "the retired nested sub-namespace name must not survive flattening"
     );
 
-    let Some(TypeDeclaration::Struct(envelope)) =
-        schema.type_named("router:routed_object:Envelope")
-    else {
+    let Some(TypeDeclaration::Struct(envelope)) = schema.type_named("Envelope") else {
         panic!("router envelope should lower to a struct");
     };
     assert_eq!(
@@ -287,31 +283,23 @@ fn nested_namespace_router_envelope_round_trips_and_lowers() {
             .map(|field| &field.reference)
             .collect::<Vec<_>>(),
         vec![
-            &TypeReference::Plain(schema_language::Name::new(
-                "router:routed_object:Destination"
-            )),
-            &TypeReference::Plain(schema_language::Name::new("router:routed_object:Contract")),
-            &TypeReference::Plain(schema_language::Name::new("router:routed_object:Operation")),
-            &TypeReference::Plain(schema_language::Name::new("router:routed_object:Exchange")),
-            &TypeReference::Plain(schema_language::Name::new(
-                "router:routed_object:PayloadSize"
-            )),
-            &TypeReference::Plain(schema_language::Name::new(
-                "router:routed_object:PayloadOctets"
-            )),
+            &TypeReference::Plain(schema_language::Name::new("Destination")),
+            &TypeReference::Plain(schema_language::Name::new("Contract")),
+            &TypeReference::Plain(schema_language::Name::new("Operation")),
+            &TypeReference::Plain(schema_language::Name::new("Exchange")),
+            &TypeReference::Plain(schema_language::Name::new("PayloadSize")),
+            &TypeReference::Plain(schema_language::Name::new("PayloadOctets")),
         ],
-        "local field types resolve to fully qualified semantic references"
+        "flattened field types resolve to plain top-level semantic references"
     );
 
-    let Some(TypeDeclaration::Newtype(destination)) =
-        schema.type_named("router:routed_object:Destination")
-    else {
-        panic!("Destination should lower to a namespaced newtype");
+    let Some(TypeDeclaration::Newtype(destination)) = schema.type_named("Destination") else {
+        panic!("Destination should lower to a top-level newtype");
     };
     assert_eq!(
         destination.reference,
         TypeReference::Plain(schema_language::Name::new("ActorIdentifier")),
-        "namespaced declarations can still reference top-level shared types"
+        "flattened declarations still reference top-level shared types"
     );
 }
 
@@ -639,7 +627,7 @@ fn duplicate_inline_declarations_are_errors() {
 
 #[test]
 fn redundant_dot_field_roles_are_errors() {
-    let source = "{}\n[]\n[]\n{\n  Topic String\n  Entry { topic.Topic }\n}";
+    let source = "{}\n[]\n[]\n{\n  Topic.String\n  Entry.{ topic.Topic }\n}\n{}\n{}";
     let error = SchemaSourceArtifact::from_schema_text(source)
         .expect_err("redundant explicit field role should fail before lowering");
     let rendered = error.to_string();

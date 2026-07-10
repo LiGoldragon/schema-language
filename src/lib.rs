@@ -63,10 +63,11 @@ pub use source::{
     FactoredEncoding, HelpRendering, IndirectionLink, IndirectionProjection,
     LinkedStructureExpansion, MainStructureDepthCap, SchemaSource, SchemaSourceArtifact,
     SourceDeclaration, SourceDeclarationValue, SourceDeclarations, SourceEnumBody, SourceField,
-    SourceFieldIdentity, SourceFieldValue, SourceImplCatalog, SourceImplEntry, SourceImport,
-    SourceImports, SourceMethodParameter, SourceMethodSignature, SourceNamespace,
-    SourceNamespaceEntry, SourceReference, SourceRootBody, SourceRootEnum, SourceStructBody,
-    SourceVariantName, SourceVariantPayload, SourceVariantSignature,
+    SourceFieldIdentity, SourceFieldValue, SourceGenericEntry, SourceGenerics, SourceImplCatalog,
+    SourceImplEntry, SourceImpls, SourceImplsEntry, SourceImport, SourceImports,
+    SourceMethodParameter, SourceMethodSignature, SourceReference, SourceRootBody, SourceRootEnum,
+    SourceStructBody, SourceTypeEntry, SourceTypes, SourceVariantName, SourceVariantPayload,
+    SourceVariantSignature,
 };
 pub use upgrade::{
     AddField, AddVariant, ChangeFieldType, DefaultValue, EditEffect, FieldMigration, MigrationSpec,

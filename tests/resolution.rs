@@ -82,7 +82,7 @@ fn resolver_resolves_import_of_dependency_root_enum() {
         "0.1.0",
     );
     let engine = SchemaEngine::default();
-    let consumer_source = "{ plane-crate.signal.Input } [Observe.Input] [] {}";
+    let consumer_source = "{ plane-crate.signal.Input }\n[Observe.Input]\n[]\n{}\n{}\n{}";
 
     let schema = engine
         .lower_source_with_resolver(
@@ -151,7 +151,7 @@ fn resolver_rejects_import_of_a_type_the_dependency_does_not_declare() {
         "0.1.0",
     );
     let engine = SchemaEngine::default();
-    let consumer_source = "{ marker-core.mail.Missing } [] [] { Topic String }";
+    let consumer_source = "{ marker-core.mail.Missing }\n[]\n[]\n{\n  Topic.String\n}\n{}\n{}";
 
     let error = engine
         .lower_source_with_resolver(
@@ -176,7 +176,8 @@ fn resolver_rejects_import_of_a_type_the_dependency_does_not_declare() {
 fn unregistered_dependency_crate_is_reported() {
     let resolver = ImportResolver::new();
     let engine = SchemaEngine::default();
-    let consumer_source = "{ marker-core.mail.DatabaseMarker } [] [] { Topic String }";
+    let consumer_source =
+        "{ marker-core.mail.DatabaseMarker }\n[]\n[]\n{\n  Topic.String\n}\n{}\n{}";
 
     let error = engine
         .lower_source_with_resolver(

@@ -222,8 +222,18 @@ impl SchemaRootBlockSummarySet {
                 ),
                 SchemaRootBlockSummary::from_document_slot(
                     document,
-                    layout.namespace(),
-                    SchemaRootBlockKind::Namespace,
+                    layout.types(),
+                    SchemaRootBlockKind::Types,
+                ),
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.generics(),
+                    SchemaRootBlockKind::Generics,
+                ),
+                SchemaRootBlockSummary::from_document_slot(
+                    document,
+                    layout.impls(),
+                    SchemaRootBlockKind::Impls,
                 ),
             ],
         }
@@ -279,7 +289,9 @@ pub enum SchemaRootBlockKind {
     Imports,
     Input,
     Output,
-    Namespace,
+    Types,
+    Generics,
+    Impls,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -288,7 +300,9 @@ pub enum SchemaNodeType {
     Imports,
     InputRoot,
     OutputRoot,
-    Namespace,
+    Types,
+    Generics,
+    Impls,
 }
 
 impl SchemaNodeType {
@@ -297,7 +311,9 @@ impl SchemaNodeType {
             SchemaRootBlockKind::Imports => Self::Imports,
             SchemaRootBlockKind::Input => Self::InputRoot,
             SchemaRootBlockKind::Output => Self::OutputRoot,
-            SchemaRootBlockKind::Namespace => Self::Namespace,
+            SchemaRootBlockKind::Types => Self::Types,
+            SchemaRootBlockKind::Generics => Self::Generics,
+            SchemaRootBlockKind::Impls => Self::Impls,
         }
     }
 }

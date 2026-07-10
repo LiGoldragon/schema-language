@@ -22,22 +22,7 @@ use schema_language::{
 };
 
 fn entry_schema_source() -> &'static str {
-    "{}\n\
-     [Record.Entry Observe.Query]\n\
-     [RecordAccepted.RecordIdentifier RecordsObserved.RecordSet]\n\
-     {\n\
-       Record Entry\n\
-       Observe Query\n\
-       RecordAccepted RecordIdentifier\n\
-       RecordsObserved RecordSet\n\
-       Topic String\n\
-       Description String\n\
-       RecordIdentifier Integer\n\
-       Entry { Topic Description Kind }\n\
-       Query { Topic Kind }\n\
-       RecordSet Vector.Entry\n\
-       Kind [Decision Principle Correction Clarification Constraint]\n\
-     }\n"
+    "{}\n[Record.Entry Observe.Query]\n[RecordAccepted.RecordIdentifier RecordsObserved.RecordSet]\n{\n  Record.Entry\n  Observe.Query\n  RecordAccepted.RecordIdentifier\n  RecordsObserved.RecordSet\n  Topic.String\n  Description.String\n  RecordIdentifier.Integer\n  Entry.{ Topic Description Kind }\n  Query.{ Topic Kind }\n  RecordSet.Vector.Entry\n  Kind.[Decision Principle Correction Clarification Constraint]\n}\n{}\n{}"
 }
 
 fn lower_previous() -> schema_language::TrueSchema {

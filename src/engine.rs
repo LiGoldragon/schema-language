@@ -227,20 +227,19 @@ pub enum SchemaError {
         kind: &'static str,
         signature: String,
     },
-    /// A body-optional `TypeName {| … |}` impl block names a target type that
-    /// is not declared anywhere in the schema. A standalone impl block must
-    /// attach its catalog to a type declared by a separate entry; an
-    /// unresolved target is not an accepted free-standing impl over an
-    /// arbitrary name.
+    /// An impls-block entry `TypeName.[ … ]` names a target type that is not
+    /// declared anywhere in the schema. An impl block must attach its catalog
+    /// to a type declared in the types (or generics) block; an unresolved
+    /// target is not an accepted free-standing impl over an arbitrary name.
     #[error("impl block targets type `{name}`, which is not declared in this schema")]
     UnresolvedImplTarget { name: String },
     /// A target type carries the same impl entry twice — the same trait
     /// marker repeated, or the same method signature repeated — across one or
-    /// more `{| … |}` blocks. Distinct entries for one target compose; an
+    /// more impls-block entries. Distinct entries for one target compose; an
     /// identical entry is a true duplicate and a typed error.
     #[error("impl catalog for type `{target}` carries duplicate entry `{entry}`")]
     DuplicateImplEntry { target: String, entry: String },
-    /// A trait atom inside a `{| … |}` impl block is not a PascalCase
+    /// A trait atom inside an impl catalog is not a PascalCase
     /// type-name. Trait references obey the same naming gate as every other
     /// type reference: a lowercase or otherwise non-type-name atom in a trait
     /// position is a typed error, not a silently-accepted trait.
@@ -512,8 +511,8 @@ impl SchemaEngine {
     /// document and its `SchemaSource` cannot lower to different schemas.
     ///
     /// The document entry point has the same strict entry contract as the
-    /// source archive: exactly five root slots, in order: imports, input,
-    /// output, namespace, relations. Empty optional sections are typed empty
+    /// source archive: exactly six root slots, in order: imports, input,
+    /// output, types, generics, impls. Empty optional sections are typed empty
     /// roots (`{}` / `[]`), not omitted roots.
     pub fn lower_document_with_resolver(
         &self,
@@ -524,9 +523,9 @@ impl SchemaEngine {
     ) -> Result<TrueSchema, SchemaError> {
         context.remember_structure_header(document.structure_header());
 
-        if document.holds_root_objects() < 4 {
+        if document.holds_root_objects() < 6 {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "4 root slots (imports input output namespace)",
+                expected: "6 root slots (imports input output types generics impls)",
                 found: document.holds_root_objects(),
             });
         }
@@ -706,10 +705,9 @@ impl<'schema> KeyValueDeclaration<'schema> {
         _registry: &MacroRegistry,
         _context: &mut MacroContext,
     ) -> Result<TypeDeclaration, SchemaError> {
-        // A `{| … |}` impl block is segmented off as a trailing block by the
-        // namespace entry walk, so it never arrives as a newtype definition.
-        // A `(| … |)` pipe-parenthesis is a head-position binder list and is
-        // still illegal at a value position.
+        // Pipe delimiters carry no surviving construct — the `{| … |}` impl
+        // tail and the `(| … |)` binder head are retired — so either is
+        // illegal at a value position.
         if matches!(
             definition,
             Block::Delimited {
@@ -893,24 +891,20 @@ impl<'schema> NamespaceBlock<'schema> {
         Ok(declarations)
     }
 
-    /// Segment the namespace body into key/value pairs the macro lowerer
-    /// understands. The body is no longer a flat `chunks_exact(2)` map: an
-    /// entry is a head, an optional inline body, and an optional trailing
-    /// `{| … |}` impl block (a separate root object). Body-bearing entries
-    /// become a [`MacroPair`]; body-optional entries (`TypeName {| … |}`)
-    /// mint no type declaration on the macro path and are dropped here — the
-    /// typed source archive carries their impls. This walk mirrors
-    /// `SourceNamespaceWalk` in `source.rs`; the two must stay in lockstep.
+    /// Segment the declaration-block body into key/value pairs the macro
+    /// lowerer understands. Every entry is one capitalized dotted key: the
+    /// key atom either carries its value inline past the dot (one block) or
+    /// ends at the dot and takes the following block as its value (two
+    /// blocks). This walk mirrors the per-kind entry reader in `source.rs`
+    /// (`SourceKindEntry`); the two must stay in lockstep.
     fn key_value_pairs(&self) -> Result<Vec<MacroPair<'schema>>, SchemaError> {
         let mut pairs = Vec::new();
         let mut walk = NamespaceEntryWalk::new(self.body.root_objects());
         while let Some(entry) = walk.next_entry()? {
-            if let Some(definition) = entry.definition {
-                pairs.push(MacroPair {
-                    name: entry.name,
-                    definition,
-                });
-            }
+            pairs.push(MacroPair {
+                name: entry.name,
+                definition: entry.definition,
+            });
         }
         Ok(pairs)
     }
@@ -943,24 +937,21 @@ impl<'schema> NamespaceBlock<'schema> {
     }
 }
 
-/// One segmented namespace entry on the macro path: a head block and the first
-/// block of an optional inline body (the `definition`). A grouped dotted
-/// application body consumes its payload block during the walk so the payload
-/// is not mistaken for the next entry. The trailing `{| … |}` impl block is
-/// recognised and skipped by the walk — the macro lowerer consumes only the
-/// body; the typed source archive (`SourceNamespaceEntry`) is what carries the
-/// impl catalog.
+/// One segmented declaration entry on the macro path: the head block carrying
+/// the dotted key, and the block carrying the value. When the key atom ends at
+/// its dot the value is the following block; when the value stays inline past
+/// the dot the head atom serves as both — the same convention as the
+/// macro-firing walk in `expansion.rs`.
 #[derive(Clone, Copy, Debug)]
 struct NamespaceEntry<'schema> {
     name: &'schema Block,
-    definition: Option<&'schema Block>,
+    definition: &'schema Block,
 }
 
-/// A cursor over a namespace body that segments it into [`NamespaceEntry`]s
-/// using the same head / optional-body / optional-pipe-brace grammar as
-/// `source.rs`'s `SourceNamespaceWalk`. Keeping the two walks identical is
-/// what stops the macro lowering and the typed-source lowering from
-/// diverging.
+/// A cursor over a declaration-block body that segments it into
+/// [`NamespaceEntry`]s using the same dotted-key grammar as the per-kind
+/// entry reader in `source.rs`. Keeping the walks identical is what stops the
+/// macro lowering and the typed-source lowering from diverging.
 #[derive(Clone, Copy, Debug)]
 struct NamespaceEntryWalk<'schema> {
     objects: &'schema [Block],
@@ -976,56 +967,23 @@ impl<'schema> NamespaceEntryWalk<'schema> {
         let Some(head) = self.objects.get(self.cursor) else {
             return Ok(None);
         };
-        if head.is_pipe_brace() {
-            return Err(SchemaError::ExpectedDelimiter {
-                expected: "a type name before a {| … |} impl block, not a leading impl block",
-            });
-        }
         self.cursor += 1;
-
-        let definition = match self.objects.get(self.cursor) {
-            Some(next) if !next.is_pipe_brace() => {
-                let definition = next;
-                self.cursor += self.definition_width_at(self.cursor);
-                Some(definition)
-            }
-            _ => None,
+        let ends_at_dot = matches!(head, Block::Atom(atom) if atom.text().ends_with('.'));
+        let definition = if ends_at_dot {
+            let Some(next) = self.objects.get(self.cursor) else {
+                return Err(SchemaError::ExpectedDelimiter {
+                    expected: "a declaration value after a trailing-dot key",
+                });
+            };
+            self.cursor += 1;
+            next
+        } else {
+            head
         };
-
-        let has_impls = match self.objects.get(self.cursor) {
-            Some(next) if next.is_pipe_brace() => {
-                self.cursor += 1;
-                true
-            }
-            _ => false,
-        };
-
-        if definition.is_none() && !has_impls {
-            return Err(SchemaError::ExpectedDelimiter {
-                expected: "a namespace entry body or a {| … |} impl block",
-            });
-        }
-
         Ok(Some(NamespaceEntry {
             name: head,
             definition,
         }))
-    }
-
-    fn definition_width_at(&self, index: usize) -> usize {
-        let Some(Block::Atom(atom)) = self.objects.get(index) else {
-            return 1;
-        };
-        if atom.text().strip_suffix('.').is_some()
-            && self
-                .objects
-                .get(index + 1)
-                .is_some_and(|block| !block.is_pipe_brace())
-        {
-            2
-        } else {
-            1
-        }
     }
 }
 

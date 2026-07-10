@@ -18,18 +18,7 @@ use schema_language::{
     SchemaEdit, SchemaEditApplication, SchemaEngine, SchemaIdentity, TrueSchema, TypeReference,
 };
 
-const BASE: &str = "\
-{}
-[Record.Entry]
-[Logged.Receipt]
-{
-  Topic String
-  Detail String
-  Kind [Decision Principle Correction]
-  Entry { Topic Kind }
-  Receipt { Topic Detail }
-}
-";
+const BASE: &str = "{}\n[Record.Entry]\n[Logged.Receipt]\n{\n  Topic.String\n  Detail.String\n  Kind.[Decision Principle Correction]\n  Entry.{ Topic Kind }\n  Receipt.{ Topic Detail }\n}\n{}\n{}";
 
 fn lower(source: &str) -> TrueSchema {
     SchemaEngine::default()

@@ -2,21 +2,23 @@
 [Record.RecordPayload Observe.ObservePayload]
 [Accepted.AcceptedPayload Failed.FailedPayload]
 {
-  RecordPayload Entry
-  ObservePayload Query
-  AcceptedPayload Receipt
-  FailedPayload ErrorReport
-  RecordIdentifier Integer
-  DatabaseMarker Integer
-  Topic String
-  Topics Vector.Topic
-  Kind [Decision Correction]
-  Description String
-  Magnitude [Low High]
-  SomethingHoldingSomethingPayload String
-  Entry { Topics Kind Description Magnitude }
-  Query { Topics Optional.Integer }
-  Receipt { RecordIdentifier DatabaseMarker }
-  ErrorReport { Description }
-  SomeEnum [ SomethingHoldingSomething.SomethingHoldingSomethingPayload SomethingElse SomeString.String ]
+  RecordPayload.Entry
+  ObservePayload.Query
+  AcceptedPayload.Receipt
+  FailedPayload.ErrorReport
+  RecordIdentifier.Integer
+  DatabaseMarker.Integer
+  Topic.String
+  Topics.Vector.Topic
+  Kind.[Decision Correction]
+  Description.String
+  Magnitude.[Low High]
+  SomethingHoldingSomethingPayload.String
+  Entry.{ Topics Kind Description Magnitude }
+  Query.{ Topics Optional.Integer }
+  Receipt.{ RecordIdentifier DatabaseMarker }
+  ErrorReport.{ Description }
+  SomeEnum.[ SomethingHoldingSomething.SomethingHoldingSomethingPayload SomethingElse SomeString.String ]
 }
+{}
+{}

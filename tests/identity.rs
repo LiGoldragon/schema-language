@@ -14,22 +14,7 @@ impl IdentityFixture {
         }
     }
 
-    const BASE: &'static str = "\
-{}
-[Record.Entry]
-[Recorded.Receipt Rejected.Rejection]
-{
-  Topic String
-  Magnitude Integer
-  Reason String
-  Note String
-  Detail { Magnitude }
-  Entry { Topic Detail }
-  Receipt { Topic }
-  Rejection { Reason }
-  Unrelated { Note }
-}
-";
+    const BASE: &'static str = "{}\n[Record.Entry]\n[Recorded.Receipt Rejected.Rejection]\n{\n  Topic.String\n  Magnitude.Integer\n  Reason.String\n  Note.String\n  Detail.{ Magnitude }\n  Entry.{ Topic Detail }\n  Receipt.{ Topic }\n  Rejection.{ Reason }\n  Unrelated.{ Note }\n}\n{}\n{}";
 
     /// BASE re-spelled with different whitespace and `;;` comments —
     /// the same semantic schema in a different textual coat.
@@ -40,55 +25,27 @@ impl IdentityFixture {
 ;; the output root
 [ Recorded.Receipt   Rejected.Rejection ]
 {
-  Topic     String   ;; alias
-  Magnitude Integer
-  Reason    String
-  Note      String
+  Topic.String   ;; alias
+  Magnitude.Integer
+  Reason.String
+  Note.String
 
-  Detail    { Magnitude }
-  Entry     { Topic Detail }
-  Receipt   { Topic }
-  Rejection { Reason }
-  Unrelated { Note }
+  Detail.{ Magnitude }
+  Entry.{ Topic Detail }
+  Receipt.{ Topic }
+  Rejection.{ Reason }
+  Unrelated.{ Note }
 }
+{}
+{}
 ";
 
     /// BASE with `Magnitude` — two reference hops below `Entry` —
     /// changed from `Integer` to `String`.
-    const DEEP_CHANGE: &'static str = "\
-{}
-[Record.Entry]
-[Recorded.Receipt Rejected.Rejection]
-{
-  Topic String
-  Magnitude String
-  Reason String
-  Note String
-  Detail { Magnitude }
-  Entry { Topic Detail }
-  Receipt { Topic }
-  Rejection { Reason }
-  Unrelated { Note }
-}
-";
+    const DEEP_CHANGE: &'static str = "{}\n[Record.Entry]\n[Recorded.Receipt Rejected.Rejection]\n{\n  Topic.String\n  Magnitude.String\n  Reason.String\n  Note.String\n  Detail.{ Magnitude }\n  Entry.{ Topic Detail }\n  Receipt.{ Topic }\n  Rejection.{ Reason }\n  Unrelated.{ Note }\n}\n{}\n{}";
 
     /// BASE with only `Unrelated` — unreachable from `Entry` — changed.
-    const UNRELATED_CHANGE: &'static str = "\
-{}
-[Record.Entry]
-[Recorded.Receipt Rejected.Rejection]
-{
-  Topic String
-  Magnitude Integer
-  Reason String
-  Note Integer
-  Detail { Magnitude }
-  Entry { Topic Detail }
-  Receipt { Topic }
-  Rejection { Reason }
-  Unrelated { Note }
-}
-";
+    const UNRELATED_CHANGE: &'static str = "{}\n[Record.Entry]\n[Recorded.Receipt Rejected.Rejection]\n{\n  Topic.String\n  Magnitude.Integer\n  Reason.String\n  Note.Integer\n  Detail.{ Magnitude }\n  Entry.{ Topic Detail }\n  Receipt.{ Topic }\n  Rejection.{ Reason }\n  Unrelated.{ Note }\n}\n{}\n{}";
 
     fn schema(&self, source: &str) -> TrueSchema {
         SchemaEngine::default()

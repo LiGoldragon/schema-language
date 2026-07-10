@@ -5,7 +5,7 @@ use schema_language::{
 };
 
 fn schema_roots(namespace: &str) -> String {
-    format!("{{}} [] [] {{ {namespace} }}")
+    format!("{{}} [] [] {{ {namespace} }} {{}} {{}}")
 }
 
 fn lower_namespace(namespace: &str) -> Result<schema_language::TrueSchema, SchemaError> {
@@ -38,7 +38,7 @@ fn public_type_reference_reader_rejects_parenthesized_builtin_applications() {
 
 #[test]
 fn schema_source_rejects_legacy_newtype_reference_at_former_engine_call_site() {
-    let error = lower_namespace("Topic String Topics (Vector Topic)")
+    let error = lower_namespace("Topic.String Topics.(Vector Topic)")
         .expect_err("namespace newtype bodies must use dotted references");
 
     assert!(
@@ -51,7 +51,7 @@ fn schema_source_rejects_legacy_newtype_reference_at_former_engine_call_site() {
 fn schema_source_rejects_legacy_root_application_at_former_engine_call_site() {
     let error = SchemaEngine::default()
         .lower_source(
-            "{}\n(Vector Topic)\n[]\n{ Topic String }",
+            "{}\n(Vector Topic)\n[]\n{\n  Topic.String\n}\n{}\n{}",
             SchemaIdentity::new("legacy-reference-pipeline:test", "0.1.0"),
         )
         .expect_err("root applications must be dotted");
@@ -75,7 +75,7 @@ fn macro_reference_templates_use_dotted_reader_and_reject_old_builtin_body() {
     let engine = SchemaEngine::with_registry(registry);
     let error = engine
         .lower_source_with_context(
-            &schema_roots("Topic String Topics (Bag Topic)"),
+            &schema_roots("Topic.String Topics.(Bag Topic)"),
             SchemaIdentity::new("legacy-reference-pipeline:test", "0.1.0"),
             &mut MacroContext::default(),
         )
@@ -100,7 +100,7 @@ fn macro_reference_templates_accept_dotted_builtin_body() {
     let engine = SchemaEngine::with_registry(registry);
     let schema = engine
         .lower_source_with_context(
-            &schema_roots("Topic String Topics (Bag Topic)"),
+            &schema_roots("Topic.String Topics.(Bag Topic)"),
             SchemaIdentity::new("legacy-reference-pipeline:test", "0.1.0"),
             &mut MacroContext::default(),
         )

@@ -2,5 +2,7 @@
 [SignalArrived.Input]
 [ReplyToSignal.Output]
 {
-  NexusReceipt Integer
+  NexusReceipt.Integer
 }
+{}
+{}

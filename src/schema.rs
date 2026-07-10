@@ -523,10 +523,9 @@ impl SchemaTree {
         }
     }
 
-    /// Attach the standalone impl blocks lowered from body-optional
-    /// `TypeName {| … |}` entries — impls for types declared elsewhere. The
-    /// fused-form catalogs ride on their own `Declaration::impls`; these are
-    /// the catalogs whose target type is declared by a separate entry.
+    /// Attach the standalone impl blocks lowered from the impls block's
+    /// `TypeName.[ … ]` entries — every impl catalog is keyed by the type it
+    /// targets, declared by its own types/generics entry.
     pub(crate) fn with_impl_blocks(mut self, impl_blocks: Vec<ImplBlock>) -> Self {
         self.impl_blocks = impl_blocks;
         self
@@ -582,8 +581,8 @@ impl SchemaTree {
         &self.namespace
     }
 
-    /// The standalone impl blocks lowered from body-optional
-    /// `TypeName {| … |}` entries (impls for elsewhere-declared types).
+    /// The standalone impl blocks lowered from the impls block's
+    /// `TypeName.[ … ]` entries.
     pub fn impl_blocks(&self) -> &[ImplBlock] {
         &self.impl_blocks
     }
@@ -1008,27 +1007,65 @@ impl SchemaTree {
             self.imports_schema_text(),
             self.input.to_root_schema_text(),
             self.output.to_root_schema_text(),
-            self.namespace_schema_text(),
+            self.types_schema_text(),
+            self.generics_schema_text(),
+            self.impls_schema_text(),
         ];
         roots.join("\n")
     }
 
     fn imports_schema_text(&self) -> String {
-        if self.imports.is_empty() {
-            return "{}".to_owned();
-        }
-        let imports = self
-            .imports
-            .iter()
-            .map(|import| format!("  {}", import.to_schema_text()))
-            .collect::<Vec<_>>();
-        format!("{{\n{}\n}}", imports.join("\n"))
+        Self::brace_block_text(
+            self.imports
+                .iter()
+                .map(|import| import.to_schema_text())
+                .collect(),
+        )
     }
 
-    fn namespace_schema_text(&self) -> String {
+    /// The `types` block: every non-parameterized declaration, projected as a
+    /// dotted `TypeName.Definition` entry.
+    fn types_schema_text(&self) -> String {
+        Self::brace_block_text(
+            self.namespace
+                .iter()
+                .filter(|declaration| declaration.parameters().is_empty())
+                .map(Declaration::types_entry_text)
+                .collect(),
+        )
+    }
+
+    /// The `generics` block: every parameterized declaration, projected as a
+    /// dotted `GenericName.((Params …) Body)` entry.
+    fn generics_schema_text(&self) -> String {
+        Self::brace_block_text(
+            self.namespace
+                .iter()
+                .filter(|declaration| !declaration.parameters().is_empty())
+                .map(Declaration::generics_entry_text)
+                .collect(),
+        )
+    }
+
+    /// The `impls` block: every impl catalog keyed by the type it targets. A
+    /// declaration carrying a fused catalog contributes its own entry, and each
+    /// standalone impl block contributes its target's entry — the same union
+    /// the enumerable manifest walks.
+    fn impls_schema_text(&self) -> String {
         let mut entries = Vec::new();
-        entries.extend(self.namespace.iter().map(Declaration::to_schema_text));
-        entries.extend(self.impl_blocks.iter().map(ImplBlock::to_schema_text));
+        for declaration in &self.namespace {
+            if !declaration.impls().is_empty() {
+                entries.push(ImplBlock::impls_entry_text(
+                    declaration.name(),
+                    declaration.impls(),
+                ));
+            }
+        }
+        entries.extend(self.impl_blocks.iter().map(ImplBlock::to_impls_entry_text));
+        Self::brace_block_text(entries)
+    }
+
+    fn brace_block_text(entries: Vec<String>) -> String {
         if entries.is_empty() {
             return "{}".to_owned();
         }
@@ -1062,20 +1099,27 @@ impl Root {
 }
 
 impl Declaration {
-    fn to_schema_text(&self) -> String {
-        let head = if self.parameters.is_empty() {
-            self.name.to_nota()
-        } else {
-            let mut items = Vec::with_capacity(self.parameters.len() + 1);
-            items.push(self.name.to_nota());
-            items.extend(self.parameters.iter().map(Name::to_nota));
-            Delimiter::PipeParenthesis.wrap(items)
-        };
-        let mut parts = vec![head, self.value.to_schema_text()];
-        if !self.impls.is_empty() {
-            parts.push(self.impls.to_schema_text());
-        }
-        parts.join(" ")
+    /// Project a non-parameterized declaration as a `types` block entry:
+    /// `TypeName.Definition`.
+    fn types_entry_text(&self) -> String {
+        format!("{}.{}", self.name.to_nota(), self.value.to_schema_text())
+    }
+
+    /// Project a parameterized declaration as a `generics` block entry:
+    /// `GenericName.((Params …) Body)`.
+    fn generics_entry_text(&self) -> String {
+        let binders = self
+            .parameters
+            .iter()
+            .map(Name::to_nota)
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "{}.(({}) {})",
+            self.name.to_nota(),
+            binders,
+            self.value.to_schema_text()
+        )
     }
 }
 
@@ -1176,18 +1220,23 @@ impl EnumVariant {
 }
 
 impl ImplBlock {
-    fn to_schema_text(&self) -> String {
-        format!(
-            "{} {}",
-            self.target.to_nota(),
-            self.catalog.to_schema_text()
-        )
+    /// Project a standalone impl block as an `impls` block entry keyed by its
+    /// target type: `TypeName.[ … ]`.
+    fn to_impls_entry_text(&self) -> String {
+        Self::impls_entry_text(&self.target, &self.catalog)
+    }
+
+    /// Project one `impls` block entry from a target type name and its catalog.
+    /// Shared by standalone impl blocks and the fused catalog a declaration
+    /// carries, so both project to the same `TypeName.[ … ]` shape.
+    fn impls_entry_text(target: &Name, catalog: &ImplCatalog) -> String {
+        format!("{}.{}", target.to_nota(), catalog.to_schema_text())
     }
 }
 
 impl ImplCatalog {
     fn to_schema_text(&self) -> String {
-        Delimiter::PipeBrace.wrap(self.entries.iter().map(ImplReference::to_schema_text))
+        Delimiter::SquareBracket.wrap(self.entries.iter().map(ImplReference::to_schema_text))
     }
 }
 
@@ -1322,7 +1371,7 @@ impl Declaration {
         self
     }
 
-    /// Attach the lowered `{| … |}` impl catalog to this declaration. The
+    /// Attach a lowered impl catalog to this declaration. The
     /// catalog is a *reference* to impls/methods that already exist on the
     /// Rust side — markers and callable method signatures — not a generated
     /// body. A declaration with no trailing impl block carries
@@ -1332,8 +1381,8 @@ impl Declaration {
         self
     }
 
-    /// The lowered impl catalog referenced by this declaration's trailing
-    /// `{| … |}` block. Empty for a declaration with no impl block. This is
+    /// The lowered impl catalog attached to this declaration. Empty for a
+    /// declaration with no attached catalog. This is
     /// the per-type reach of the enumerable manifest; the schema-wide walk
     /// (`SchemaTree::referenced_impls`) unions these with the standalone
     /// body-optional impl blocks.
@@ -1365,7 +1414,7 @@ impl Declaration {
     }
 }
 
-/// The lowered `{| … |}` impl catalog: an enumerable list of impl
+/// The lowered impl catalog: an enumerable list of impl
 /// *references* — markers, body-bearing trait impls, and inherent method
 /// signatures — that name impls/methods already present on the Rust side.
 /// It carries no generated body; it is the data the out-of-band trust
@@ -1595,7 +1644,7 @@ impl MethodParameter {
 }
 
 /// A standalone lowered impl block for a type declared elsewhere — the
-/// lowered form of a body-optional `TypeName {| … |}` entry. The named
+/// lowered form of an impls-block `TypeName.[ … ]` entry. The named
 /// `target` is resolved by ordinary symbol lookup; this block mints no
 /// type declaration, it only attaches a catalog to the existing type.
 #[derive(
@@ -2083,54 +2132,16 @@ impl DeclarationHead {
         (self.name, self.parameters)
     }
 
-    /// Decode the declaration-name position from its block. A bare symbol
-    /// atom is an ordinary head with no parameters; a pipe-parenthesized
-    /// `(| Name Param … |)` reuses the application seam after delimiter
-    /// discrimination and lifts each binder out of the decoded tail.
+    /// Decode the declaration-name position from its block: a bare symbol
+    /// atom with no parameters. The retired pipe-parenthesized
+    /// `(| Name Param … |)` head is not read here — generic binders live in
+    /// the dedicated generics block (`GenericName.((Params …) Body)`), read
+    /// by the source-side generics reader.
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        match block {
-            Block::Delimited {
-                delimiter: Delimiter::PipeParenthesis,
-                ..
-            } => Self::from_parameterized(block),
-            _ => Ok(Self {
-                name: block.schema_name()?,
-                parameters: Vec::new(),
-            }),
-        }
-    }
-
-    fn from_parameterized(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(
-            block,
-            Delimiter::PipeParenthesis,
-            "parameterized declaration head",
-        )?;
-        let [head, tail @ ..] = body.root_objects() else {
-            return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "at least one declaration-head object",
-                found: body.root_objects().len(),
-            });
-        };
-        let name = head.schema_name()?;
-        let mut parameters = Vec::with_capacity(tail.len());
-        for argument in tail {
-            let parameter =
-                argument
-                    .schema_name()
-                    .map_err(|_| SchemaError::ExpectedTypeParameterName {
-                        declaration: name.as_str().to_owned(),
-                        found: format!("{argument:?}"),
-                    })?;
-            if parameters.iter().any(|existing| existing == &parameter) {
-                return Err(SchemaError::DuplicateTypeParameter {
-                    declaration: name.as_str().to_owned(),
-                    parameter: parameter.as_str().to_owned(),
-                });
-            }
-            parameters.push(parameter);
-        }
-        Ok(Self { name, parameters })
+        Ok(Self {
+            name: block.schema_name()?,
+            parameters: Vec::new(),
+        })
     }
 }
 

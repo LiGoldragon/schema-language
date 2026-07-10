@@ -4,6 +4,8 @@
 [Observe.Observation]
 [Observed.Observation]
 {
-  ReadInput [Observe]
-  ReadOutput [Observed]
+  ReadInput.[Observe]
+  ReadOutput.[Observed]
 }
+{}
+{}

@@ -236,7 +236,7 @@ impl TrueSchema {
     }
 
     /// The standalone impl blocks lowered from body-optional
-    /// `TypeName {| … |}` entries, projected.
+    /// `TypeName.[ … ]` impls-block entries, projected.
     pub fn impl_blocks(&self) -> Vec<ImplBlock> {
         self.impl_block_views()
             .iter()

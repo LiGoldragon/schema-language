@@ -2,27 +2,29 @@
 []
 []
 {
-  TrueSchema { Input Output Namespace }
-  Imports Vector.ImportDeclaration
-  Namespace Vector.Declaration
-  ImportDeclaration { Name TypeReference }
-  Declaration [Public.NamedTypeDeclaration Private.NamedTypeDeclaration]
-  NamedTypeDeclaration { Name TypeDeclaration }
-  TypeDeclaration [Struct.StructDeclaration Enum.EnumDeclaration Newtype.NewtypeDeclaration]
-  StructDeclaration { Name StructFieldMap }
-  NewtypeDeclaration { Name TypeReference }
-  StructFieldMap Vector.FieldDeclaration
-  FieldDeclaration { Name TypeReference }
-  EnumDeclaration { Name Variants }
-  Variants Vector.VariantDeclaration
-  VariantDeclaration { Name Payload }
-  Payload [Unit Carries.TypeReference]
-  TypeReference [String Integer Boolean Path Bytes Plain.Name SingleType.SingleTypeApplication MultiType.MultiTypeApplication Value.ValueApplication]
-  SingleTypeApplication { SingleTypeProjection TypeReference }
-  MultiTypeApplication { MultiTypeProjection Vector.TypeReference }
-  ValueApplication { ValueProjection Integer }
-  SingleTypeProjection [Vector Optional ScopeOf]
-  MultiTypeProjection [Map]
-  ValueProjection [Bytes]
-  Name String
+  TrueSchema.{ Input Output Namespace }
+  Imports.Vector.ImportDeclaration
+  Namespace.Vector.Declaration
+  ImportDeclaration.{ Name TypeReference }
+  Declaration.[Public.NamedTypeDeclaration Private.NamedTypeDeclaration]
+  NamedTypeDeclaration.{ Name TypeDeclaration }
+  TypeDeclaration.[Struct.StructDeclaration Enum.EnumDeclaration Newtype.NewtypeDeclaration]
+  StructDeclaration.{ Name StructFieldMap }
+  NewtypeDeclaration.{ Name TypeReference }
+  StructFieldMap.Vector.FieldDeclaration
+  FieldDeclaration.{ Name TypeReference }
+  EnumDeclaration.{ Name Variants }
+  Variants.Vector.VariantDeclaration
+  VariantDeclaration.{ Name Payload }
+  Payload.[Unit Carries.TypeReference]
+  TypeReference.[String Integer Boolean Path Bytes Plain.Name SingleType.SingleTypeApplication MultiType.MultiTypeApplication Value.ValueApplication]
+  SingleTypeApplication.{ SingleTypeProjection TypeReference }
+  MultiTypeApplication.{ MultiTypeProjection Vector.TypeReference }
+  ValueApplication.{ ValueProjection Integer }
+  SingleTypeProjection.[Vector Optional ScopeOf]
+  MultiTypeProjection.[Map]
+  ValueProjection.[Bytes]
+  Name.String
 }
+{}
+{}

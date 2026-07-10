@@ -11,67 +11,69 @@
  Event.EventPayload
  Rejected.RejectedPayload]
 {
-  SignalInPayload SignalRequest
-  NexusInPayload NexusRequest
-  SemaInPayload SemaRequest
-  AdminPayload AdminRequest
-  SignalOutPayload SignalReply
-  NexusOutPayload NexusReply
-  SemaOutPayload SemaReply
-  AdminOutPayload AdminReply
-  EventPayload RuntimeEvent
-  RejectedPayload RejectedReply
-  CommitSequence Integer
-  DatabaseDigest Integer
-  ActorIdentifier String
-  SocketPath String
-  SignalRequest [RecordIntent.RecordIntentPayload ObserveIntent.ObserveIntentPayload SubscribeIntent.SubscribeIntentPayload]
-  SignalReply [RecordAccepted.RecordAcceptedPayload ObservationReturned.ObservationReturnedPayload SubscriptionStarted.SubscriptionStartedPayload]
-  NexusRequest [PushSignal.PushSignalPayload PushSemaResult.PushSemaResultPayload ResolveMail ExpireMail]
-  NexusReply [PushedToSema.PushedToSemaPayload MailResolved.MailResolvedPayload MailExpired]
-  SemaRequest [WriteEntry.WriteEntryPayload ReadEntries.ReadEntriesPayload OpenSubscription.OpenSubscriptionPayload CloseSubscription.CloseSubscriptionPayload]
-  SemaReply [EntryWritten.EntryWrittenPayload EntriesRead.EntriesReadPayload SubscriptionOpened.SubscriptionOpenedPayload SubscriptionClosed.SubscriptionClosedPayload]
-  AdminRequest [Drain Pause Resume Snapshot.SnapshotPayload]
-  AdminReply [Drained Paused Resumed SnapshotReady.SnapshotReadyPayload]
-  RuntimeEvent [MailSent.MailSentPayload MessageAccepted.MessageAcceptedPayload MessageCommitted.MessageCommittedPayload MessageFailed.MessageFailedPayload]
-  RejectedReply { RejectionReason }
-  RejectionReason [Malformed Unauthorized Conflict Unsupported StaleVersion InternalError]
-  RecordIntentPayload { ActorIdentifier Entry }
-  ObserveIntentPayload { Query }
-  SubscribeIntentPayload { Query }
-  RecordAcceptedPayload { RecordIdentifier CommitSequence }
-  ObservationReturnedPayload { RecordSet }
-  SubscriptionStartedPayload { SubscriptionToken }
-  PushSignalPayload { SignalRequest }
-  PushSemaResultPayload { SemaReply }
-  PushedToSemaPayload { SemaRequest }
-  MailResolvedPayload { SignalReply }
-  WriteEntryPayload { Entry }
-  ReadEntriesPayload { Query }
-  OpenSubscriptionPayload { Query }
-  CloseSubscriptionPayload { SubscriptionToken }
-  EntryWrittenPayload { RecordIdentifier CommitSequence DatabaseDigest }
-  EntriesReadPayload { RecordSet DatabaseDigest }
-  SubscriptionOpenedPayload { SubscriptionToken CommitSequence }
-  SubscriptionClosedPayload { SubscriptionToken CommitSequence }
-  SnapshotPayload { SocketPath }
-  SnapshotReadyPayload { SocketPath DatabaseDigest }
-  MailSentPayload { SignalRequest }
-  MessageAcceptedPayload { SignalRequest }
-  MessageCommittedPayload { CommitSequence }
-  MessageFailedPayload { RejectionReason }
-  Entry { Topics Kind Description Magnitude ActorIdentifier }
-  Topic String
-  Topics Vector.Topic
-  Description String
-  Kind [Decision Principle Correction Clarification Constraint Observation Question]
-  Magnitude [Minimum VeryLow Low Medium High VeryHigh Maximum]
-  Kinds Vector.Kind
-  Limit Optional.Integer
-  Query { Topics Kinds Limit }
-  RecordIdentifier Integer
-  SubscriptionToken Integer
-  Records Vector.Entry
-  ByTopic Map.(Topic RecordIdentifier)
-  RecordSet { Records ByTopic }
+  SignalInPayload.SignalRequest
+  NexusInPayload.NexusRequest
+  SemaInPayload.SemaRequest
+  AdminPayload.AdminRequest
+  SignalOutPayload.SignalReply
+  NexusOutPayload.NexusReply
+  SemaOutPayload.SemaReply
+  AdminOutPayload.AdminReply
+  EventPayload.RuntimeEvent
+  RejectedPayload.RejectedReply
+  CommitSequence.Integer
+  DatabaseDigest.Integer
+  ActorIdentifier.String
+  SocketPath.String
+  SignalRequest.[RecordIntent.RecordIntentPayload ObserveIntent.ObserveIntentPayload SubscribeIntent.SubscribeIntentPayload]
+  SignalReply.[RecordAccepted.RecordAcceptedPayload ObservationReturned.ObservationReturnedPayload SubscriptionStarted.SubscriptionStartedPayload]
+  NexusRequest.[PushSignal.PushSignalPayload PushSemaResult.PushSemaResultPayload ResolveMail ExpireMail]
+  NexusReply.[PushedToSema.PushedToSemaPayload MailResolved.MailResolvedPayload MailExpired]
+  SemaRequest.[WriteEntry.WriteEntryPayload ReadEntries.ReadEntriesPayload OpenSubscription.OpenSubscriptionPayload CloseSubscription.CloseSubscriptionPayload]
+  SemaReply.[EntryWritten.EntryWrittenPayload EntriesRead.EntriesReadPayload SubscriptionOpened.SubscriptionOpenedPayload SubscriptionClosed.SubscriptionClosedPayload]
+  AdminRequest.[Drain Pause Resume Snapshot.SnapshotPayload]
+  AdminReply.[Drained Paused Resumed SnapshotReady.SnapshotReadyPayload]
+  RuntimeEvent.[MailSent.MailSentPayload MessageAccepted.MessageAcceptedPayload MessageCommitted.MessageCommittedPayload MessageFailed.MessageFailedPayload]
+  RejectedReply.{ RejectionReason }
+  RejectionReason.[Malformed Unauthorized Conflict Unsupported StaleVersion InternalError]
+  RecordIntentPayload.{ ActorIdentifier Entry }
+  ObserveIntentPayload.{ Query }
+  SubscribeIntentPayload.{ Query }
+  RecordAcceptedPayload.{ RecordIdentifier CommitSequence }
+  ObservationReturnedPayload.{ RecordSet }
+  SubscriptionStartedPayload.{ SubscriptionToken }
+  PushSignalPayload.{ SignalRequest }
+  PushSemaResultPayload.{ SemaReply }
+  PushedToSemaPayload.{ SemaRequest }
+  MailResolvedPayload.{ SignalReply }
+  WriteEntryPayload.{ Entry }
+  ReadEntriesPayload.{ Query }
+  OpenSubscriptionPayload.{ Query }
+  CloseSubscriptionPayload.{ SubscriptionToken }
+  EntryWrittenPayload.{ RecordIdentifier CommitSequence DatabaseDigest }
+  EntriesReadPayload.{ RecordSet DatabaseDigest }
+  SubscriptionOpenedPayload.{ SubscriptionToken CommitSequence }
+  SubscriptionClosedPayload.{ SubscriptionToken CommitSequence }
+  SnapshotPayload.{ SocketPath }
+  SnapshotReadyPayload.{ SocketPath DatabaseDigest }
+  MailSentPayload.{ SignalRequest }
+  MessageAcceptedPayload.{ SignalRequest }
+  MessageCommittedPayload.{ CommitSequence }
+  MessageFailedPayload.{ RejectionReason }
+  Entry.{ Topics Kind Description Magnitude ActorIdentifier }
+  Topic.String
+  Topics.Vector.Topic
+  Description.String
+  Kind.[Decision Principle Correction Clarification Constraint Observation Question]
+  Magnitude.[Minimum VeryLow Low Medium High VeryHigh Maximum]
+  Kinds.Vector.Kind
+  Limit.Optional.Integer
+  Query.{ Topics Kinds Limit }
+  RecordIdentifier.Integer
+  SubscriptionToken.Integer
+  Records.Vector.Entry
+  ByTopic.Map.(Topic RecordIdentifier)
+  RecordSet.{ Records ByTopic }
 }
+{}
+{}

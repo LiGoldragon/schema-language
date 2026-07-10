@@ -1,19 +1,19 @@
 {}
-[Deliver.router:routed_object:Envelope]
+[Deliver.Envelope]
 []
 {
-  ActorIdentifier String
-  ContractName String
-  ContractOperation String
-  ContractPayloadSize Integer
-  ContractPayloadOctets Vector.Integer
-  router:routed_object {
-    Destination ActorIdentifier
-    Contract ContractName
-    Operation ContractOperation
-    Exchange [Request Reply]
-    PayloadSize ContractPayloadSize
-    PayloadOctets ContractPayloadOctets
-    Envelope { Destination Contract Operation Exchange PayloadSize PayloadOctets }
-  }
+  ActorIdentifier.String
+  ContractName.String
+  ContractOperation.String
+  ContractPayloadSize.Integer
+  ContractPayloadOctets.Vector.Integer
+  Destination.ActorIdentifier
+  Contract.ContractName
+  Operation.ContractOperation
+  Exchange.[Request Reply]
+  PayloadSize.ContractPayloadSize
+  PayloadOctets.ContractPayloadOctets
+  Envelope.{ Destination Contract Operation Exchange PayloadSize PayloadOctets }
 }
+{}
+{}

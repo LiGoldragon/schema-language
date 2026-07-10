@@ -10,7 +10,7 @@ impl SymbolPathFixture {
     fn new() -> Self {
         Self {
             identity: SchemaIdentity::new("spirit-next:lib", "0.1.0"),
-            source: "{} [Record.Entry] [Rejected.SignalRejection] { Description String Entry { Description Kind } SignalRejection { ValidationError } Kind [Decision] ValidationError [EmptyTopic EmptyDescription] }",
+            source: "{}\n[Record.Entry]\n[Rejected.SignalRejection]\n{\n  Description.String\n  Entry.{ Description Kind }\n  SignalRejection.{ ValidationError }\n  Kind.[Decision]\n  ValidationError.[EmptyTopic EmptyDescription]\n}\n{}\n{}",
         }
     }
 

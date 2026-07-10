@@ -26,7 +26,7 @@ fn plain(name: &str) -> TypeReference {
 fn lower_reference(namespace: &str, name: &str) -> TypeReference {
     let schema = SchemaEngine::default()
         .lower_source(
-            &format!("{{}}\n[]\n[]\n{{ {namespace} }}"),
+            &format!("{{}}\n[]\n[]\n{{ {namespace} }}\n{{}}\n{{}}"),
             SchemaIdentity::new("typeref:test", "0.1.0"),
         )
         .expect("schema lowers");
@@ -66,7 +66,7 @@ fn unary_generic_definitions_round_trip_through_dotted_forms() {
 fn map_lowers_through_grouped_positional_payload() {
     assert_eq!(
         lower_reference(
-            "Topic String RecordIdentifier String Holder Map.(Topic RecordIdentifier)",
+            "Topic.String RecordIdentifier.String Holder.Map.(Topic RecordIdentifier)",
             "Holder"
         ),
         TypeReference::map(plain("Topic"), plain("RecordIdentifier")),
@@ -81,7 +81,7 @@ fn nested_dotted_forms_recurse() {
     );
     assert_eq!(
         lower_reference(
-            "Topic String Entry String Holder Map.(Topic Vector.Entry)",
+            "Topic.String Entry.String Holder.Map.(Topic Vector.Entry)",
             "Holder"
         ),
         TypeReference::map(plain("Topic"), TypeReference::vector(plain("Entry"))),
@@ -91,7 +91,7 @@ fn nested_dotted_forms_recurse() {
 #[test]
 fn scalar_leaf_nests_inside_a_grouped_generic_form() {
     assert_eq!(
-        lower_reference("Holder Map.(String Boolean)", "Holder"),
+        lower_reference("Holder.Map.(String Boolean)", "Holder"),
         TypeReference::map(TypeReference::String, TypeReference::Boolean),
     );
 }

@@ -2,7 +2,9 @@
 []
 []
 {
-  CommitSequence Integer
-  StateDigest Integer
-  DatabaseMarker { CommitSequence StateDigest }
+  CommitSequence.Integer
+  StateDigest.Integer
+  DatabaseMarker.{ CommitSequence StateDigest }
 }
+{}
+{}

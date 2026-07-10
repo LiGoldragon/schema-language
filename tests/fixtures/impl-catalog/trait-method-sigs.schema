@@ -2,5 +2,9 @@
 []
 []
 {
-  NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.Node } Boolean) ] |}
+  NodeQuery.{ Differentiator }
+}
+{}
+{
+  NodeQuery.[ QueryMatcher [ (matches { candidate.Node } Boolean) ] ]
 }

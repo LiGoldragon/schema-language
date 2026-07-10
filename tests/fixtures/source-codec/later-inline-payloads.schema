@@ -2,10 +2,12 @@
 [Record.RecordPayload Select.SelectPayload]
 []
 {
-  Topic String
-  Description String
-  RecordPayload { Topic Description }
-  ByTopicPayload { Topic }
-  ByDescriptionPayload { Description }
-  SelectPayload [ByTopic.ByTopicPayload ByDescription.ByDescriptionPayload]
+  Topic.String
+  Description.String
+  RecordPayload.{ Topic Description }
+  ByTopicPayload.{ Topic }
+  ByDescriptionPayload.{ Description }
+  SelectPayload.[ByTopic.ByTopicPayload ByDescription.ByDescriptionPayload]
 }
+{}
+{}

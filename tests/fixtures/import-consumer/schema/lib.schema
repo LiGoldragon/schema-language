@@ -2,6 +2,8 @@
 [Observe.Query]
 [Marked.DatabaseMarker]
 {
-  Topic String
-  Query { Topic }
+  Topic.String
+  Query.{ Topic }
 }
+{}
+{}

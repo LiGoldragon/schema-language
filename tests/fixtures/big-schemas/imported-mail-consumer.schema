@@ -9,26 +9,28 @@
  Committed.CommittedPayload
  Rejected.RejectedPayload]
 {
-  RecordPayload Entry
-  ObservePayload Query
-  MarkPayload DatabaseMarker
-  CommitPayload CommitSequence
-  RecordedPayload RecordReceipt
-  ObservedPayload RecordSet
-  MarkedPayload DatabaseMarker
-  CommittedPayload CommitSequence
-  RejectedPayload Rejection
-  Topic String
-  Topics Vector.Topic
-  Description String
-  AgentName String
-  RecordIdentifier Integer
-  Rejection { Description }
-  Limit Optional.Integer
-  Entries Vector.Entry
-  ByTopic Map.(Topic RecordIdentifier)
-  Entry { Topics Description AgentName DatabaseMarker }
-  Query { Topics Limit }
-  RecordReceipt { RecordIdentifier DatabaseMarker CommitSequence }
-  RecordSet { Entries ByTopic }
+  RecordPayload.Entry
+  ObservePayload.Query
+  MarkPayload.DatabaseMarker
+  CommitPayload.CommitSequence
+  RecordedPayload.RecordReceipt
+  ObservedPayload.RecordSet
+  MarkedPayload.DatabaseMarker
+  CommittedPayload.CommitSequence
+  RejectedPayload.Rejection
+  Topic.String
+  Topics.Vector.Topic
+  Description.String
+  AgentName.String
+  RecordIdentifier.Integer
+  Rejection.{ Description }
+  Limit.Optional.Integer
+  Entries.Vector.Entry
+  ByTopic.Map.(Topic RecordIdentifier)
+  Entry.{ Topics Description AgentName DatabaseMarker }
+  Query.{ Topics Limit }
+  RecordReceipt.{ RecordIdentifier DatabaseMarker CommitSequence }
+  RecordSet.{ Entries ByTopic }
 }
+{}
+{}

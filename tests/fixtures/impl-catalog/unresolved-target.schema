@@ -2,6 +2,9 @@
 []
 []
 {
-  Topic String
-  StatementText {| Display |}
+  Topic.String
+}
+{}
+{
+  StatementText.[ Display ]
 }

@@ -50,10 +50,10 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
     let fixture = FixturePackage::new();
     fixture.write_schema(
         "lib",
-        "{ fixture-crate.shared.Shared }\n[UseShared.Shared]\n[]\n{\n  UseShared Shared\n}\n",
+        "{ fixture-crate.shared.Shared }\n[UseShared.Shared]\n[]\n{\n  UseShared.Shared\n}\n{}\n{}\n",
     );
-    fixture.write_schema("shared", "{}\n[]\n[]\n{\n  Shared String\n}\n");
-    fixture.write_schema("ignored", "{}\n[]\n[]\n{\n  Ignored String\n}\n");
+    fixture.write_schema("shared", "{}\n[]\n[]\n{\n  Shared.String\n}\n{}\n{}\n");
+    fixture.write_schema("ignored", "{}\n[]\n[]\n{\n  Ignored.String\n}\n{}\n{}\n");
 
     let environment = SchemaEnvironment::new(fixture.package());
     let manifest = SchemaEnvironmentManifest::new(vec![Name::new("lib")]);
@@ -82,7 +82,9 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             SchemaRootBlockKind::Imports,
             SchemaRootBlockKind::Input,
             SchemaRootBlockKind::Output,
-            SchemaRootBlockKind::Namespace,
+            SchemaRootBlockKind::Types,
+            SchemaRootBlockKind::Generics,
+            SchemaRootBlockKind::Impls,
         ]
     );
     assert_eq!(module.summary().file_range().start().line(), 1);
@@ -91,7 +93,7 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             .summary()
             .root_blocks()
             .iter()
-            .find(|block| block.kind() == SchemaRootBlockKind::Namespace)
+            .find(|block| block.kind() == SchemaRootBlockKind::Types)
             .expect("namespace summary exists")
             .range()
             .start()
@@ -110,7 +112,9 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             SchemaNodeType::Imports,
             SchemaNodeType::InputRoot,
             SchemaNodeType::OutputRoot,
-            SchemaNodeType::Namespace,
+            SchemaNodeType::Types,
+            SchemaNodeType::Generics,
+            SchemaNodeType::Impls,
         ]
     );
 }
@@ -120,9 +124,9 @@ fn environment_round_trips_canonical_source_and_resolves_package_imports() {
     let fixture = FixturePackage::new();
     fixture.write_schema(
         "lib",
-        "{ fixture-crate.shared.Shared }\n[UseShared.Shared]\n[]\n{\n  UseShared Shared\n}\n",
+        "{ fixture-crate.shared.Shared }\n[UseShared.Shared]\n[]\n{\n  UseShared.Shared\n}\n{}\n{}\n",
     );
-    fixture.write_schema("shared", "{}\n[]\n[]\n{\n  Shared String\n}\n");
+    fixture.write_schema("shared", "{}\n[]\n[]\n{\n  Shared.String\n}\n{}\n{}\n");
 
     let environment = SchemaEnvironment::new(fixture.package());
     let manifest = SchemaEnvironmentManifest::new(vec![Name::new("lib")]);
@@ -150,7 +154,7 @@ fn grouped_root_application_counts_as_one_summary_slot_and_round_trips_help() {
     let fixture = FixturePackage::new();
     fixture.write_schema(
         "lib",
-        "{}\nWork.(SignalInput SignalOutput)\n[]\n{\n  (| Work Input Output |) [Start.Input Done.Output]\n  SignalInput String\n  SignalOutput String\n}\n",
+        "{}\nWork.(SignalInput SignalOutput)\n[]\n{\n  SignalInput.String\n  SignalOutput.String\n}\n{\n  Work.((Input Output) [Start.Input Done.Output])\n}\n{}\n",
     );
 
     let environment = SchemaEnvironment::new(fixture.package());
@@ -171,7 +175,9 @@ fn grouped_root_application_counts_as_one_summary_slot_and_round_trips_help() {
             SchemaRootBlockKind::Imports,
             SchemaRootBlockKind::Input,
             SchemaRootBlockKind::Output,
-            SchemaRootBlockKind::Namespace,
+            SchemaRootBlockKind::Types,
+            SchemaRootBlockKind::Generics,
+            SchemaRootBlockKind::Impls,
         ],
         "the grouped application root is one typed Input slot"
     );
