@@ -29,7 +29,6 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
-[]
 ";
 
     /// BASE re-spelled with different whitespace and `;;` comments —
@@ -52,7 +51,6 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
-[]
 ";
 
     /// BASE with `Magnitude` — two reference hops below `Entry` —
@@ -72,7 +70,6 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
-[]
 ";
 
     /// BASE with only `Unrelated` — unreachable from `Entry` — changed.
@@ -91,7 +88,6 @@ impl IdentityFixture {
   Rejection { Reason }
   Unrelated { Note }
 }
-[]
 ";
 
     fn schema(&self, source: &str) -> TrueSchema {

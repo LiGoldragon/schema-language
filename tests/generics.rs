@@ -36,7 +36,7 @@ fn lower(namespace: &str) -> schema_language::TrueSchema {
 
 fn try_lower(namespace: &str) -> Result<schema_language::TrueSchema, SchemaError> {
     SchemaEngine::default().lower_source(
-        &format!("{{}}\n[]\n[]\n{{ {namespace} }}\n[]"),
+        &format!("{{}}\n[]\n[]\n{{ {namespace} }}"),
         SchemaIdentity::new("generics:lib", "0.1.0"),
     )
 }
@@ -317,7 +317,7 @@ fn map_grouped_payload_lowers_and_dot_chain_arity_fails() {
 
 #[test]
 fn parameterized_head_round_trips_through_the_source_codec() {
-    let source = "{}\n[]\n[]\n{\n  (| Plane Input Output |) { Input Output }\n}\n[]";
+    let source = "{}\n[]\n[]\n{\n  (| Plane Input Output |) { Input Output }\n}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let canonical = artifact.to_schema_text();
     assert!(
@@ -348,7 +348,7 @@ fn parameterized_head_round_trips_through_the_source_codec() {
 #[test]
 fn source_codec_path_also_validates_application_arity() {
     let source =
-        "{}\n[]\n[]\n{\n  (| Plane Input Output |) { Input Output }\n  Holder Plane.String\n}\n[]";
+        "{}\n[]\n[]\n{\n  (| Plane Input Output |) { Input Output }\n  Holder Plane.String\n}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let error = artifact
         .source()
@@ -390,7 +390,7 @@ fn application_root_source(read_output: &str) -> String {
          SemaReadOutput Integer \
          AltReadOutput Integer \
          EffectOutcome Boolean \
-         }} []"
+         }}"
     )
 }
 
@@ -470,7 +470,7 @@ fn root_position_application_lowers_to_root_application() {
 fn enum_body_root_still_lowers_to_root_enum() {
     let schema = SchemaEngine::default()
         .lower_source(
-            "{} [Record.Entry] [Recorded.Receipt] { Topic String Ok Boolean Entry { Topic } Receipt { Ok } } []",
+            "{} [Record.Entry] [Recorded.Receipt] { Topic String Ok Boolean Entry { Topic } Receipt { Ok } }",
             SchemaIdentity::new("enum-root:lib", "0.1.0"),
         )
         .expect("enum-body root schema lowers");

@@ -22,38 +22,38 @@ fn root_enum(root: Root) -> EnumDeclaration {
     root.as_enum().cloned().expect("root is the enum-body form")
 }
 
-/// Illustrates: a schema document is positional and has exactly five root
-/// slots: imports, input, output, namespace, and relations. Empty optional
-/// roots are still present as `{}` or `[]`; slot omission is not inference.
+/// Illustrates: a schema document is positional and has exactly four root
+/// slots: imports, input, output, and namespace. Empty optional roots are
+/// still present as `{}` or `[]`; slot omission is not inference.
 #[test]
-fn design_example_schema_document_has_five_strict_roots() {
-    let too_few = "[] []";
+fn design_example_schema_document_has_four_strict_roots() {
+    let too_few = "[]";
     let error = SchemaEngine::default()
         .lower_source(too_few, SchemaIdentity::new("example", "0.1.0"))
-        .expect_err("two root objects should fail");
+        .expect_err("one root object should fail");
     assert_eq!(
         error,
         SchemaError::ExpectedRootObjectCount {
-            expected: "5 root slots (imports input output namespace relations; grouped dotted applications count as one slot)",
-            found: 2,
+            expected: "4 root slots (imports input output namespace)",
+            found: 1,
         }
     );
 
-    let too_many = "{} [] [] {} [] []";
+    let too_many = "{} [] [] {} []";
     let error = SchemaEngine::default()
         .lower_source(too_many, SchemaIdentity::new("example", "0.1.0"))
-        .expect_err("six root objects should fail");
+        .expect_err("five root objects should fail");
     assert_eq!(
         error,
         SchemaError::ExpectedRootObjectCount {
-            expected: "5 root slots (imports input output namespace relations; grouped dotted applications count as one slot)",
-            found: 6,
+            expected: "4 root slots (imports input output namespace)",
+            found: 5,
         }
     );
 
     SchemaEngine::default()
-        .lower_source("{} [] [] {} []", SchemaIdentity::new("example", "0.1.0"))
-        .expect("five-root schema lowers");
+        .lower_source("{} [] [] {}", SchemaIdentity::new("example", "0.1.0"))
+        .expect("four-root schema lowers");
 }
 
 /// Illustrates: the schema namespace is an honest brace key/value map.
@@ -66,7 +66,7 @@ fn design_example_schema_document_has_five_strict_roots() {
 /// the pair-style positive path.
 #[test]
 fn design_example_namespace_brace_contains_key_value_declarations() {
-    let source = "{} [] [] { Topic String Kind [Decision Constraint] } []";
+    let source = "{} [] [] { Topic String Kind [Decision Constraint] }";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("key/value namespace lowers");
@@ -128,7 +128,7 @@ fn design_example_type_reference_macro_captures_use_dollar_sigils() {
         registry.register_box(schema_macro);
     }
     let engine = SchemaEngine::with_registry(registry);
-    let source = "{} [] [] { Topic String Topics (Bag Topic) } []";
+    let source = "{} [] [] { Topic String Topics (Bag Topic) }";
     let mut context = MacroContext::default();
     engine
         .lower_source_with_context(
@@ -228,7 +228,7 @@ fn design_example_default_engine_uses_strict_structural_macros() {
         "legacy pipe declaration macro is loadable data, not default syntax"
     );
 
-    let source = "{} [] [] { Topic String } []";
+    let source = "{} [] [] { Topic String }";
     let mut context = MacroContext::default();
     SchemaEngine::default()
         .lower_source_with_context(
@@ -266,7 +266,7 @@ fn design_example_default_engine_uses_strict_structural_macros() {
 /// triage.
 #[test]
 fn design_example_schema_lowering_records_source_structure_header() {
-    let source = "{} [Record.Entry] [Accepted] { Value String Entry { Value } } []";
+    let source = "{} [Record.Entry] [Accepted] { Value String Entry { Value } }";
     let mut context = MacroContext::default();
     SchemaEngine::default()
         .lower_source_with_context(
@@ -289,7 +289,7 @@ fn design_example_schema_lowering_records_source_structure_header() {
     assert_eq!(
         observed,
         vec![
-            (StructureShape::Document, 5),
+            (StructureShape::Document, 4),
             (StructureShape::Brace, 0),
             (StructureShape::SquareBracket, 1),
             (StructureShape::Atom, 0),
@@ -417,7 +417,7 @@ fn design_example_schema_node_macro_call_is_tagged_data() {
 /// unit variants use bare symbols.
 #[test]
 fn design_example_root_enum_uses_direct_variant_shapes() {
-    let source = "{} [Record.Entry Drop] [] {} []";
+    let source = "{} [Record.Entry Drop] [] {}";
 
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
@@ -483,7 +483,7 @@ fn design_example_user_declared_macros_extend_structural_and_named_slots() {
     let engine = SchemaEngine::with_registry(registry);
     let schema = engine
         .lower_source(
-            "{} [] [] { Topic String Topics (Bag Topic) } []",
+            "{} [] [] { Topic String Topics (Bag Topic) }",
             SchemaIdentity::new("example", "0.1.0"),
         )
         .expect("schema lowers through user macros");
@@ -525,7 +525,6 @@ fn design_example_signal_nexus_and_sema_are_schema_declared_planes() {
           Query { Topic }
           RecordSet Vector.Entry
         }
-        []
     ";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("spirit-next:lib", "0.1.0"))

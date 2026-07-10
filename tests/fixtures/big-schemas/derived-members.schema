@@ -20,4 +20,3 @@
   ErrorReport { Description }
   SomeEnum [ SomethingHoldingSomething.SomethingHoldingSomethingPayload SomethingElse SomeString.String ]
 }
-[]

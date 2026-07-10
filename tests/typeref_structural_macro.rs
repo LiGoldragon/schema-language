@@ -26,7 +26,7 @@ fn plain(name: &str) -> TypeReference {
 fn lower_reference(namespace: &str, name: &str) -> TypeReference {
     let schema = SchemaEngine::default()
         .lower_source(
-            &format!("{{}}\n[]\n[]\n{{ {namespace} }}\n[]"),
+            &format!("{{}}\n[]\n[]\n{{ {namespace} }}"),
             SchemaIdentity::new("typeref:test", "0.1.0"),
         )
         .expect("schema lowers");

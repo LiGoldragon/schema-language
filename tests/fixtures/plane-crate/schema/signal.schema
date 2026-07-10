@@ -6,4 +6,3 @@
   Message { Text }
   Receipt Integer
 }
-[]

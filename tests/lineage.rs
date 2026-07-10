@@ -29,7 +29,6 @@ const BASE: &str = "\
   Entry { Topic Kind }
   Receipt { Topic Detail }
 }
-[]
 ";
 
 fn lower(source: &str) -> TrueSchema {

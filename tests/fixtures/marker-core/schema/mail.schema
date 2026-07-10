@@ -6,4 +6,3 @@
   StateDigest Integer
   DatabaseMarker { CommitSequence StateDigest }
 }
-[]

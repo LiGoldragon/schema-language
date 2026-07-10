@@ -129,7 +129,8 @@ fn schema_source_reference_fields_lower_to_canonical_field_names() {
 
 #[test]
 fn schema_source_explicit_structural_fields_round_trip() {
-    let source = "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.Vector.Topic Limit.Optional.Integer }\n}\n[]";
+    let source =
+        "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.Vector.Topic Limit.Optional.Integer }\n}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("schema source decodes");
     let canonical = artifact.to_schema_text();
     let recovered = SchemaSourceArtifact::from_schema_text(&canonical)
@@ -147,7 +148,7 @@ fn schema_source_explicit_structural_fields_round_trip() {
 
     assert_eq!(
         canonical,
-        "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.Vector.Topic Limit.Optional.Integer }\n}\n[]"
+        "{}\n[]\n[]\n{\n  Topic String\n  Query { Topics.Vector.Topic Limit.Optional.Integer }\n}"
     );
     assert_eq!(query.fields[0].name.as_str(), "topics");
     assert_eq!(query.fields[1].name.as_str(), "limit");
@@ -155,7 +156,7 @@ fn schema_source_explicit_structural_fields_round_trip() {
 
 #[test]
 fn schema_source_exposes_one_level_help_projection_inputs() {
-    let source = "{}\n[(Record { Entry Justification })]\n[RecordAccepted]\n{\n  Entry { Domains Kind Description }\n  Domains Vector.Domain\n  Description String\n  Kind [Decision Principle]\n  RecordIdentifier String\n}\n[]";
+    let source = "{}\n[(Record { Entry Justification })]\n[RecordAccepted]\n{\n  Entry { Domains Kind Description }\n  Domains Vector.Domain\n  Description String\n  Kind [Decision Principle]\n  RecordIdentifier String\n}";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("schema source decodes");
     let input = artifact
         .source()
@@ -638,7 +639,7 @@ fn duplicate_inline_declarations_are_errors() {
 
 #[test]
 fn redundant_dot_field_roles_are_errors() {
-    let source = "{}\n[]\n[]\n{\n  Topic String\n  Entry { topic.Topic }\n}\n[]";
+    let source = "{}\n[]\n[]\n{\n  Topic String\n  Entry { topic.Topic }\n}";
     let error = SchemaSourceArtifact::from_schema_text(source)
         .expect_err("redundant explicit field role should fail before lowering");
     let rendered = error.to_string();

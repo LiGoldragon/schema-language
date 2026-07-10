@@ -17,4 +17,3 @@
     Envelope { Destination Contract Operation Exchange PayloadSize PayloadOctets }
   }
 }
-[]

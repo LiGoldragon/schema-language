@@ -4,4 +4,3 @@
 {
   RecordIdentifier String {| Display Ord |}
 }
-[]

@@ -103,4 +103,3 @@ Action.(SignalOutput SemaWriteSet SemaReadInput EffectCommand Work.(SignalInput 
   StashRequest { Records DatabaseMarker }
   StashResult { StashHandle RecordCount DatabaseMarker }
 }
-[]

@@ -9,4 +9,3 @@
   ByDescriptionPayload { Description }
   SelectPayload [ByTopic.ByTopicPayload ByDescription.ByDescriptionPayload]
 }
-[]

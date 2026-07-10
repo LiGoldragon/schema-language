@@ -71,7 +71,7 @@ fn marker_core_resolver() -> ImportResolver {
 /// The source of the explicit-disambiguator fixture: TimeRange duplicates the
 /// Time component, so start/end are stored explicit field names, while every
 /// Entry field name is derived.
-const EXPLICIT_DISAMBIGUATOR_SOURCE: &str = "{}\n[Record.Entry]\n[Recorded.Entry]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains Vector.Domain\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents Vector.String\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}\n[]";
+const EXPLICIT_DISAMBIGUATOR_SOURCE: &str = "{}\n[Record.Entry]\n[Recorded.Entry]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains Vector.Domain\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents Vector.String\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}";
 
 /// The fixture corpus: every checked-in positive-lowering fixture family, the
 /// two self-describing repo schemas, and inline fixtures covering explicit
@@ -152,7 +152,7 @@ fn corpus() -> Vec<CorpusEntry> {
              SemaWriteOutput Boolean \
              SemaReadOutput Integer \
              EffectOutcome Boolean \
-             } []",
+             }",
         ),
     ]
 }
@@ -550,7 +550,7 @@ fn field_view_name_matches_the_projected_field_name_over_the_corpus() {
 fn a_source_local_name_with_a_colon_is_a_typed_error() {
     let engine = SchemaEngine::default();
     let identity = SchemaIdentity::new("corpus:malformed", "0.1.0");
-    let source = "{}\n[]\n[]\n{\n  Entry { Foo:Bar }\n}\n[]";
+    let source = "{}\n[]\n[]\n{\n  Entry { Foo:Bar }\n}";
     let error = engine
         .lower_source(source, identity)
         .expect_err("a ':' in a source-derived local name is rejected");
@@ -559,4 +559,3 @@ fn a_source_local_name_with_a_colon_is_a_typed_error() {
         "expected a MalformedLocalName error, got {error:?}",
     );
 }
-

@@ -5,7 +5,7 @@ use schema_language::{
 };
 
 fn schema_roots(namespace: &str) -> String {
-    format!("{{}} [] [] {{ {namespace} }} []")
+    format!("{{}} [] [] {{ {namespace} }}")
 }
 
 fn lower_namespace(namespace: &str) -> Result<schema_language::TrueSchema, SchemaError> {
@@ -51,7 +51,7 @@ fn schema_source_rejects_legacy_newtype_reference_at_former_engine_call_site() {
 fn schema_source_rejects_legacy_root_application_at_former_engine_call_site() {
     let error = SchemaEngine::default()
         .lower_source(
-            "{}\n(Vector Topic)\n[]\n{ Topic String }\n[]",
+            "{}\n(Vector Topic)\n[]\n{ Topic String }",
             SchemaIdentity::new("legacy-reference-pipeline:test", "0.1.0"),
         )
         .expect_err("root applications must be dotted");

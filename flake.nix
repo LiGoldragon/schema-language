@@ -39,7 +39,7 @@
           build = craneLib.cargoBuild (commonArguments // { inherit cargoArtifacts; });
           test = craneLib.cargoTest (commonArguments // { inherit cargoArtifacts; });
           design-examples = pkgs.runCommand "schema-design-examples" { } ''
-            grep -R "design_example_schema_document_has_five_strict_roots" ${src}/tests/design_examples.rs >/dev/null
+            grep -R "design_example_schema_document_has_four_strict_roots" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_namespace_brace_contains_key_value_declarations" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_type_reference_macro_captures_use_dollar_sigils" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_colon_qualified_name_decomposes_into_segments" ${src}/tests/design_examples.rs >/dev/null

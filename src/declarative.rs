@@ -11,8 +11,7 @@ use nota::{
 use crate::{
     EnumDeclaration, EnumVariant, FieldDeclaration, MacroContext, MacroObject, MacroOutput,
     MacroPair, MacroPosition, MacroRegistry, Name, NewtypeDeclaration, SchemaError,
-    SchemaMacroHandler, StructDeclaration, TypeDeclaration, TypeReference,
-    macros::SchemaBlockExt,
+    SchemaMacroHandler, StructDeclaration, TypeDeclaration, TypeReference, macros::SchemaBlockExt,
 };
 
 #[derive(

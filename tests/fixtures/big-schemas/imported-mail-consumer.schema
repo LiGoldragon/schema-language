@@ -33,4 +33,3 @@
   RecordReceipt { RecordIdentifier DatabaseMarker CommitSequence }
   RecordSet { Entries ByTopic }
 }
-[]

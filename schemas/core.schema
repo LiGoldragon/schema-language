@@ -26,4 +26,3 @@
   MacroShape [BraceMap ParenthesisEnum SquareStruct KeyValueDeclaration VariantDefinition Symbol]
   MacroOutputKind [Imports RootEnum Types Type Fields Variants Reference References AssembledSchema]
 }
-[]

@@ -18,7 +18,7 @@ fn lower(source: &str) -> schema_language::TrueSchema {
 }
 
 fn roots(namespace: &str) -> String {
-    format!("{{}} [] [] {{ {namespace} }} []")
+    format!("{{}} [] [] {{ {namespace} }}")
 }
 
 fn struct_fields(
@@ -175,7 +175,7 @@ fn parenthesized_explicit_composite_field_syntax_is_retired() {
 fn scalar_names_are_reserved_at_namespace_declaration_position() {
     let error = SchemaEngine::default()
         .lower_source(
-            "{} [] [] { String Integer } []",
+            "{} [] [] { String Integer }",
             SchemaIdentity::new("collections:lib", "0.1.0"),
         )
         .expect_err("reserved scalar names cannot be user-declared schema types");
@@ -214,7 +214,7 @@ fn option_field_lowers_to_optional_reference() {
 fn square_bracket_field_is_not_vec_type_syntax() {
     let error = SchemaEngine::default()
         .lower_source(
-            "{} [] [] { Service String Cluster { [Service] } } []",
+            "{} [] [] { Service String Cluster { [Service] } }",
             SchemaIdentity::new("collections:lib", "0.1.0"),
         )
         .expect_err("raw square bracket is not a Vec reference");
@@ -232,7 +232,7 @@ fn square_bracket_field_is_not_vec_type_syntax() {
 fn brace_field_is_not_map_type_syntax() {
     let error = SchemaEngine::default()
         .lower_source(
-            "{} [] [] { NodeName String NodeProposal String Cluster { {NodeName NodeProposal} } } []",
+            "{} [] [] { NodeName String NodeProposal String Cluster { {NodeName NodeProposal} } }",
             SchemaIdentity::new("collections:lib", "0.1.0"),
         )
         .expect_err("raw brace map is not a Map reference");
@@ -293,7 +293,7 @@ fn collection_payload_lowers_in_an_output_variant() {
     // Output variant carrying a map payload — the projection result
     // shape Horizon needs (Projected -> a map of node configs).
     let schema = lower(
-        "{} [] [Projected.ProjectedPayload] { NodeName String NodeConfig String ProjectedPayload Map.(NodeName NodeConfig) } []",
+        "{} [] [Projected.ProjectedPayload] { NodeName String NodeConfig String ProjectedPayload Map.(NodeName NodeConfig) }",
     );
     let output_root = schema.output();
     let payload = output_root
@@ -348,7 +348,7 @@ fn dropped_vec_alias_no_longer_lowers_to_vector() {
 fn map_with_wrong_argument_count_is_rejected() {
     let error = SchemaEngine::default()
         .lower_source(
-            "{} [] [] { Leaf String Bad Map.Leaf } []",
+            "{} [] [] { Leaf String Bad Map.Leaf }",
             SchemaIdentity::new("collections:lib", "0.1.0"),
         )
         .expect_err("Map needs two arguments");

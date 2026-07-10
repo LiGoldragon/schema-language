@@ -7,4 +7,3 @@
   ByTopic Map.(Topic RecordIdentifier)
   Entry { RecordIdentifier ByTopic }
 }
-[]

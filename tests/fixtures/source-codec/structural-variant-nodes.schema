@@ -6,4 +6,3 @@
   InlinePayload { Topic }
   Topic String
 }
-[]

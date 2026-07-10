@@ -102,4 +102,3 @@
   StashRequest { Records DatabaseMarker }
   StashResult { StashHandle RecordCount DatabaseMarker }
 }
-[]

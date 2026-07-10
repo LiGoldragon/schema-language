@@ -53,4 +53,3 @@
   Rejection { RejectionReason Description }
   IndexReceipt { CommitSequence DatabaseDigest }
 }
-[]

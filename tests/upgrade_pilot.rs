@@ -37,8 +37,7 @@ fn entry_schema_source() -> &'static str {
        Query { Topic Kind }\n\
        RecordSet Vector.Entry\n\
        Kind [Decision Principle Correction Clarification Constraint]\n\
-     }\n\
-     []\n"
+     }\n"
 }
 
 fn lower_previous() -> schema_language::TrueSchema {

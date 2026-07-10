@@ -206,7 +206,7 @@ fn impl_catalog_decodes_each_entry_kind() {
 fn engine_namespace_walk_accepts_fused_and_body_optional_entries() {
     // The body-optional `StatementText {| … |}` references a `StatementText`
     // declared by a separate body-bearing entry (Ruling 1).
-    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} StatementText String StatementText {| Display |} Topic String } []";
+    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} StatementText String StatementText {| Display |} Topic String }";
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("engine lowers fused and body-optional entries");
@@ -267,7 +267,7 @@ fn engine_namespace_walk_accepts_fused_and_body_optional_entries() {
 /// swallow a stray pipe-brace.
 #[test]
 fn leading_impl_block_is_rejected() {
-    let source = "{}\n[]\n[]\n{\n  {| Display |}\n}\n[]";
+    let source = "{}\n[]\n[]\n{\n  {| Display |}\n}";
     let error =
         SchemaSourceArtifact::from_schema_text(source).expect_err("leading impl block is rejected");
     let message = error.to_string();
@@ -577,7 +577,7 @@ fn unresolved_impl_target_is_rejected_on_both_paths() {
 #[test]
 fn distinct_impl_blocks_for_one_target_compose() {
     let source =
-        "{} [] [] { StatementText String StatementText {| Display |} StatementText {| Ord |} } []";
+        "{} [] [] { StatementText String StatementText {| Display |} StatementText {| Ord |} }";
     let schema = lower_via_source_path(source);
 
     let pairs = manifest_pairs(&schema);
@@ -601,7 +601,8 @@ fn distinct_impl_blocks_for_one_target_compose() {
 /// identical entry collides.
 #[test]
 fn duplicate_marker_across_blocks_is_rejected() {
-    let source = "{} [] [] { StatementText String StatementText {| Display |} StatementText {| Display |} } []";
+    let source =
+        "{} [] [] { StatementText String StatementText {| Display |} StatementText {| Display |} }";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let error = artifact
         .source()
@@ -623,7 +624,7 @@ fn duplicate_marker_across_blocks_is_rejected() {
 /// separate body-optional block.
 #[test]
 fn duplicate_method_signature_on_one_target_is_rejected() {
-    let source = "{} [] [] { StatementText String {| (word_count {} Integer) |} StatementText {| (word_count {} Integer) |} } []";
+    let source = "{} [] [] { StatementText String {| (word_count {} Integer) |} StatementText {| (word_count {} Integer) |} }";
     let artifact = SchemaSourceArtifact::from_schema_text(source).expect("source decodes");
     let error = artifact
         .source()
@@ -648,7 +649,7 @@ fn duplicate_method_signature_on_one_target_is_rejected() {
 /// collapsing on the method name alone.
 #[test]
 fn distinct_method_signatures_same_name_compose() {
-    let source = "{} [] [] { Topic String StatementText String {| (length {} Integer) (length { unit.Topic } Integer) |} } []";
+    let source = "{} [] [] { Topic String StatementText String {| (length {} Integer) (length { unit.Topic } Integer) |} }";
     let schema = lower_via_source_path(source);
     let pairs = manifest_pairs(&schema);
     assert_eq!(
@@ -666,7 +667,7 @@ fn distinct_method_signatures_same_name_compose() {
 /// path dropped the catalog entirely; now both carry it identically.
 #[test]
 fn both_lowering_paths_produce_the_same_impls() {
-    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} StatementText String StatementText {| Display (word_count {} Integer) |} } []";
+    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} StatementText String StatementText {| Display (word_count {} Integer) |} }";
 
     let macro_schema = lower_via_macro_path(source);
     let source_schema = lower_via_source_path(source);
@@ -714,7 +715,7 @@ fn both_lowering_paths_produce_the_same_impls() {
 /// markers ride on the declaration's `impls()` identically on both paths.
 #[test]
 fn both_lowering_paths_carry_fused_catalogs() {
-    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} } []";
+    let source = "{} [] [] { RecordIdentifier String {| Display Ord |} }";
     let macro_schema = lower_via_macro_path(source);
     let source_schema = lower_via_source_path(source);
 
@@ -755,7 +756,7 @@ fn both_lowering_paths_flatten_a_nested_namespace_identically() {
     Envelope { Destination Contract }
   }
 }
-[]";
+";
 
     let macro_schema = lower_via_macro_path(source);
     let source_schema = lower_via_source_path(source);
@@ -803,7 +804,7 @@ fn both_lowering_paths_flatten_a_nested_namespace_identically() {
 /// silently-accepted trait marker.
 #[test]
 fn lowercase_trait_name_is_rejected() {
-    let source = "{} [] [] { RecordIdentifier String {| display |} } []";
+    let source = "{} [] [] { RecordIdentifier String {| display |} }";
     let error =
         SchemaSourceArtifact::from_schema_text(source).expect_err("a lowercase trait is rejected");
 
@@ -818,7 +819,8 @@ fn lowercase_trait_name_is_rejected() {
 /// validation is not limited to bare markers.
 #[test]
 fn lowercase_trait_name_with_methods_is_rejected() {
-    let source = "{} [] [] { NodeQuery String {| queryMatcher [ (matches { candidate.Node } Boolean) ] |} } []";
+    let source =
+        "{} [] [] { NodeQuery String {| queryMatcher [ (matches { candidate.Node } Boolean) ] |} }";
     let error =
         SchemaSourceArtifact::from_schema_text(source).expect_err("a lowercase trait is rejected");
     assert!(
@@ -898,7 +900,7 @@ fn lowercase_method_parameter_type_is_a_typed_rejection() {
     // `candidate.node` — a lowercase parameter type — must be rejected.
     let lowercase = "{}\n[]\n[]\n{\n  \
         NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.node } Boolean) ] |}\n\
-        }\n[]\n";
+        }\n";
     let error = SchemaSourceArtifact::from_schema_text(lowercase)
         .expect_err("a lowercase method-parameter type is rejected at parse");
     assert!(
@@ -909,7 +911,7 @@ fn lowercase_method_parameter_type_is_a_typed_rejection() {
     // The capitalized control `candidate.Node` still parses cleanly.
     let capitalized = "{}\n[]\n[]\n{\n  \
         NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.Node } Boolean) ] |}\n\
-        }\n[]\n";
+        }\n";
     SchemaSourceArtifact::from_schema_text(capitalized)
         .expect("a capitalized method-parameter type parses");
 }
