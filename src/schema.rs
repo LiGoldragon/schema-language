@@ -1020,13 +1020,7 @@ impl SchemaTree {
         let imports = self
             .imports
             .iter()
-            .map(|import| {
-                format!(
-                    "  {} {}",
-                    import.local_name.to_nota(),
-                    import.source.to_structural_nota()
-                )
-            })
+            .map(|import| format!("  {}", import.to_schema_text()))
             .collect::<Vec<_>>();
         format!("{{\n{}\n}}", imports.join("\n"))
     }
@@ -1247,6 +1241,19 @@ impl MethodParameter {
 pub struct ImportDeclaration {
     pub local_name: Name,
     pub source: TypeReference,
+}
+
+impl ImportDeclaration {
+    /// The dotted no-alias import entry text: the single-colon source path
+    /// re-projected with dots, `crate.module.Type`. The imported name is the
+    /// target's own name, so no alias is written (see ARCHITECTURE "Imports
+    /// entry syntax carries no alias").
+    fn to_schema_text(&self) -> String {
+        self.source
+            .plain_name()
+            .map(|name| name.as_str().replace(':', "."))
+            .unwrap_or_else(|| self.source.to_structural_nota())
+    }
 }
 
 #[derive(

@@ -421,7 +421,9 @@ fn package_loader_reads_all_schema_modules_in_crate() {
             .plain_name()
             .expect("plain nexus input payload")
             .as_str(),
-        "SignalInput"
+        // No-alias imports keep the producer's own name: the nexus imports
+        // signal's `Input` under its own name, not a `SignalInput` alias.
+        "Input"
     );
 
     let sema = schemas

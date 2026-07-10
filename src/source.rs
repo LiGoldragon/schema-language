@@ -469,27 +469,17 @@ impl SourceImports {
     pub(crate) fn to_schema_imports(&self) -> Result<Vec<ImportDeclaration>, SchemaError> {
         self.entries
             .iter()
-            .map(SourceImport::to_schema_import)
+            .flat_map(SourceImport::to_schema_imports)
             .collect()
     }
 
     fn from_block(block: &Block) -> Result<Self, SchemaError> {
         let body = NotaBody::from_delimited(block, Delimiter::Brace, "source imports")?;
-        let root_objects = body.root_objects();
-        if root_objects.len() % 2 != 0 {
-            return Err(SchemaError::from(NotaDecodeError::ExpectedRootCount {
-                type_name: "source imports",
-                expected: root_objects.len() + 1,
-                found: root_objects.len(),
-            }));
-        }
-
+        let objects = body.root_objects();
         let mut entries = Vec::new();
-        for pair in root_objects.chunks_exact(2) {
-            entries.push(SourceImport {
-                local_name: SourceAtom::from_block(&pair[0])?.into_name()?,
-                source: SourceReference::from_block(&pair[1])?,
-            });
+        let mut index = 0;
+        while index < objects.len() {
+            entries.push(SourceImport::from_blocks_at(objects, &mut index)?);
         }
         Ok(Self { entries })
     }
@@ -507,34 +497,162 @@ impl SourceImports {
     }
 }
 
+/// One import entry: a lowercase dotted source path and the one-or-many
+/// capitalized targets imported from it. There is no alias — an imported
+/// declaration keeps its own name (see ARCHITECTURE "Imports entry syntax
+/// carries no alias"). `path.to.Object` imports the single target `Object`;
+/// `path.to.[X Y Z]` imports several targets from the same path.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct SourceImport {
-    local_name: Name,
-    source: SourceReference,
+    path: Vec<Name>,
+    targets: Vec<Name>,
 }
 
 impl SourceImport {
-    pub fn local_name(&self) -> &Name {
-        &self.local_name
+    pub fn path(&self) -> &[Name] {
+        &self.path
     }
 
-    pub fn source(&self) -> &SourceReference {
-        &self.source
+    pub fn targets(&self) -> &[Name] {
+        &self.targets
+    }
+
+    /// Read one import entry. The leading atom is a lowercase dotted path: when
+    /// it ends in a capitalized segment that segment is the single target and
+    /// one block is consumed; when it ends in a trailing dot the following
+    /// `[X Y Z]` bracket carries the targets and two blocks are consumed. The
+    /// per-segment split is the shared NOTA primitive; this reader only walks
+    /// the segments and enforces the path/target casing.
+    fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
+        let head = blocks.get(*index).and_then(Block::atom).ok_or_else(|| {
+            SchemaError::MalformedImportSource {
+                found: blocks
+                    .get(*index)
+                    .map(Block::reemit_fallback)
+                    .unwrap_or_default(),
+            }
+        })?;
+        let ends_with_dot = head.text().ends_with('.');
+        let mut segments = Vec::new();
+        let mut remainder = Some(head.clone());
+        while let Some(current) = remainder {
+            match current.split_at_first_dot() {
+                Some((prefix, rest)) => {
+                    segments.push(Name::new(prefix.text()));
+                    remainder = rest;
+                }
+                None => {
+                    segments.push(Name::new(current.text()));
+                    remainder = None;
+                }
+            }
+        }
+        *index += 1;
+        if ends_with_dot {
+            let targets = Self::target_vector(blocks, index)?;
+            Self::new(segments, targets)
+        } else {
+            let target = segments
+                .pop()
+                .ok_or_else(|| SchemaError::MalformedImportSource {
+                    found: head.text().to_owned(),
+                })?;
+            Self::new(segments, vec![target])
+        }
+    }
+
+    /// Read the `[X Y Z]` bracket that follows a trailing-dot import path,
+    /// consuming it and collecting its capitalized target atoms.
+    fn target_vector(blocks: &[Block], index: &mut usize) -> Result<Vec<Name>, SchemaError> {
+        let block = blocks
+            .get(*index)
+            .ok_or_else(|| SchemaError::MalformedImportSource {
+                found: "import path ending in a dot with no target vector".to_owned(),
+            })?;
+        let Block::Delimited {
+            delimiter: Delimiter::SquareBracket,
+            root_objects,
+            ..
+        } = block
+        else {
+            return Err(SchemaError::MalformedImportSource {
+                found: block.reemit_fallback(),
+            });
+        };
+        let mut targets = Vec::new();
+        for object in root_objects {
+            let atom = object
+                .atom()
+                .ok_or_else(|| SchemaError::MalformedImportSource {
+                    found: object.reemit_fallback(),
+                })?;
+            targets.push(Name::new(atom.text()));
+        }
+        *index += 1;
+        Ok(targets)
+    }
+
+    fn new(path: Vec<Name>, targets: Vec<Name>) -> Result<Self, SchemaError> {
+        if path.is_empty() || targets.is_empty() {
+            return Err(SchemaError::MalformedImportSource {
+                found: Self::joined_path(&path, &targets),
+            });
+        }
+        for segment in &path {
+            if !SourceIdentifierCase::new(segment).is_namespace() {
+                return Err(SchemaError::MalformedImportSource {
+                    found: segment.to_nota(),
+                });
+            }
+        }
+        for target in &targets {
+            if !SourceIdentifierCase::new(target).is_type() {
+                return Err(SchemaError::MalformedImportSource {
+                    found: target.to_nota(),
+                });
+            }
+        }
+        Ok(Self { path, targets })
+    }
+
+    /// The single-colon namespace source name the resolver consumes for one
+    /// target: the dotted path segments and the target joined by `:`, the shape
+    /// `ImportSource` splits back into crate, module, and type.
+    fn colon_source(&self, target: &Name) -> Name {
+        let mut segments: Vec<&str> = self.path.iter().map(Name::as_str).collect();
+        segments.push(target.as_str());
+        Name::new(segments.join(":"))
+    }
+
+    fn joined_path(path: &[Name], targets: &[Name]) -> String {
+        let dotted = path.iter().map(Name::as_str).collect::<Vec<_>>().join(".");
+        match targets {
+            [single] => format!("{dotted}.{}", single.as_str()),
+            _ => format!(
+                "{dotted}.[{}]",
+                targets
+                    .iter()
+                    .map(Name::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        }
     }
 
     fn to_schema_text(&self) -> String {
-        format!(
-            "{} {}",
-            self.local_name.to_nota(),
-            self.source.to_schema_text()
-        )
+        Self::joined_path(&self.path, &self.targets)
     }
 
-    fn to_schema_import(&self) -> Result<ImportDeclaration, SchemaError> {
-        Ok(ImportDeclaration {
-            local_name: self.local_name.clone(),
-            source: self.source.to_type_reference(),
-        })
+    fn to_schema_imports(&self) -> Vec<Result<ImportDeclaration, SchemaError>> {
+        self.targets
+            .iter()
+            .map(|target| {
+                Ok(ImportDeclaration {
+                    local_name: target.clone(),
+                    source: TypeReference::from_name(self.colon_source(target)),
+                })
+            })
+            .collect()
     }
 }
 

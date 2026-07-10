@@ -1,6 +1,6 @@
 {
-  Work reaction:reaction:Work
-  Action reaction:reaction:Action
+  reaction.reaction.Work
+  reaction.reaction.Action
 }
 Work.(SignalInput SemaWriteOutput SemaReadOutput EffectOutcome)
 Action.(SignalOutput SemaWriteSet SemaReadInput EffectCommand Work.(SignalInput SemaWriteOutput SemaReadOutput EffectOutcome))

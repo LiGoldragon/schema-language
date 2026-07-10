@@ -254,14 +254,17 @@ fn renaming_an_imported_declaration_through_the_table_leaves_the_substrate_fixed
     );
 }
 
-/// Finding 2 (import alias identifier-addressing): the imports-brace alias is the
-/// imported declaration's current name — a declaration in the loaded whole — so
-/// it is identifier-addressed in the substrate and projected through the name
-/// table, exactly the identifier the matching resolved import carries. Renaming
-/// the imported declaration through the table therefore moves the imports brace
-/// AND the body together, so the projection stays internally consistent and
-/// re-lowers cleanly, with the substrate bytes fixed and free of the alias
-/// string.
+/// Finding 2 (imported-declaration rename under the no-alias projection): an
+/// imported declaration is a declaration like any other in the loaded whole — a
+/// minted identifier with its name held in the table — so renaming it through the
+/// table follows into every referencing segment, the applied body above all. The
+/// imports brace, by contrast, carries the cross-crate import SOURCE path, which
+/// is provenance the language leaves in source form (there is no alias key), so it
+/// names the producer's exported declaration and a consumer-side rename does NOT
+/// move it. The brace provenance and the renamed body therefore legitimately
+/// diverge, the substrate bytes stay fixed (the name lives in the table, the
+/// identifier in the substrate), and the projection still re-lowers cleanly
+/// against the renamed prior table.
 #[test]
 fn renaming_an_imported_declaration_keeps_the_imports_brace_consistent_and_reloadable() {
     let engine = SchemaEngine::default();
@@ -280,35 +283,26 @@ fn renaming_an_imported_declaration_keeps_the_imports_brace_consistent_and_reloa
         .rename(&work, Name::new("WorkFrame"))
         .expect("renaming the imported declaration through the table succeeds");
 
-    // The imports brace projects the renamed alias and no longer carries the
-    // stale pre-rename name, so brace and body agree.
-    let aliases: Vec<String> = migrated
-        .imports()
-        .iter()
-        .map(|import| import.local_name.as_str().to_owned())
-        .collect();
-    assert!(
-        aliases.iter().any(|alias| alias == "WorkFrame"),
-        "the imports brace projects the renamed alias, got {aliases:?}",
-    );
-    assert!(
-        !aliases.iter().any(|alias| alias == "Work"),
-        "the stale pre-rename alias is gone from the imports brace, got {aliases:?}",
-    );
-
-    // The projected schema text uses the renamed alias in both the imports brace
-    // and the applied body, so the two are internally consistent.
+    // The projected schema text keeps the imports brace on the producer's SOURCE
+    // path (provenance in source form, unmoved by a consumer-side rename) while
+    // the rename follows into the applied body. There is no alias, so the brace
+    // never carries the renamed local name, and the alias-era `Name source` pair
+    // form never reappears.
     let projected = migrated.to_schema_text();
     assert!(
-        projected.contains("WorkFrame reaction:reaction:Work"),
-        "the imports brace uses the renamed alias:\n{projected}",
+        projected.contains("reaction.reaction.Work"),
+        "the imports brace keeps the producer's source path as provenance:\n{projected}",
     );
     assert!(
         projected.contains("WorkFrame.("),
-        "the body applies the renamed alias:\n{projected}",
+        "the rename follows into the applied body:\n{projected}",
+    );
+    assert!(
+        !projected.contains("WorkFrame reaction"),
+        "the retired alias-pair imports form must not reappear:\n{projected}",
     );
 
-    // The substrate is untouched by the rename: the alias lives in the table, its
+    // The substrate is untouched by the rename: the name lives in the table, its
     // identifier lives in the substrate, so not a byte moves.
     let core_bytes_after = migrated
         .core()

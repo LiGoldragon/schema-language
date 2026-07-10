@@ -1,4 +1,4 @@
-{ DatabaseMarker marker-core:mail:DatabaseMarker }
+{ marker-core.mail.DatabaseMarker }
 [Observe.Query]
 [Marked.DatabaseMarker]
 {

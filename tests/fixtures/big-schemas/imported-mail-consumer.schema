@@ -1,5 +1,4 @@
-{ DatabaseMarker marker-core:mail:DatabaseMarker
-  CommitSequence marker-core:mail:CommitSequence }
+{ marker-core.mail.[DatabaseMarker CommitSequence] }
 [Record.RecordPayload
  Observe.ObservePayload
  Mark.MarkPayload

@@ -1,7 +1,6 @@
 {
-  SemaReadInput nested-runtime:sema:ReadInput
-  SemaReadOutput nested-runtime:sema:ReadOutput
+  nested-runtime.sema.[ReadInput ReadOutput]
 }
-[SemaReadCompleted.SemaReadOutput]
-[CommandSemaRead.SemaReadInput]
+[SemaReadCompleted.ReadOutput]
+[CommandSemaRead.ReadInput]
 {}
