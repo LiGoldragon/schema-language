@@ -428,27 +428,33 @@ while the source head and grammar name it `Bytes` with a width leaf, and the
 semantic side also keeps a separate unit `Bytes` scalar. Unifying the model
 should reconcile these names.
 
-### Rename edit to add
+### Rename edit is landed
 
-`SchemaEdit` (`src/upgrade.rs`) has exactly `AddField`, `ChangeFieldType`, and
-`AddVariant`; there is no `Rename` edit. `AddVariant` already produces a receipt
-with no migration spec, so a zero-migration edit shape has precedent, but a
-name-only `Rename` edit that touches only the `NameTable` does not yet exist.
+`SchemaEdit` (`src/upgrade.rs`) carries `AddField`, `ChangeFieldType`,
+`AddVariant`, and `Rename`. A `Rename` addresses one declaration by its stable
+`NominalIdentifier` — so it applies uniformly to a type, a member, or an
+imported declaration — touches only the `NameTable`, and emits zero migration
+(the `AddVariant` no-migration-spec shape is the precedent). Applying it
+produces a receipt whose parent and child core hashes are equal, carrying the
+`NameTableDelta` it recorded on the chain, so a rename never moves the core
+hash.
 
-### Identity is inside the core-hashed bytes today
+### Hashing and lineage are landed
 
-The whole-schema hash still runs over the projected sidecar tree (`SchemaTree`
-in `src/schema.rs`), which carries `identity: SchemaIdentity` as its first
-field — deliberately unchanged by the view flip so hash behavior is stable
-while the split lands. Two hash domains exist in `src/identity.rs`: the
-whole-schema domain hashes the full projected semantic value including
-`SchemaIdentity`, so it is not a pure-structure address, and a rename moves it.
-The per-family-closure domain already excludes `SchemaIdentity` and is a
-pure-structure address, but it is per-family, not the whole-schema lineage
-address the target design needs. The target moves the whole-schema hash onto
-the `CoreSchema` substrate bytes — which already exclude both `SchemaIdentity`
-and every name — so the core hash becomes the structural lineage address, and
-renames stop moving it.
+The whole-schema hash has been split into two domains in `src/identity.rs`, each
+under a freshly minted blake3 context (the retired identity-bearing whole-schema
+context is gone, not reused): `TrueSchema::core_hash` hashes the stringless
+`CoreSchema` substrate bytes — which exclude both `SchemaIdentity` and every
+name — and is the structural lineage address a rename never moves;
+`TrueSchema::true_name_hash` hashes the projected sidecar tree including
+`SchemaIdentity` and every name, and is the per-version human-view address that
+moves on rename. The per-family-closure domain is unchanged. Lineage is a graph
+of receipt edges (`SchemaEditReceipt`, keyed by the parent-core-hash-to-child-
+core-hash pair) walked by `LineageGraph` (`src/lineage.rs`): the
+historical-to-current conversion chain is the composition of the structural
+receipts along a path, and common-ancestor search is a backward walk over the
+stored edges. Receipt storage is this in-crate typed representation; the schema
+daemon persists it later and this crate invents no persistence of its own.
 
 ## Checked-in schema files
 

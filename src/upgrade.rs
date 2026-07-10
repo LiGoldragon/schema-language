@@ -1,6 +1,7 @@
 use crate::{
-    Declaration, EnumDeclaration, EnumVariant, FieldDeclaration, Name, SchemaError, SchemaIdentity,
-    StructDeclaration, TrueSchema, TypeDeclaration, TypeReference,
+    ContentHash, Declaration, EnumDeclaration, EnumVariant, FieldDeclaration, Name,
+    NominalIdentifier, SchemaError, SchemaIdentity, StructDeclaration, TrueSchema, TypeDeclaration,
+    TypeReference,
 };
 
 #[derive(
@@ -18,6 +19,7 @@ pub enum SchemaEdit {
     AddField(AddField),
     ChangeFieldType(ChangeFieldType),
     AddVariant(AddVariant),
+    Rename(Rename),
 }
 
 #[derive(
@@ -73,6 +75,50 @@ pub struct AddVariant {
     pub payload: Option<TypeReference>,
 }
 
+/// A name-only edit: rebind one declaration's nominal identifier to a new human
+/// name. It touches ONLY the [`crate::NameTable`] and emits zero migration code
+/// — `AddVariant`'s no-migration-spec shape is the precedent — so it must not
+/// move the core hash. The declaration is addressed by its stable identifier, so
+/// a rename applies uniformly to a top-level type, a member (field or variant),
+/// or an imported declaration, none of which the current name can disambiguate
+/// on its own.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub struct Rename {
+    pub identifier: NominalIdentifier,
+    pub new_name: Name,
+}
+
+/// The `NameTable` change a [`Rename`] records on the lineage chain: the
+/// declaration's identifier and the name it moved from and to. The core hash is
+/// unchanged across this delta by construction — only the table moved — so the
+/// receipt edge it rides on has an equal parent and child core hash.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub struct NameTableDelta {
+    pub identifier: NominalIdentifier,
+    pub previous_name: Name,
+    pub new_name: Name,
+}
+
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -126,6 +172,49 @@ pub struct MigrationSpec {
     pub migration: FieldMigration,
 }
 
+/// What one accepted edit did to the substrate, in the register the lineage
+/// chain composes over. A `Structural` edit moved the core hash and carries the
+/// field migration the historical-to-current emission needs — `Some` for
+/// `AddField`/`ChangeFieldType`, `None` for `AddVariant`, which changes bytes
+/// but needs no per-field migration. A `Rename` moved only the `NameTable`,
+/// carries the name delta, and emits zero migration.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub enum EditEffect {
+    // The migration is boxed: a `MigrationSpec` dwarfs a `NameTableDelta`, so
+    // an unboxed union would pad every rename edge to the structural size.
+    Structural(Option<Box<MigrationSpec>>),
+    Rename(NameTableDelta),
+}
+
+impl EditEffect {
+    /// The field migration this edit contributes to a historical-to-current
+    /// conversion, or `None` when it emits no migration code. Both a rename and
+    /// an `AddVariant` contribute nothing; a rename because it is name-only, an
+    /// `AddVariant` because a new variant needs no per-field migration.
+    pub fn migration_spec(&self) -> Option<&MigrationSpec> {
+        match self {
+            Self::Structural(migration) => migration.as_deref(),
+            Self::Rename(_) => None,
+        }
+    }
+}
+
+/// One receipt edge in the lineage graph: the (parent core hash -> child core
+/// hash) pair the edit produced, plus what it did. A structural edit moves the
+/// core hash, so its parent and child hashes differ; a rename leaves the core
+/// hash fixed, so they are equal. This is the typed edge the schema daemon will
+/// later persist and walk — receipt storage lives here as data, not as daemon
+/// machinery.
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -138,8 +227,49 @@ pub struct MigrationSpec {
     PartialEq,
 )]
 pub struct SchemaEditReceipt {
-    pub schema_identity: SchemaIdentity,
-    pub migration_spec: Option<MigrationSpec>,
+    pub parent_core_hash: ContentHash,
+    pub child_core_hash: ContentHash,
+    pub effect: EditEffect,
+}
+
+impl SchemaEditReceipt {
+    /// A receipt for a structural edit: the core hash moved from `parent` to
+    /// `child`, carrying the field migration the edit emits (`None` for
+    /// `AddVariant`).
+    fn structural(
+        parent_core_hash: ContentHash,
+        child_core_hash: ContentHash,
+        migration: Option<MigrationSpec>,
+    ) -> Self {
+        Self {
+            parent_core_hash,
+            child_core_hash,
+            effect: EditEffect::Structural(migration.map(Box::new)),
+        }
+    }
+
+    pub fn parent_core_hash(&self) -> &ContentHash {
+        &self.parent_core_hash
+    }
+
+    pub fn child_core_hash(&self) -> &ContentHash {
+        &self.child_core_hash
+    }
+
+    pub fn effect(&self) -> &EditEffect {
+        &self.effect
+    }
+
+    /// The field migration this edit contributes to a conversion, or `None`.
+    pub fn migration_spec(&self) -> Option<&MigrationSpec> {
+        self.effect.migration_spec()
+    }
+
+    /// Whether this edit left the core hash fixed — true exactly for a rename,
+    /// whose parent and child core hashes are equal by construction.
+    pub fn is_core_preserving(&self) -> bool {
+        self.parent_core_hash == self.child_core_hash
+    }
 }
 
 pub struct SchemaEditApplication {
@@ -188,6 +318,17 @@ impl SchemaEdit {
         })
     }
 
+    /// Rename the declaration carrying `identifier` to `new_name`. The
+    /// identifier is stable across the rename, so this addresses a type, a
+    /// member, or an imported declaration uniformly and never moves the core
+    /// hash.
+    pub fn rename(identifier: NominalIdentifier, new_name: impl Into<String>) -> Self {
+        Self::Rename(Rename {
+            identifier,
+            new_name: Name::new(new_name),
+        })
+    }
+
     pub fn apply_to(
         self,
         schema: TrueSchema,
@@ -209,6 +350,7 @@ impl SchemaEditApplication {
                 Self::apply_change_field_type(schema, operation)
             }
             SchemaEdit::AddVariant(operation) => Self::apply_add_variant(schema, operation),
+            SchemaEdit::Rename(operation) => Self::apply_rename(schema, operation),
         }
     }
 
@@ -216,6 +358,7 @@ impl SchemaEditApplication {
         schema: TrueSchema,
         edit: AddField,
     ) -> Result<(TrueSchema, SchemaEditReceipt), SchemaError> {
+        let parent_core_hash = schema.core_hash()?;
         let field_type = edit.field_type.clone();
         let migration = FieldMigration::SetDefault(edit.default_value);
         let (schema, previous_type) =
@@ -240,13 +383,17 @@ impl SchemaEditApplication {
                     None,
                 ))
             })?;
-        let receipt = schema.edit_receipt(Some(MigrationSpec {
-            target_type: edit.target_type,
-            field_name: edit.field_name,
-            previous_type,
-            next_type: field_type,
-            migration,
-        }));
+        let receipt = SchemaEditReceipt::structural(
+            parent_core_hash,
+            schema.core_hash()?,
+            Some(MigrationSpec {
+                target_type: edit.target_type,
+                field_name: edit.field_name,
+                previous_type,
+                next_type: field_type,
+                migration,
+            }),
+        );
         Ok((schema, receipt))
     }
 
@@ -254,6 +401,7 @@ impl SchemaEditApplication {
         schema: TrueSchema,
         edit: ChangeFieldType,
     ) -> Result<(TrueSchema, SchemaEditReceipt), SchemaError> {
+        let parent_core_hash = schema.core_hash()?;
         let next_type = edit.new_type.clone();
         let (schema, previous_type) =
             SchemaEditor::new(schema).update_struct(edit.target_type.clone(), |declaration| {
@@ -274,13 +422,17 @@ impl SchemaEditApplication {
                     Some(previous_type),
                 ))
             })?;
-        let receipt = schema.edit_receipt(Some(MigrationSpec {
-            target_type: edit.target_type,
-            field_name: edit.field_name,
-            previous_type,
-            next_type,
-            migration: edit.migration,
-        }));
+        let receipt = SchemaEditReceipt::structural(
+            parent_core_hash,
+            schema.core_hash()?,
+            Some(MigrationSpec {
+                target_type: edit.target_type,
+                field_name: edit.field_name,
+                previous_type,
+                next_type,
+                migration: edit.migration,
+            }),
+        );
         Ok((schema, receipt))
     }
 
@@ -288,6 +440,7 @@ impl SchemaEditApplication {
         schema: TrueSchema,
         edit: AddVariant,
     ) -> Result<(TrueSchema, SchemaEditReceipt), SchemaError> {
+        let parent_core_hash = schema.core_hash()?;
         let schema =
             SchemaEditor::new(schema).update_enum(edit.target_type.clone(), |declaration| {
                 if declaration
@@ -307,7 +460,39 @@ impl SchemaEditApplication {
                 ));
                 Ok(EnumDeclaration::new(declaration.name.clone(), variants))
             })?;
-        let receipt = schema.edit_receipt(None);
+        let receipt = SchemaEditReceipt::structural(parent_core_hash, schema.core_hash()?, None);
+        Ok((schema, receipt))
+    }
+
+    fn apply_rename(
+        schema: TrueSchema,
+        edit: Rename,
+    ) -> Result<(TrueSchema, SchemaEditReceipt), SchemaError> {
+        let parent_core_hash = schema.core_hash()?;
+        // The previous name must be read before the table moves; a declaration
+        // addressed by a live identifier always has a row, and `rename` rejects
+        // an absent identifier, so a successful rename guarantees it was `Some`.
+        let previous_name = schema
+            .names()
+            .name_of(&edit.identifier)
+            .cloned()
+            .ok_or_else(|| SchemaError::NameTableIdentifierAbsent {
+                identifier: edit.identifier.to_hex(),
+            })?;
+        let mut schema = schema;
+        schema.rename(&edit.identifier, edit.new_name.clone())?;
+        // A rename touches only the NameTable, so the core hash is fixed: the
+        // receipt edge's parent and child core hashes are equal by construction.
+        let child_core_hash = schema.core_hash()?;
+        let receipt = SchemaEditReceipt {
+            parent_core_hash,
+            child_core_hash,
+            effect: EditEffect::Rename(NameTableDelta {
+                identifier: edit.identifier,
+                previous_name,
+                new_name: edit.new_name,
+            }),
+        };
         Ok((schema, receipt))
     }
 }
@@ -411,15 +596,6 @@ impl SchemaEditor {
             Vec::new(),
         );
         TrueSchema::from_tree(&tree, &crate::NameTable::empty())
-    }
-}
-
-impl TrueSchema {
-    fn edit_receipt(&self, migration_spec: Option<MigrationSpec>) -> SchemaEditReceipt {
-        SchemaEditReceipt {
-            schema_identity: self.identity().clone(),
-            migration_spec,
-        }
     }
 }
 

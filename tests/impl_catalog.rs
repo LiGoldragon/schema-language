@@ -790,9 +790,9 @@ fn both_lowering_paths_flatten_a_nested_namespace_identically() {
         "both entry points must lower the nested namespace to the same types"
     );
     assert_eq!(
-        macro_schema.content_hash(),
-        source_schema.content_hash(),
-        "one schema text lowers to one content identity regardless of entry path"
+        macro_schema.core_hash(),
+        source_schema.core_hash(),
+        "one schema text lowers to one core identity regardless of entry path"
     );
 }
 

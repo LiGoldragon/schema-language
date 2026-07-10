@@ -114,7 +114,7 @@ impl IdentityFixture {
     }
 
     fn schema_hash(&self, source: &str) -> ContentHash {
-        self.schema(source).content_hash().expect("schema hashes")
+        self.schema(source).core_hash().expect("schema hashes")
     }
 }
 

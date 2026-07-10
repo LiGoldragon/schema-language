@@ -20,8 +20,7 @@ use std::path::PathBuf;
 
 use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{
-    DeclarationKind, ImportResolver, MacroContext, Name, NameTable, SchemaEngine, SchemaIdentity,
-    TrueSchema,
+    DeclarationKind, ImportResolver, MacroContext, Name, SchemaEngine, SchemaIdentity, TrueSchema,
 };
 
 fn reaction_fixture_dir() -> PathBuf {
@@ -140,7 +139,9 @@ fn imported_declarations_mint_identical_identifiers_to_standalone_lowering() {
 fn import_bearing_view_codecs_round_trip_value_exactly() {
     let migrated = lower_migrated_consumer();
 
-    let bytes = migrated.to_binary_bytes().expect("migrated encodes to rkyv");
+    let bytes = migrated
+        .to_binary_bytes()
+        .expect("migrated encodes to rkyv");
     let from_binary = TrueSchema::from_binary_bytes(&bytes).expect("migrated decodes from rkyv");
     assert_eq!(
         from_binary, migrated,
@@ -149,8 +150,8 @@ fn import_bearing_view_codecs_round_trip_value_exactly() {
 
     let nota = migrated.to_nota();
     let document = Document::parse(&nota).expect("migrated NOTA parses");
-    let from_nota =
-        TrueSchema::from_nota_block(&document.root_objects()[0]).expect("migrated decodes from NOTA");
+    let from_nota = TrueSchema::from_nota_block(&document.root_objects()[0])
+        .expect("migrated decodes from NOTA");
     assert_eq!(
         from_nota, migrated,
         "NOTA round trip is value-exact over the import-bearing fixture",

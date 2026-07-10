@@ -79,7 +79,11 @@ fn add_field_lands_new_field_on_target_struct() {
             .map(|field| field.name.as_str())
             .collect::<Vec<_>>()
     );
-    assert!(receipt.migration_spec.is_some());
+    assert!(receipt.migration_spec().is_some());
+    assert!(
+        receipt.parent_core_hash() != receipt.child_core_hash(),
+        "a structural edit moves the core hash",
+    );
 }
 
 #[test]
@@ -113,7 +117,7 @@ fn change_field_type_swaps_topic_to_vector_with_wrap_singleton() {
         other => panic!("expected Vector<Topic>, found {other:?}"),
     }
     let migration = receipt
-        .migration_spec
+        .migration_spec()
         .expect("change_field_type carries migration");
     assert!(matches!(migration.migration, FieldMigration::WrapSingleton));
 }
@@ -143,9 +147,13 @@ fn add_variant_extends_target_enum() {
             .map(|variant| variant.name.as_str())
             .collect::<Vec<_>>()
     );
-    // AddVariant has no per-field migration; receipt's migration_spec is
-    // None.
-    assert!(receipt.migration_spec.is_none());
+    // AddVariant has no per-field migration; the receipt carries no migration
+    // spec, but it is a structural edit, so the core hash still moves.
+    assert!(receipt.migration_spec().is_none());
+    assert!(
+        receipt.parent_core_hash() != receipt.child_core_hash(),
+        "AddVariant is structural and moves the core hash",
+    );
 }
 
 #[test]

@@ -6,6 +6,7 @@ mod expansion;
 mod identifier;
 mod identity;
 mod instance;
+mod lineage;
 mod macros;
 mod module;
 mod raw;
@@ -37,6 +38,7 @@ pub use identifier::{
     DeclarationKind, NameDeclaration, NameEntry, NameHarvest, NameTable, NominalIdentifier,
 };
 pub use identity::{ContentHash, FamilyClosure};
+pub use lineage::LineageGraph;
 pub use macros::{
     MacroContext, MacroDispatch, MacroNodeDefinition, MacroObject, MacroOutput, MacroPair,
     MacroPosition, MacroRegistry, SchemaMacroHandler,
@@ -68,8 +70,9 @@ pub use source::{
     SourceVariantSignature, StreamRelationKeyword,
 };
 pub use upgrade::{
-    AddField, AddVariant, ChangeFieldType, DefaultValue, FieldMigration, MigrationSpec, SchemaEdit,
-    SchemaEditApplication, SchemaEditReceipt, UpgradeObject, UpgradeReceipt,
+    AddField, AddVariant, ChangeFieldType, DefaultValue, EditEffect, FieldMigration, MigrationSpec,
+    NameTableDelta, Rename, SchemaEdit, SchemaEditApplication, SchemaEditReceipt, UpgradeObject,
+    UpgradeReceipt,
 };
 pub use view::{
     DeclarationView, EnumView, FamilyView, FieldView, ImplBlockView, NewtypeView,

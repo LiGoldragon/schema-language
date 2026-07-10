@@ -1,25 +1,33 @@
 //! Content identity for semantic schema values.
 //!
-//! A schema's identity is the blake3 hash of its canonical rkyv bytes:
-//! any edit to the semantic schema changes the address, and the address
-//! is the version the version-control layer consumes. Two hash domains
-//! exist — the whole-schema value and a per-family declaration closure —
-//! and each is domain-separated through its own blake3 `derive_key`
-//! context so the two kinds can never collide.
+//! Three blake3 hash domains exist, each domain-separated through its own
+//! `derive_key` context so hashes over identical bytes can never collide:
 //!
-//! Coverage boundaries the version-control layer must know: a family
-//! closure covers what is reachable FROM the declaration — struct
-//! fields, variant payloads, alias/newtype targets, collection inner
-//! references, and stream relations. Relation declarations point AT
-//! declarations rather than being reachable from them, so a relation
-//! edit moves only the whole-schema hash, never a family hash. The
-//! whole-schema hash covers the full semantic value including
-//! `SchemaIdentity` (component name + authored version string) and
-//! resolved imports, so it is not a pure-structure address; the family
-//! hashes are.
+//! - the CORE hash, over the stringless [`crate::CoreSchema`] substrate's
+//!   canonical bytes — nominal identifiers plus structure, with
+//!   `SchemaIdentity` and every human name outside the hashed bytes. It is the
+//!   structural LINEAGE ADDRESS: equal core hash means compatible, shared
+//!   ancestry, and a rename never moves it because names live in the
+//!   [`crate::NameTable`], not the substrate;
+//! - the TRUE/NAME hash, over the full human-facing view — the projected
+//!   name-bearing tree including `SchemaIdentity` and every current name. It is
+//!   the per-version human-view address: it MOVES on rename and lives outside
+//!   the lineage receipt chain, where the core hash does not; and
+//! - the per-family declaration CLOSURE hash, a pure-structure address over the
+//!   transitive closure reachable FROM one named record family.
+//!
+//! Coverage boundaries the version-control layer must know: a family closure
+//! covers what is reachable FROM the declaration — struct fields, variant
+//! payloads, alias/newtype targets, collection inner references, and stream
+//! relations. Relation declarations point AT declarations rather than being
+//! reachable from them, so a relation edit moves the core and true/name hashes
+//! but never a family hash. The core hash and the family hashes both exclude
+//! `SchemaIdentity`; only the true/name hash carries it.
 
 use std::collections::BTreeSet;
 use std::fmt;
+
+use nota::{Block, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
 
 use crate::{
     SchemaError,
@@ -30,20 +38,24 @@ use crate::{
     view::TrueSchema,
 };
 
-/// The hash domains content identity is derived under. Each domain
-/// carries its own blake3 `derive_key` context string, so a
-/// whole-schema hash and a family-closure hash over identical bytes
-/// are structurally distinct values.
+/// The hash domains content identity is derived under. Each domain carries its
+/// own blake3 `derive_key` context string, so hashes over identical bytes in
+/// different domains are structurally distinct values. The core and true/name
+/// domains are minted fresh for the Core/True split: the retired whole-schema
+/// domain hashed the identity-bearing projected tree AS the lineage address,
+/// and that semantics does not survive under a reused context.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HashDomain {
-    TrueSchema,
+    CoreSchema,
+    TrueName,
     FamilyClosure,
 }
 
 impl HashDomain {
     fn context(self) -> &'static str {
         match self {
-            Self::TrueSchema => "schema 2026-06-12 whole-schema content identity",
+            Self::CoreSchema => "schema 2026-07-10 core structural lineage address",
+            Self::TrueName => "schema 2026-07-10 true-name human view identity",
             Self::FamilyClosure => "schema 2026-06-12 family-closure content identity",
         }
     }
@@ -81,6 +93,40 @@ impl ContentHash {
 
     pub fn to_hex(&self) -> String {
         self.0.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    /// Parse a 64-character lowercase-hex address back into 32 bytes. Any other
+    /// length or a non-hex character yields `None`. This is the inverse of
+    /// [`ContentHash::to_hex`], so an address survives a NOTA round trip.
+    fn from_hex(hex: &str) -> Option<Self> {
+        if hex.len() != 64 {
+            return None;
+        }
+        let mut bytes = [0u8; 32];
+        for (index, slot) in bytes.iter_mut().enumerate() {
+            *slot = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).ok()?;
+        }
+        Some(Self(bytes))
+    }
+}
+
+/// A `ContentHash` projects to its 64-character lowercase-hex address as a
+/// single NOTA leaf, so a receipt edge keyed by a hash pair round-trips through
+/// the human projection.
+impl NotaDecode for ContentHash {
+    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
+        let hex = NotaBlock::new(block).parse_string()?;
+        Self::from_hex(&hex).ok_or_else(|| NotaDecodeError::InvalidValue {
+            type_name: "ContentHash",
+            value: hex,
+            reason: "expected 64 lowercase hexadecimal digits".to_owned(),
+        })
+    }
+}
+
+impl NotaEncode for ContentHash {
+    fn to_nota(&self) -> String {
+        self.to_hex()
     }
 }
 
@@ -157,12 +203,25 @@ impl FamilyClosure {
 }
 
 impl TrueSchema {
-    /// The whole-schema content address: blake3 over the semantic
-    /// schema value's canonical rkyv bytes, under the whole-schema
-    /// hash domain. Any edit to the semantic schema moves this address.
-    pub fn content_hash(&self) -> Result<ContentHash, SchemaError> {
+    /// The CORE hash: blake3 over the stringless [`crate::CoreSchema`]
+    /// substrate's canonical bytes, under the core-schema domain. Structure and
+    /// nominal identifiers only — `SchemaIdentity` and every human name are
+    /// outside these bytes, so a rename through the [`crate::NameTable`] never
+    /// moves it. This is the structural LINEAGE ADDRESS: equal core hash means
+    /// compatible, shared ancestry, and lineage receipt edges are keyed by it.
+    pub fn core_hash(&self) -> Result<ContentHash, SchemaError> {
+        let bytes = self.core().canonical_bytes()?;
+        Ok(ContentHash::derive(HashDomain::CoreSchema, &bytes))
+    }
+
+    /// The TRUE/NAME hash: blake3 over the full human-facing view — the
+    /// projected name-bearing tree including `SchemaIdentity` and every current
+    /// name — under the true-name domain. It MOVES on rename and is the
+    /// per-version human-view address, distinct from and outside the core
+    /// hash's lineage receipt chain.
+    pub fn true_name_hash(&self) -> Result<ContentHash, SchemaError> {
         let bytes = self.to_binary_bytes()?;
-        Ok(ContentHash::derive(HashDomain::TrueSchema, &bytes))
+        Ok(ContentHash::derive(HashDomain::TrueName, &bytes))
     }
 
     /// The declaration closure of the named family. The name must be a

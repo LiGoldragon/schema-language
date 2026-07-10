@@ -271,9 +271,9 @@ fn nested_namespace_router_envelope_round_trips_and_lowers() {
         .expect("canonical nested namespace source lowers");
 
     assert_eq!(
-        schema.content_hash(),
-        schema_from_canonical.content_hash(),
-        "source projection details must not move semantic content identity"
+        schema.core_hash(),
+        schema_from_canonical.core_hash(),
+        "source projection details must not move the core structural identity"
     );
     assert!(
         schema.type_named("router:routed_object:Envelope").is_some(),
