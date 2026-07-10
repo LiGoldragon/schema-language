@@ -93,10 +93,12 @@ that arrived through an import is a declaration like any other — a minted
 identifier, a `NameTable` row, and names held in the table rather than the
 structure. A resolved import's frame body, its binder identifiers and its
 variant list, therefore decomposes exactly as a natively declared frame does,
-and a relation-path segment always names a declaration in the whole — a local
-one or an imported one — and is minted to that declaration's identifier, so a
-rename of a relation's target follows into the relation; a segment that resolves
-to no declaration is a typed error, never a silently retained name.
+and any path segment that names a declaration — including a relation-path
+segment in the current, retired relations construct (see "Retired constructs") —
+always names a declaration in the whole, a local one or an imported one, and is
+minted to that declaration's identifier, so a rename of the target follows into
+the referencing segment; a segment that resolves to no declaration is a typed
+error, never a silently retained name.
 Rename-stability of the substrate is therefore universal over the loaded whole,
 not a local-only property: renaming any declaration, imported ones included,
 moves only the `NameTable` and leaves every substrate byte fixed. What stays as
@@ -293,7 +295,10 @@ named-brace application form is confused-agent drift, not valid schema.
 Generic application is positional and dotted; parameter names live only in the
 definition. Schemas using the named-brace form must be rewritten to positional
 dotted application, for example `Family.(StoredRecord stored_records Domain)`
-or `Stream.(Token Opened Event Closed)`.
+or `Stream.(Token Opened Event Closed)`. This rejection invariant governs current
+code; the `Family` and `Stream` constructs it uses as examples are themselves
+retired (see "Retired constructs"), so the invariant applies to current source
+carrying retiring constructs, not to target shape.
 
 ### Blast radius
 
@@ -307,6 +312,30 @@ The blast radius of the dotted-everywhere change is schema source only:
 
 Runtime state and wire are rkyv binary keyed by field position and are untouched
 by the text change. Field order remains the compatibility surface.
+
+## Retired constructs
+
+Three source constructs are RETIRED from the schema language by psyche decision.
+Their removal from grammar, parser, substrate, and fixtures is pending
+implementation, so the current code and the checked-in `.schema` fixtures still
+carry them; this is current-versus-target divergence, not settled shape.
+
+- Relations / Equivalence. Declaring path-name equivalences does not belong in
+  schema. The feature was traced to an uncited 2026-06-11 commit with no Spirit
+  intent record backing it, and the psyche has settled that it leaves the
+  language. The relations block and its relation declarations are retired; the
+  current enforced document layout still reads a relations slot as its fifth
+  square-bracket block (see "The strict five-slot document layout is enforced"),
+  and that slot is removed with the construct.
+- Streams. The `Stream.(…)` metadata head and the `streams` substrate vector are
+  retired; streams do not earn a dedicated per-kind block in the target.
+- Families. The `Family.(…)` metadata head, the `families` substrate vector, and
+  the `FamilyClosure` per-family hash domain are retired together; families do
+  not earn a dedicated per-kind block in the target.
+
+The surviving declared object classes are types, generics, and impls, and the
+settled target root-slot layout is built from those alone (see "Per-kind
+declaration blocks").
 
 ## Per-kind declaration blocks
 
@@ -322,28 +351,40 @@ new generic is defining a new kind of data type, a meta-type; and when a whole n
 class of meta-objects arises, it earns its own dedicated block in the schema file
 rather than a marker, head, or tag squeezed into an existing block.
 
-This principle is settled, and its consequences for the target source shape are
-settled with it:
+This principle is settled. The construct set it partitions is now settled with
+it by psyche decision: relations, streams, and families are retired from the
+language (see "Retired constructs"), so the surviving declared object classes are
+types, generics, and impls, and only those earn dedicated blocks:
 
+- The former namespace becomes the `types` block, holding only dotted
+  `TypeName.Definition` entries and nothing else.
+- Generic definitions move into their own dedicated generics block.
+- The trailing `{| impl |}` object that today rides at the document tail is
+  superseded in the target source shape by entries in a dedicated impl block.
 - The `Stream.(…)` and `Family.(…)` metadata heads that today ride inside
-  namespace entries are superseded in the target source shape by entries in their
-  own dedicated stream and family blocks.
-- The trailing `{| impl |}` object is likewise superseded in the target source
-  shape by entries in a dedicated impl block.
+  namespace entries carry retired constructs; they do not move to dedicated
+  blocks, they leave the language with streams and families.
 
-The principle makes the source text match the model that already exists
-underneath. The substrate already partitions this way internally: `CoreSchema`
-(`src/core.rs`) carries separate `namespace`, `streams`, `families`, and
-`impl_blocks` vectors. The per-kind blocks give the source text the same partition
-the stored model holds, so text shape and substrate agree instead of the source
-folding several object classes into one namespace and a trailing impl tail.
+The principle makes the source text match the model that lives underneath, minus
+the retired classes. The substrate today partitions more finely than the target
+keeps: `CoreSchema` (`src/core.rs`) carries separate `namespace`, `streams`,
+`families`, and `impl_blocks` vectors. That is current state; the `streams` and
+`families` vectors carry retired constructs and retire with them, removal pending
+implementation. The per-kind blocks give the surviving source text the same
+partition the stored model holds for the kept classes, so text shape and
+substrate agree instead of the source folding several object classes into one
+namespace and a trailing impl tail.
 
-### PENDING: root-slot ordering of the per-kind blocks
+### Target root-slot layout of the per-kind blocks
 
-The principle and the consequences above are settled. What remains pending psyche
-confirmation is the exact root-slot ordering of the per-kind blocks. A proposed
-ordering — imports, input, output, types, generics, streams, families, impls — is
-with the psyche now and is not decided until it is confirmed.
+The construct set and the root-slot ordering are settled by psyche decision. The
+psyche has been given the ordering to veto, and it stands as the target. The
+target schema document is six per-kind blocks, in order: imports, input, output,
+types, generics, impls. Every slot is always present — optionality is an empty
+typed slot, never a changed root count. The `types` block holds only dotted
+`TypeName.Definition` entries; generics and impls each live in their own
+dedicated block. There is no relations slot, no streams block, and no families
+block, because those constructs are retired.
 
 ## Current implementation and remaining work
 
@@ -375,9 +416,11 @@ hand-written reading, backed by single-source-of-truth vocabularies, is the
 accepted shape. This settles that the `Stream` and `Family` metadata heads are
 recognized by hand-written code (through `MetadataHead`); that hand-written
 recognition mechanism is accepted, not drift. The metadata-head form it reads is a
-current-state fact rather than the target source shape: under the per-kind
-declaration block principle those heads move out of namespace entries into
-dedicated stream and family blocks (see "Per-kind declaration blocks").
+current-state fact rather than the target source shape: the `Stream` and `Family`
+heads carry the retired streams and families constructs (see "Retired
+constructs") and leave the language rather than moving to dedicated blocks. Their
+hand-written recognition code is accepted as current-state parsing of a retiring
+construct.
 
 What is hand-written and accepted is the per-context dispatch — which context
 expects which dotted-prefix expectation kind. The low-level dotted-prefix split
@@ -438,13 +481,16 @@ imports inference is gone. The imports section is read via
 `SourceImports::from_block` and the namespace section via
 `SourceNamespace::from_block` (both `src/source.rs`).
 
-This five-slot layout is the current enforced shape, not the target. Under the
-per-kind declaration block principle the single namespace slot is the TYPE
-namespace and the target source shape splits generics, streams, families, and
-impls into their own dedicated blocks; the `Stream`/`Family` metadata heads and
-the trailing impl object described in this document are therefore current-state
-facts, not target shape. The exact root-slot ordering of the per-kind blocks is
-still pending psyche confirmation (see "Per-kind declaration blocks").
+This five-slot layout is the current enforced shape, not the target. Its fifth
+slot is the relations square-bracket block; relations are retired by decision
+(see "Retired constructs"), so that slot is removed with the construct, removal
+pending implementation. Under the per-kind declaration block principle the single
+namespace slot becomes the TYPE namespace, and the settled target document is the
+six per-kind blocks — imports, input, output, types, generics, impls — with
+streams and families retired rather than promoted to blocks. The `Stream`/`Family`
+metadata heads and the trailing impl object described in this document are
+therefore current-state facts, not target shape. The target root-slot layout is
+settled (see "Per-kind declaration blocks").
 
 ### Enforced strict-positional rejections
 
@@ -523,7 +569,9 @@ context is gone, not reused): `TrueSchema::core_hash` hashes the stringless
 name — and is the structural lineage address a rename never moves;
 `TrueSchema::true_name_hash` hashes the projected sidecar tree including
 `SchemaIdentity` and every name, and is the per-version human-view address that
-moves on rename. The per-family-closure domain is unchanged. Lineage is a graph
+moves on rename. The per-family-closure hash domain is current-state only: it
+retires with families (see "Retired constructs"), removal pending implementation.
+Lineage is a graph
 of receipt edges (`SchemaEditReceipt`, keyed by the parent-core-hash-to-child-
 core-hash pair) walked by `LineageGraph` (`src/lineage.rs`): the
 historical-to-current conversion chain is the composition of the structural
