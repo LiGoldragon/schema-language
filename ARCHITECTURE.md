@@ -331,7 +331,10 @@ carry them; this is current-versus-target divergence, not settled shape.
   retired; streams do not earn a dedicated per-kind block in the target.
 - Families. The `Family.(…)` metadata head, the `families` substrate vector, and
   the `FamilyClosure` per-family hash domain are retired together; families do
-  not earn a dedicated per-kind block in the target.
+  not earn a dedicated per-kind block in the target. The `Family.(…)` construct
+  was the narrow, mis-shaped first implementation of per-component storage-type
+  declaration; its successor is not a block in any document but the separate
+  `sema.schema` document kind (see "Schema document kinds").
 
 The surviving declared object classes are types, generics, and impls, and the
 settled target root-slot layout is built from those alone (see "Per-kind
@@ -385,6 +388,36 @@ typed slot, never a changed root count. The `types` block holds only dotted
 `TypeName.Definition` entries; generics and impls each live in their own
 dedicated block. There is no relations slot, no streams block, and no families
 block, because those constructs are retired.
+
+## Schema document kinds
+
+The six per-kind blocks describe one document kind — the general schema
+document. It is not the language's only document kind. The SEMA declarations
+that define a component's storage types live in a separate document kind: the
+per-component storage-declaration document, by convention the `sema.schema`
+file (existing usage: `orchestrate/schema/sema.schema`,
+`spirit/schema/sema.schema`, each generated into `src/schema/sema.rs`). Its
+root shape is not the six-block layout; the document holds a set of
+storage-type declarations, one per stored record type, and nothing else.
+
+These are distinct KINDS, not one document with an optional block. The
+distinction is a direct reading of the foundational tenet that the expected
+type is known ahead at every NOTA boundary starting with file kind: the file
+kind fixes the expected root type, so a `sema.schema` file expects the
+storage-declaration root and a general schema file expects the six-block root,
+and neither borrows a slot from the other. A storage declaration is therefore
+never a block folded into the general schema document; it is the entire content
+of its own document kind.
+
+Each storage-type declaration names a stored record type together with the
+parts the storage engine consumes from it: its record type, its key or identity
+style, and its indices and projections. All storage descriptors are generated
+from these declarations — no daemon hand-constructs a descriptor. The fuller
+vision of what a declaration carries lives with the storage engine that
+consumes it (see the sema-engine architecture). The exact entry shape — how an
+index or projection declaration reads as surface syntax — is not yet designed;
+it is reserved for a psyche design session. This document names the fields the
+engine consumes without fixing their surface form.
 
 ## Current implementation and remaining work
 
