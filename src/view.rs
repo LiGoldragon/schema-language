@@ -63,6 +63,13 @@ impl TrueSchema {
     /// Wrap a lowered name-bearing tree into the split model, re-associating
     /// identifiers against `prior`.
     pub(crate) fn from_tree(tree: &SchemaTree, prior: &NameTable) -> Result<Self, SchemaError> {
+        // The semantic construction/decode boundary: every schema value —
+        // programmatically built, binary-decoded, or NOTA-decoded — funnels
+        // through here, so a duplicate generic or frame binder is rejected here
+        // even when the value never passed the source reader's own guard.
+        // Decomposition would otherwise mint two binders with the same name into
+        // one colliding identifier, silently swallowing the duplicate.
+        tree.parameters_verified()?;
         let (core, names) = tree.decompose(prior)?;
         Ok(Self {
             identity: tree.identity().clone(),

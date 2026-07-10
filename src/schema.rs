@@ -784,6 +784,36 @@ impl SchemaTree {
         Ok(self)
     }
 
+    /// Verify that every parameterized declaration's binder list is distinct:
+    /// no declaration head repeats a type-parameter name. The source reader
+    /// (`SourceGenerics::read_parameters`) already rejects a duplicate binder as
+    /// it parses the `generics` block, but that guard sits on the text path
+    /// alone. This is the same rule enforced at the SEMANTIC boundary — the
+    /// construction/decode surface every schema value passes through
+    /// ([`crate::TrueSchema::from_tree`], reached by the programmatic tree
+    /// constructor, binary decode, and NOTA decode) — so a schema value that
+    /// never touched the source reader still cannot carry a duplicate generic or
+    /// frame binder. The binder home is one `Declaration::parameters` list
+    /// whether the body is a plain generic or a parameterized enum frame, so the
+    /// single walk covers both duplicate generic parameters and duplicate frame
+    /// parameters, and it constructs the same [`SchemaError::DuplicateTypeParameter`]
+    /// the source form does.
+    pub(crate) fn parameters_verified(&self) -> Result<(), SchemaError> {
+        for declaration in &self.namespace {
+            let mut seen: Vec<&Name> = Vec::new();
+            for parameter in declaration.parameters() {
+                if seen.contains(&parameter) {
+                    return Err(SchemaError::DuplicateTypeParameter {
+                        declaration: declaration.name().as_str().to_owned(),
+                        parameter: parameter.as_str().to_owned(),
+                    });
+                }
+                seen.push(parameter);
+            }
+        }
+        Ok(())
+    }
+
     /// Verify the impl manifest: every standalone (body-optional) impl block
     /// targets a type declared elsewhere in this schema, and no target carries
     /// a true-duplicate entry. Distinct entries on one target compose; an
@@ -2941,5 +2971,115 @@ mod scalar_vocabulary_guard {
                 "machine wire tag must match the reserved source name",
             );
         }
+    }
+}
+
+/// The source reader rejects a duplicate generic or frame binder as it parses
+/// the `generics` block (`SourceGenerics::read_parameters`), witnessed by the
+/// document-form tests in `tests/generics.rs`. These tests witness the OTHER
+/// boundary: a schema VALUE that reaches the semantic construction/decode
+/// surface (`TrueSchema::from_tree`) carrying a duplicate binder — one that
+/// never passed the source reader, because it was tampered after lowering — is
+/// rejected there too, with the same typed [`SchemaError::DuplicateTypeParameter`].
+/// The rejection is witnessed across every surface that funnels through
+/// `from_tree`: the programmatic tree constructor, binary (rkyv) decode, and
+/// structured NOTA decode. Both a plain generic and a parameterized enum frame
+/// are covered, since both carry their binders in the one
+/// `Declaration::parameters` list.
+#[cfg(test)]
+mod semantic_duplicate_parameter_rejection {
+    use super::*;
+    use crate::{NameTable, SchemaEngine, SchemaIdentity, TrueSchema};
+
+    /// Lower a valid single-block `generics` document and hand back the
+    /// crate-internal sidecar tree the codec surfaces project through.
+    fn lowered_tree(generics_body: &str) -> SchemaTree {
+        let source = format!("{{}}\n[]\n[]\n{{}}\n{{ {generics_body} }}\n{{}}");
+        SchemaEngine::default()
+            .lower_source(
+                &source,
+                SchemaIdentity::new("semantic-duplicate:lib", "0.1.0"),
+            )
+            .expect("valid parameterized declaration lowers")
+            .tree()
+    }
+
+    /// Duplicate the first binder of the first parameterized declaration —
+    /// producing a value the source reader would never emit — and return the
+    /// typed error the semantic boundary must now construct for it.
+    fn tamper_first_binder(tree: &mut SchemaTree) -> SchemaError {
+        for declaration in &mut tree.namespace {
+            if let Some(first) = declaration.parameters().first().cloned() {
+                *declaration = declaration
+                    .clone()
+                    .with_parameters(vec![first.clone(), first.clone()]);
+                return SchemaError::DuplicateTypeParameter {
+                    declaration: declaration.name().as_str().to_owned(),
+                    parameter: first.as_str().to_owned(),
+                };
+            }
+        }
+        panic!("fixture must carry a parameterized declaration");
+    }
+
+    fn assert_rejected_across_surfaces(
+        generics_body: &str,
+        expected_declaration: &str,
+        expected_parameter: &str,
+    ) {
+        let mut tree = lowered_tree(generics_body);
+        let expected = tamper_first_binder(&mut tree);
+        assert_eq!(
+            expected,
+            SchemaError::DuplicateTypeParameter {
+                declaration: expected_declaration.to_owned(),
+                parameter: expected_parameter.to_owned(),
+            },
+        );
+
+        // Programmatic construction surface.
+        assert_eq!(
+            TrueSchema::from_tree(&tree, &NameTable::empty())
+                .expect_err("from_tree must reject a duplicate binder"),
+            expected,
+        );
+
+        // Binary (rkyv) decode surface.
+        let bytes = tree
+            .to_binary_bytes()
+            .expect("tampered tree encodes to binary");
+        assert_eq!(
+            TrueSchema::from_binary_bytes(&bytes)
+                .expect_err("binary decode must reject a duplicate binder"),
+            expected,
+        );
+
+        // Structured NOTA decode surface. The view's `NotaDecode` wraps the
+        // schema error as `InvalidValue`, so the typed error surfaces through
+        // its rendered reason.
+        let nota = tree.to_nota();
+        let document = nota::Document::parse(&nota).expect("tampered tree NOTA parses");
+        match TrueSchema::from_nota_block(&document.root_objects()[0])
+            .expect_err("NOTA decode must reject a duplicate binder")
+        {
+            NotaDecodeError::InvalidValue { reason, .. } => {
+                assert_eq!(reason, expected.to_string());
+            }
+            other => panic!("expected an InvalidValue wrapping the schema error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn duplicate_generic_parameters_are_rejected_at_the_semantic_boundary() {
+        assert_rejected_across_surfaces("Plane.((Wing) { Wing })", "Plane", "Wing");
+    }
+
+    #[test]
+    fn duplicate_frame_parameters_are_rejected_at_the_semantic_boundary() {
+        assert_rejected_across_surfaces(
+            "Work.((Event Outcome) [Started.Event Completed.Outcome])",
+            "Work",
+            "Event",
+        );
     }
 }
