@@ -124,8 +124,20 @@ impl TrueSchema {
         self.names.identifier_of(kind, name)
     }
 
-    pub fn imports(&self) -> &[ImportDeclaration] {
-        &self.core.imports
+    /// The brace-declared imports, projected from the substrate. Each import's
+    /// alias is identifier-addressed and lives in the name table, so a rename of
+    /// the imported declaration follows into the projected alias, keeping the
+    /// imports brace consistent with the body.
+    pub fn imports(&self) -> Vec<ImportDeclaration> {
+        self.core
+            .imports
+            .iter()
+            .map(|import| {
+                import
+                    .project(&self.names)
+                    .expect(VIEW_RESOLUTION_INVARIANT)
+            })
+            .collect()
     }
 
     /// The imports resolved against dependency crate schemas, projected from the

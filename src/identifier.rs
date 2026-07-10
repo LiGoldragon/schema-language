@@ -44,8 +44,11 @@
 //!
 //! Both hazards stay OPEN in `ARCHITECTURE.md`. The real answer may only emerge
 //! after the system is implemented and used; until then this substrate must be
-//! treated as possibly unreliable, and it is deliberately not yet wired into
-//! the hashing domains.
+//! treated as possibly unreliable. This provisional minting IS the current
+//! lineage foundation: the core hash rests entirely on the identifier-built
+//! canonical bytes, so every hazard above is inherited by lineage identity as it
+//! stands today — it is not a dormant mechanism awaiting a later wiring into the
+//! hashing domains.
 
 use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
 

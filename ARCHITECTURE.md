@@ -130,8 +130,10 @@ under the tenet that a use-site name may be a reference/path/name value.
   receipt. The historical-to-current conversion chain between two versions is the
   composition of the receipts along the path between them, and common-ancestor
   search is a walk over the stored receipt edges.
-- A `Rename` edit records a `NameTable` delta on the same chain but contributes
-  no receipt, because it is a zero-migration edit.
+- A `Rename` edit records a name-delta receipt on the same chain: the receipt
+  carries the `NameTable` delta and emits zero migration, and its parent and
+  child core hashes are equal, so it is a core-preserving self-loop that does not
+  advance the structural chain.
 - A separate true/name hash exists per version for the human view. It lives
   outside the receipt chain and moves on rename; the core hash does not.
 

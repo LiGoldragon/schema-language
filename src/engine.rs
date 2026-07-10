@@ -165,6 +165,11 @@ pub enum SchemaError {
     ExpectedSyntaxDeclaration { found: String },
     #[error("expected a syntax reference, found {found}")]
     ExpectedSyntaxReference { found: String },
+    #[error(
+        "expected a capitalized type reference at a reference leaf, found the \
+         lowercase-led name {found}"
+    )]
+    ExpectedTypeReferenceLeaf { found: String },
     #[error("expected {form} to hold {expected}, found {found} objects")]
     ExpectedSyntaxReferenceArity {
         form: &'static str,

@@ -268,3 +268,41 @@ fn common_ancestor_is_a_walk_over_stored_receipt_edges() {
         "the nearest core hash both versions descend from is the root",
     );
 }
+
+/// Finding 6 (edge-set hygiene): the lineage graph keeps no duplicate receipt
+/// edges. An edge is fully determined by its (parent core hash, child core hash,
+/// effect) triple, so a second identical edge carries no information a walk could
+/// use; both `record` and `from_edges` drop it.
+#[test]
+fn the_lineage_graph_deduplicates_identical_receipt_edges() {
+    let version_one = lower(BASE);
+    let (_version_two, receipt) = SchemaEditApplication::new(
+        version_one,
+        SchemaEdit::add_field(
+            "Entry",
+            "last_modified",
+            TypeReference::Integer,
+            DefaultValue::Integer(0),
+        ),
+    )
+    .apply()
+    .expect("add-field edit applies");
+
+    // `from_edges` collapses the duplicate to a single edge.
+    let from_edges = LineageGraph::from_edges([receipt.clone(), receipt.clone()]);
+    assert_eq!(
+        from_edges.edges().len(),
+        1,
+        "from_edges discards a duplicate receipt edge",
+    );
+
+    // `record` refuses to store a second identical edge.
+    let mut recorded = LineageGraph::new();
+    recorded.record(receipt.clone());
+    recorded.record(receipt);
+    assert_eq!(
+        recorded.edges().len(),
+        1,
+        "record discards a duplicate receipt edge",
+    );
+}

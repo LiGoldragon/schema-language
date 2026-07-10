@@ -256,7 +256,7 @@ fn schema_is_typed_data_with_named_field_accessors() {
     assert_eq!(schema.identity().version(), "0.1.0");
 
     // Typed accessors — TrueSchema is a noun with methods, not a string blob.
-    let _: &[schema_language::ImportDeclaration] = schema.imports();
+    let _: Vec<schema_language::ImportDeclaration> = schema.imports();
     let _: schema_language::Root = schema.input();
     let _: schema_language::Root = schema.output();
     let _: schema_language::EnumDeclaration = schema

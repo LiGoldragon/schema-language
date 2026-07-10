@@ -887,3 +887,29 @@ fn signature_mismatch_reports_the_full_signature() {
         "the error must not report the bare method name alone"
     );
 }
+
+/// Finding 4 (validation): a method parameter's TYPE is a type reference, so its
+/// leaf must be capitalized per the capitalization tenet — a capitalized-leading
+/// atom is a type/object, a lowercase one is a name/reference. The seam
+/// conversion had dropped this gate, letting a lowercase parameter type through;
+/// it is restored with a typed error. Negative witness plus a positive control.
+#[test]
+fn lowercase_method_parameter_type_is_a_typed_rejection() {
+    // `candidate.node` — a lowercase parameter type — must be rejected.
+    let lowercase = "{}\n[]\n[]\n{\n  \
+        NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.node } Boolean) ] |}\n\
+        }\n[]\n";
+    let error = SchemaSourceArtifact::from_schema_text(lowercase)
+        .expect_err("a lowercase method-parameter type is rejected at parse");
+    assert!(
+        matches!(error, SchemaError::ExpectedTypeReferenceLeaf { .. }),
+        "expected ExpectedTypeReferenceLeaf, got: {error}"
+    );
+
+    // The capitalized control `candidate.Node` still parses cleanly.
+    let capitalized = "{}\n[]\n[]\n{\n  \
+        NodeQuery { Differentiator } {| QueryMatcher [ (matches { candidate.Node } Boolean) ] |}\n\
+        }\n[]\n";
+    SchemaSourceArtifact::from_schema_text(capitalized)
+        .expect("a capitalized method-parameter type parses");
+}

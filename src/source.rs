@@ -1547,6 +1547,9 @@ impl SourceMethodParameter {
         let name = Name::new(SourceReference::dotted_key_text(&entry));
         Self::validate_name(&name)?;
         let reference = SourceReference::from_block(entry.value())?;
+        // A parameter's type is a type reference, so its leaf must be
+        // capitalized: `(m { p.lowercase } R)` is rejected here.
+        reference.require_type_leaf()?;
         Ok(Self { name, reference })
     }
 
@@ -4025,6 +4028,23 @@ impl SourceReference {
                 found: block.reemit_fallback(),
             })
         }
+    }
+
+    /// Require that this reference names a TYPE at its leaf, per the
+    /// capitalization tenet: a capitalized-leading atom is an object/type, a
+    /// lowercase-leading atom is a name/reference. An application head is
+    /// capitalized by construction, so only a plain lowercase leaf violates the
+    /// rule — as when a method parameter's type is written lowercase
+    /// (`(m { p.lowercase } R)`), which this rejects with a typed error.
+    fn require_type_leaf(&self) -> Result<(), SchemaError> {
+        if let Self::Plain(name) = self {
+            if !SourceIdentifierCase::new(name).is_type() {
+                return Err(SchemaError::ExpectedTypeReferenceLeaf {
+                    found: name.to_nota(),
+                });
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {

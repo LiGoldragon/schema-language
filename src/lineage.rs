@@ -48,16 +48,25 @@ impl LineageGraph {
         Self { edges: Vec::new() }
     }
 
-    /// Build a graph from an existing set of receipt edges.
+    /// Build a graph from an existing set of receipt edges, discarding duplicate
+    /// edges so the edge set stays hygienic: an edge is fully determined by its
+    /// (parent core hash, child core hash, effect) triple, so a second identical
+    /// edge carries no lineage information a walk could use.
     pub fn from_edges(edges: impl IntoIterator<Item = SchemaEditReceipt>) -> Self {
-        Self {
-            edges: edges.into_iter().collect(),
+        let mut graph = Self::new();
+        for edge in edges {
+            graph.record(edge);
         }
+        graph
     }
 
-    /// Record one accepted edit as an edge on the chain.
+    /// Record one accepted edit as an edge on the chain. An edge equal to one
+    /// already stored is dropped: walks are visited-guarded, so a duplicate edge
+    /// never changes a reachable set, and keeping it would only bloat the store.
     pub fn record(&mut self, receipt: SchemaEditReceipt) {
-        self.edges.push(receipt);
+        if !self.edges.contains(&receipt) {
+            self.edges.push(receipt);
+        }
     }
 
     pub fn edges(&self) -> &[SchemaEditReceipt] {

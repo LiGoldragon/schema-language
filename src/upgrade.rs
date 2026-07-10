@@ -506,10 +506,20 @@ struct SchemaEditor {
     namespace: Vec<Declaration>,
     streams: Vec<crate::StreamDeclaration>,
     families: Vec<crate::FamilyDeclaration>,
+    // The pre-edit name table, carried as the re-association prior when the
+    // edited tree is decomposed back into the split model. Without it the
+    // rebuild re-mints every identifier from the CURRENT name against an empty
+    // prior, so a renamed declaration is re-minted from its new name and the
+    // child core hash becomes a function of edit order — two orderings reaching
+    // identical text would produce different core hashes. Threading the prior
+    // preserves each unchanged and renamed declaration's identifier, so only a
+    // genuinely new structural addition mints fresh.
+    prior: crate::NameTable,
 }
 
 impl SchemaEditor {
     fn new(schema: TrueSchema) -> Self {
+        let prior = schema.names().clone();
         let tree = schema.tree();
         Self {
             identity: tree.identity().clone(),
@@ -520,6 +530,7 @@ impl SchemaEditor {
             namespace: tree.namespace().to_vec(),
             streams: tree.streams().to_vec(),
             families: tree.families().to_vec(),
+            prior,
         }
     }
 
@@ -595,7 +606,7 @@ impl SchemaEditor {
             self.families,
             Vec::new(),
         );
-        TrueSchema::from_tree(&tree, &crate::NameTable::empty())
+        TrueSchema::from_tree(&tree, &self.prior)
     }
 }
 

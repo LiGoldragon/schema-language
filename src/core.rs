@@ -81,6 +81,11 @@ impl SchemaTree {
         prior: &NameTable,
     ) -> Result<(CoreSchema, NameTable), SchemaError> {
         let mut harvest = NameHarvest::new(prior);
+        let imports = self
+            .imports()
+            .iter()
+            .map(|import| CoreImportDeclaration::from_import_declaration(import, &mut harvest))
+            .collect();
         let resolved_imports = self
             .resolved_imports()
             .iter()
@@ -117,7 +122,7 @@ impl SchemaTree {
             .map(|block| CoreImplBlock::from_impl_block(block, &mut harvest))
             .collect();
         let core = CoreSchema {
-            imports: self.imports().to_vec(),
+            imports,
             resolved_imports,
             input,
             output,
@@ -137,7 +142,7 @@ impl SchemaTree {
 /// of the substrate; `CoreSchema::project` takes it as an argument.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreSchema {
-    pub(crate) imports: Vec<ImportDeclaration>,
+    pub(crate) imports: Vec<CoreImportDeclaration>,
     pub(crate) resolved_imports: Vec<CoreResolvedImport>,
     pub(crate) input: CoreRoot,
     pub(crate) output: CoreRoot,
@@ -159,7 +164,10 @@ impl CoreSchema {
     ) -> Result<SchemaTree, SchemaError> {
         Ok(SchemaTree::new(
             identity,
-            self.imports.clone(),
+            self.imports
+                .iter()
+                .map(|import| import.project(names))
+                .collect::<Result<Vec<_>, _>>()?,
             self.resolved_imports
                 .iter()
                 .map(|import| import.project(names))
@@ -296,6 +304,47 @@ impl CoreApplicationHead {
                 ApplicationHead::Local(names.projected_name(identifier)?.clone())
             }
             Self::Imported(import) => ApplicationHead::Imported(import.project(names)?),
+        })
+    }
+}
+
+/// A brace-declared import in the substrate. The alias a human writes in the
+/// imports brace IS the imported declaration's current name — a declaration in
+/// the loaded whole like any other — so it is identifier-addressed and its name
+/// lives in the [`NameTable`], carried by the very identifier the matching
+/// [`CoreResolvedImport`] mints. Storing the alias identifier rather than the
+/// alias string keeps it out of the substrate's canonical bytes and makes a
+/// rename of the imported declaration move the imports brace and the body
+/// together, so the projection stays internally consistent and reloadable.
+///
+/// Only the cross-crate SOURCE reference stays as data — genuine provenance
+/// naming a location in another crate's source, which the stringless principle
+/// leaves in source form.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct CoreImportDeclaration {
+    identifier: NominalIdentifier,
+    source: TypeReference,
+}
+
+impl CoreImportDeclaration {
+    pub(crate) fn from_import_declaration(
+        declaration: &ImportDeclaration,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
+        // The alias is the imported declaration's top-level name; declaring it
+        // here mints (or re-associates) exactly the identifier the matching
+        // resolved import carries, and the duplicate row collapses in the built
+        // table, so brace and body address the one declaration.
+        Self {
+            identifier: harvest.declare(DeclarationKind::Type, &declaration.local_name),
+            source: declaration.source.clone(),
+        }
+    }
+
+    pub(crate) fn project(&self, names: &NameTable) -> Result<ImportDeclaration, SchemaError> {
+        Ok(ImportDeclaration {
+            local_name: names.projected_name(&self.identifier)?.clone(),
+            source: self.source.clone(),
         })
     }
 }
