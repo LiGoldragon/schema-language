@@ -54,11 +54,12 @@ pub use resolution::{ImportResolver, ImportSource, ResolvedImport};
 pub use schema::{
     ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration,
     FamilyKey, FieldDeclaration, ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact,
-    ImplReference, ImportDeclaration, MethodParameter, MethodSignature, Name, NewtypeDeclaration,
-    RelationDeclaration, RelationValue, Root, RootApplication, RustSurface, SchemaNode,
-    SchemaNodeData, SchemaNodePair, SchemaNodeValue, StreamDeclaration, StreamRelation,
+    ImplReference, ImportDeclaration, MethodParameter, MethodSignature,
+    MultiTypeReferenceProjection, Name, NewtypeDeclaration, RelationDeclaration, RelationValue,
+    Root, RootApplication, RustSurface, SchemaNode, SchemaNodeData, SchemaNodePair,
+    SchemaNodeValue, SingleTypeReferenceProjection, StreamDeclaration, StreamRelation,
     StructDeclaration, StructFieldMap, SymbolPath, SymbolPathPosition, TableName, TypeDeclaration,
-    TypeReference, Visibility,
+    TypeReference, ValueReferenceProjection, Visibility,
 };
 pub use source::{
     SchemaSource, SchemaSourceArtifact, SourceDeclaration, SourceDeclarationValue,

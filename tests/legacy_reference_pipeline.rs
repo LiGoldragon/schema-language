@@ -112,7 +112,7 @@ fn macro_reference_templates_accept_dotted_builtin_body() {
     };
     assert_eq!(
         declaration.reference,
-        TypeReference::Vector(Box::new(TypeReference::new("Topic")))
+        TypeReference::vector(TypeReference::new("Topic"))
     );
 }
 

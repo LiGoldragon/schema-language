@@ -415,20 +415,45 @@ Two rejected source forms are landed and witnessed as invariants:
 `DeclarationHead::from_parameterized` (`src/schema.rs`) and tested in
 `tests/generics.rs`, rejecting duplicate type parameters.
 
-### Remaining collapse: the semantic `TypeReference`
+### The semantic `TypeReference` is on the per-kind model
 
-The semantic `TypeReference` (`src/schema.rs`) still carries per-name variants
-`Vector`, `Map`, `Optional`, `ScopeOf`, and `FixedBytes` alongside the uniform
-`Application { head, arguments }`. Collapsing these to mirror the source kind
-partition, so lowering dispatches on kind and never on a name, is the remaining
-generic-collapse work. `schemas/root.schema` and the checked-in lowering tests
-still consume the per-name semantic variants, so the collapse moves the semantic
-type, its `NotaDecode`, `root.schema`, and lowering together.
+The semantic `TypeReference` (`src/schema.rs`) mirrors the source kind partition
+rather than one variant per builtin name. The per-name `Vector`, `Map`,
+`Optional`, `ScopeOf`, and `FixedBytes` variants are gone; in their place are
+`SingleTypeApplication { projection, argument }`, `MultiTypeApplication {
+projection, arguments }`, and `ValueApplication { projection, value }`, each
+carrying a closed projection — `SingleTypeReferenceProjection`
+(`Vector`/`Optional`/`ScopeOf`), `MultiTypeReferenceProjection` (`Map`), and
+`ValueReferenceProjection` (`Bytes`) — that names the within-kind lowering
+strategy. Lowering dispatches on kind and projection and never on a head string;
+the projection enums are the single authority shared by the source model
+(`SourceReference` applications, the generic-definition table), the substrate
+mirror (`CoreReference` in `src/core.rs`), and the semantic type, so there is one
+Vector/Optional/ScopeOf/Map/Bytes vocabulary rather than three parallel ones. A
+user-defined single-type alias such as `List` still lowers through the `Vector`
+projection by definition data; the head name is a `NameTable`/source concern, not
+a dispatch key. `schemas/root.schema` describes this partition (a `SingleType` /
+`MultiType` / `Value` application variant carrying a projection enum), and the
+machine `NotaEncode`/`NotaDecode` spells each projection by its canonical name so
+`(Vector T)`, `(Map K V)`, and `(Bytes N)` round-trip value-exact — the only
+canonical-spelling change from the old model is `(FixedBytes N)` becoming
+`(Bytes N)`.
 
-Vocabulary note: the semantic side names the fixed-width value kind `FixedBytes`
-while the source head and grammar name it `Bytes` with a width leaf, and the
-semantic side also keeps a separate unit `Bytes` scalar. Unifying the model
-should reconcile these names.
+The `CoreReference` substrate mirror was collapsed in the same move, so the
+stringless substrate and the semantic type stay aligned: changing
+`CoreReference`'s shape changes `CoreSchema` canonical bytes and therefore core
+hashes, but the lineage witnesses pin hash relationships (equality, inequality,
+rename- and order-stability), not absolute values, so they survive the reshape.
+
+Vocabulary resolution — `FixedBytes` versus `Bytes`: the model now spells the
+fixed-width value kind `Bytes`, matching the source head and grammar (the
+psyche-designed surface), and the `FixedBytes` name is retired everywhere. The
+dynamic-length bytes scalar remains the separate `TypeReference::Bytes` leaf. The
+two are distinguished by kind — a value application (`Bytes.N`, a width leaf)
+versus a scalar leaf (bare `Bytes`) — exactly as the grammar already
+distinguishes them by the presence of the width leaf. Fixed-width bytes is
+therefore the `Bytes` value generic applied to a width, not a special-cased
+variant name; the special case dissolves into the normal value-application case.
 
 ### Rename edit is landed
 
@@ -463,9 +488,9 @@ daemon persists it later and this crate invents no persistence of its own.
 - `schemas/root.schema` is the self-describing schema of the schema root type.
   It now uses the dotted source projection for composite references and remains
   active: `tests/lowering.rs`, `tests/operator_271_closed_claims.rs`, and the
-  `flake.nix` lint depend on it. It still mirrors the temporary semantic
-  `TypeReference` variants until the per-name semantic variants are collapsed
-  to the per-kind model.
+  `flake.nix` lint depend on it. It describes the collapsed per-kind
+  `TypeReference` partition (a `SingleType` / `MultiType` / `Value` application
+  variant carrying a projection enum), not the retired per-name variants.
 - `schemas/core.schema` is the builtin-macro-library schema. Its namespace
   declares a type named `BuiltinMacroLibrary`, the macro library, which is
   unrelated to the target stringless `CoreSchema` substrate. The earlier name
@@ -489,11 +514,11 @@ daemon persists it later and this crate invents no persistence of its own.
 - The dotted-everywhere source sweep (text projection) and the
   `CoreSchema`/`TrueSchema` data-model build are orthogonal and can proceed in
   parallel.
-- The per-name-to-per-kind generic collapse is done on the source side
-  (per-kind `SourceGenericDefinition` and `SourceReference`); the remaining work
-  collapses the semantic `TypeReference` per-name variants to mirror the kind
-  partition, touching the semantic type, `root.schema`, and lowering together.
-  The legacy reference-pipeline split is closed.
+- The per-name-to-per-kind generic collapse is done on both the source side
+  (per-kind `SourceGenericDefinition` and `SourceReference`) and the semantic
+  side (per-kind `TypeReference` and its `CoreReference` substrate mirror, with
+  the projection vocabulary shared across all three). The legacy
+  reference-pipeline split is closed.
 - Deterministic identifier and `NameTable` creation is OPEN and sequenced
   separately; it subsumes the narrower reload re-association problem. It is not an
   outright blocker: a provisional mechanism may be built now if it is marked

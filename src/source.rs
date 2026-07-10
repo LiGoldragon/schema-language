@@ -12,9 +12,10 @@ use nota::{
 use crate::{
     Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey,
     FieldDeclaration, ImplBlock, ImplCatalog, ImplReference, ImportDeclaration, MethodParameter,
-    MethodSignature, Name, NewtypeDeclaration, RelationDeclaration, RelationValue, ResolvedImport,
-    Root, RootApplication, SchemaEngine, SchemaError, SchemaIdentity, StreamDeclaration,
-    StreamRelation, StructDeclaration, TableName, TypeDeclaration, TypeReference,
+    MethodSignature, MultiTypeReferenceProjection, Name, NewtypeDeclaration, RelationDeclaration,
+    RelationValue, ResolvedImport, Root, RootApplication, SchemaEngine, SchemaError,
+    SchemaIdentity, SingleTypeReferenceProjection, StreamDeclaration, StreamRelation,
+    StructDeclaration, TableName, TypeDeclaration, TypeReference, ValueReferenceProjection,
     macros::{BlockDebug, SchemaBlockExt},
     schema::SchemaTree,
 };
@@ -3379,7 +3380,7 @@ pub enum SourceReference {
 )]
 pub struct SourceValueApplication {
     head: Name,
-    projection: SourceValueReferenceProjection,
+    projection: ValueReferenceProjection,
     field_name_pattern: SourceApplicationFieldNamePattern,
     value: SourceGenericValue,
 }
@@ -3387,7 +3388,7 @@ pub struct SourceValueApplication {
 impl SourceValueApplication {
     fn new(
         head: Name,
-        projection: SourceValueReferenceProjection,
+        projection: ValueReferenceProjection,
         field_name_pattern: SourceApplicationFieldNamePattern,
         value: SourceGenericValue,
     ) -> Self {
@@ -3411,7 +3412,7 @@ impl SourceValueApplication {
     }
 
     fn to_type_reference(&self) -> TypeReference {
-        self.projection.to_type_reference(self.value)
+        TypeReference::value_application(self.projection, self.value.unsigned_integer())
     }
 }
 
@@ -3429,7 +3430,7 @@ impl SourceValueApplication {
 )]
 pub struct SourceSingleTypeApplication {
     head: Name,
-    projection: SourceSingleTypeReferenceProjection,
+    projection: SingleTypeReferenceProjection,
     field_name_pattern: SourceApplicationFieldNamePattern,
     #[rkyv(omit_bounds)]
     argument: Box<SourceReference>,
@@ -3438,7 +3439,7 @@ pub struct SourceSingleTypeApplication {
 impl SourceSingleTypeApplication {
     fn new(
         head: Name,
-        projection: SourceSingleTypeReferenceProjection,
+        projection: SingleTypeReferenceProjection,
         field_name_pattern: SourceApplicationFieldNamePattern,
         argument: SourceReference,
     ) -> Self {
@@ -3463,8 +3464,7 @@ impl SourceSingleTypeApplication {
     }
 
     fn to_type_reference(&self) -> TypeReference {
-        self.projection
-            .to_type_reference(self.argument.to_type_reference())
+        TypeReference::single_type_application(self.projection, self.argument.to_type_reference())
     }
 
     fn resolve_reference_with<Resolver: SourceVariantResolver + ?Sized>(
@@ -3472,8 +3472,10 @@ impl SourceSingleTypeApplication {
         resolver: &Resolver,
         namespace: Option<&Name>,
     ) -> TypeReference {
-        self.projection
-            .to_type_reference(resolver.resolve_reference(namespace, &self.argument))
+        TypeReference::single_type_application(
+            self.projection,
+            resolver.resolve_reference(namespace, &self.argument),
+        )
     }
 }
 
@@ -3491,7 +3493,7 @@ impl SourceSingleTypeApplication {
 )]
 pub struct SourceMultiTypeApplication {
     head: Name,
-    projection: SourceMultiTypeReferenceProjection,
+    projection: MultiTypeReferenceProjection,
     field_name_pattern: SourceApplicationFieldNamePattern,
     #[rkyv(omit_bounds)]
     arguments: Vec<SourceReference>,
@@ -3500,7 +3502,7 @@ pub struct SourceMultiTypeApplication {
 impl SourceMultiTypeApplication {
     fn new(
         head: Name,
-        projection: SourceMultiTypeReferenceProjection,
+        projection: MultiTypeReferenceProjection,
         field_name_pattern: SourceApplicationFieldNamePattern,
         arguments: Vec<SourceReference>,
     ) -> Self {
@@ -3525,8 +3527,8 @@ impl SourceMultiTypeApplication {
     }
 
     fn to_type_reference(&self) -> TypeReference {
-        self.projection.to_type_reference(
-            &self.head,
+        TypeReference::multi_type_application(
+            self.projection,
             self.arguments
                 .iter()
                 .map(SourceReference::to_type_reference)
@@ -3539,8 +3541,8 @@ impl SourceMultiTypeApplication {
         resolver: &Resolver,
         namespace: Option<&Name>,
     ) -> TypeReference {
-        self.projection.to_type_reference(
-            &self.head,
+        TypeReference::multi_type_application(
+            self.projection,
             self.arguments
                 .iter()
                 .map(|argument| resolver.resolve_reference(namespace, argument))
@@ -3623,61 +3625,6 @@ impl SourceGenericValueKind {
     }
 }
 
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
-enum SourceValueReferenceProjection {
-    FixedBytes,
-}
-
-impl SourceValueReferenceProjection {
-    fn to_type_reference(self, value: SourceGenericValue) -> TypeReference {
-        match self {
-            Self::FixedBytes => TypeReference::FixedBytes(value.unsigned_integer()),
-        }
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
-enum SourceSingleTypeReferenceProjection {
-    Vector,
-    Optional,
-    ScopeOf,
-}
-
-impl SourceSingleTypeReferenceProjection {
-    fn to_type_reference(self, argument: TypeReference) -> TypeReference {
-        match self {
-            Self::Vector => TypeReference::Vector(Box::new(argument)),
-            Self::Optional => TypeReference::Optional(Box::new(argument)),
-            Self::ScopeOf => TypeReference::ScopeOf(Box::new(argument)),
-        }
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
-enum SourceMultiTypeReferenceProjection {
-    Map,
-}
-
-impl SourceMultiTypeReferenceProjection {
-    fn to_type_reference(self, head: &Name, arguments: Vec<TypeReference>) -> TypeReference {
-        match self {
-            Self::Map => {
-                if arguments.len() == 2 {
-                    let mut arguments = arguments.into_iter();
-                    return TypeReference::Map(
-                        Box::new(arguments.next().expect("argument count checked")),
-                        Box::new(arguments.next().expect("argument count checked")),
-                    );
-                }
-                TypeReference::Application {
-                    head: crate::ApplicationHead::Local(head.clone()),
-                    arguments,
-                }
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 struct SourceGenericDefinitions {
     definitions: &'static [SourceGenericDefinition],
@@ -3696,29 +3643,29 @@ impl SourceGenericDefinitions {
         static DEFINITIONS: [SourceGenericDefinition; 5] = [
             SourceGenericDefinition::single_type(
                 "Vector",
-                SourceSingleTypeReferenceProjection::Vector,
+                SingleTypeReferenceProjection::Vector,
                 SourceGenericFieldNamePattern::Suffix("vector"),
             ),
             SourceGenericDefinition::single_type(
                 "Optional",
-                SourceSingleTypeReferenceProjection::Optional,
+                SingleTypeReferenceProjection::Optional,
                 SourceGenericFieldNamePattern::Prefix("optional"),
             ),
             SourceGenericDefinition::single_type(
                 "ScopeOf",
-                SourceSingleTypeReferenceProjection::ScopeOf,
+                SingleTypeReferenceProjection::ScopeOf,
                 SourceGenericFieldNamePattern::Suffix("scope"),
             ),
             SourceGenericDefinition::multi_type(
                 "Map",
                 2,
-                SourceMultiTypeReferenceProjection::Map,
+                MultiTypeReferenceProjection::Map,
                 SourceGenericFieldNamePattern::ValueByKey,
             ),
             SourceGenericDefinition::value(
                 "Bytes",
                 SourceGenericValueKind::UnsignedInteger,
-                SourceValueReferenceProjection::FixedBytes,
+                ValueReferenceProjection::Bytes,
                 SourceGenericFieldNamePattern::Constant("bytes"),
             ),
         ];
@@ -3738,7 +3685,7 @@ impl SourceGenericDefinitions {
 
     fn value_definition(
         &self,
-        projection: SourceValueReferenceProjection,
+        projection: ValueReferenceProjection,
     ) -> Option<SourceGenericDefinition> {
         self.definitions()
             .iter()
@@ -3748,7 +3695,7 @@ impl SourceGenericDefinitions {
 
     fn single_type_definition(
         &self,
-        projection: SourceSingleTypeReferenceProjection,
+        projection: SingleTypeReferenceProjection,
     ) -> Option<SourceGenericDefinition> {
         self.definitions()
             .iter()
@@ -3758,7 +3705,7 @@ impl SourceGenericDefinitions {
 
     fn multi_type_definition(
         &self,
-        projection: SourceMultiTypeReferenceProjection,
+        projection: MultiTypeReferenceProjection,
     ) -> Option<SourceGenericDefinition> {
         self.definitions()
             .iter()
@@ -3786,18 +3733,18 @@ impl SourceGenericDefinitionKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SourceValueGenericDefinition {
     value_kind: SourceGenericValueKind,
-    projection: SourceValueReferenceProjection,
+    projection: ValueReferenceProjection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SourceSingleTypeGenericDefinition {
-    projection: SourceSingleTypeReferenceProjection,
+    projection: SingleTypeReferenceProjection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SourceMultiTypeGenericDefinition {
     argument_count: usize,
-    projection: SourceMultiTypeReferenceProjection,
+    projection: MultiTypeReferenceProjection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3830,7 +3777,7 @@ impl SourceGenericDefinition {
     const fn value(
         name: &'static str,
         value_kind: SourceGenericValueKind,
-        projection: SourceValueReferenceProjection,
+        projection: ValueReferenceProjection,
         field_name_pattern: SourceGenericFieldNamePattern,
     ) -> Self {
         Self {
@@ -3845,7 +3792,7 @@ impl SourceGenericDefinition {
 
     const fn single_type(
         name: &'static str,
-        projection: SourceSingleTypeReferenceProjection,
+        projection: SingleTypeReferenceProjection,
         field_name_pattern: SourceGenericFieldNamePattern,
     ) -> Self {
         Self {
@@ -3860,7 +3807,7 @@ impl SourceGenericDefinition {
     const fn multi_type(
         name: &'static str,
         argument_count: usize,
-        projection: SourceMultiTypeReferenceProjection,
+        projection: MultiTypeReferenceProjection,
         field_name_pattern: SourceGenericFieldNamePattern,
     ) -> Self {
         Self {
@@ -3965,24 +3912,21 @@ impl SourceGenericDefinition {
         })
     }
 
-    fn matches_value_projection(self, projection: SourceValueReferenceProjection) -> bool {
+    fn matches_value_projection(self, projection: ValueReferenceProjection) -> bool {
         matches!(
             self.kind,
             SourceGenericDefinitionKind::Value(definition) if definition.projection == projection
         )
     }
 
-    fn matches_single_type_projection(
-        self,
-        projection: SourceSingleTypeReferenceProjection,
-    ) -> bool {
+    fn matches_single_type_projection(self, projection: SingleTypeReferenceProjection) -> bool {
         matches!(
             self.kind,
             SourceGenericDefinitionKind::SingleType(definition) if definition.projection == projection
         )
     }
 
-    fn matches_multi_type_projection(self, projection: SourceMultiTypeReferenceProjection) -> bool {
+    fn matches_multi_type_projection(self, projection: MultiTypeReferenceProjection) -> bool {
         matches!(
             self.kind,
             SourceGenericDefinitionKind::MultiType(definition) if definition.projection == projection
@@ -4205,30 +4149,27 @@ impl SourceReference {
                     .scalar_name()
                     .expect("a scalar reference exposes its canonical name"),
             )),
-            TypeReference::FixedBytes(width) => definitions
-                .value_definition(SourceValueReferenceProjection::FixedBytes)
-                .expect("fixed bytes definition is installed")
-                .source_value_application(SourceGenericValue::UnsignedInteger(*width)),
             TypeReference::Plain(name) => Self::Plain(name.clone()),
-            TypeReference::Vector(reference) => definitions
-                .single_type_definition(SourceSingleTypeReferenceProjection::Vector)
-                .expect("vector definition is installed")
-                .source_single_type_application(Self::from_type_reference(reference)),
-            TypeReference::Map(key, value) => definitions
-                .multi_type_definition(SourceMultiTypeReferenceProjection::Map)
-                .expect("map definition is installed")
-                .source_multi_type_application(vec![
-                    Self::from_type_reference(key),
-                    Self::from_type_reference(value),
-                ]),
-            TypeReference::Optional(reference) => definitions
-                .single_type_definition(SourceSingleTypeReferenceProjection::Optional)
-                .expect("optional definition is installed")
-                .source_single_type_application(Self::from_type_reference(reference)),
-            TypeReference::ScopeOf(reference) => definitions
-                .single_type_definition(SourceSingleTypeReferenceProjection::ScopeOf)
-                .expect("scope definition is installed")
-                .source_single_type_application(Self::from_type_reference(reference)),
+            TypeReference::SingleTypeApplication {
+                projection,
+                argument,
+            } => definitions
+                .single_type_definition(*projection)
+                .expect("single-type definition is installed")
+                .source_single_type_application(Self::from_type_reference(argument)),
+            TypeReference::MultiTypeApplication {
+                projection,
+                arguments,
+            } => definitions
+                .multi_type_definition(*projection)
+                .expect("multi-type definition is installed")
+                .source_multi_type_application(
+                    arguments.iter().map(Self::from_type_reference).collect(),
+                ),
+            TypeReference::ValueApplication { projection, value } => definitions
+                .value_definition(*projection)
+                .expect("value definition is installed")
+                .source_value_application(SourceGenericValue::UnsignedInteger(*value)),
             TypeReference::Application { head, arguments } => Self::Application {
                 head: head.name().clone(),
                 arguments: arguments.iter().map(Self::from_type_reference).collect(),
@@ -4266,22 +4207,22 @@ impl SourceReference {
         match reference {
             nota::TypeReference::Named(name) => Self::Plain(Name::new(*name)),
             nota::TypeReference::Vector(element) => definitions
-                .single_type_definition(SourceSingleTypeReferenceProjection::Vector)
+                .single_type_definition(SingleTypeReferenceProjection::Vector)
                 .expect("vector definition is installed")
                 .source_single_type_application(Self::from_instance_reference(element)),
             nota::TypeReference::Optional(inner) => definitions
-                .single_type_definition(SourceSingleTypeReferenceProjection::Optional)
+                .single_type_definition(SingleTypeReferenceProjection::Optional)
                 .expect("optional definition is installed")
                 .source_single_type_application(Self::from_instance_reference(inner)),
             nota::TypeReference::Map(key, value) => definitions
-                .multi_type_definition(SourceMultiTypeReferenceProjection::Map)
+                .multi_type_definition(MultiTypeReferenceProjection::Map)
                 .expect("map definition is installed")
                 .source_multi_type_application(vec![
                     Self::from_instance_reference(key),
                     Self::from_instance_reference(value),
                 ]),
             nota::TypeReference::FixedBytes(width) => definitions
-                .value_definition(SourceValueReferenceProjection::FixedBytes)
+                .value_definition(ValueReferenceProjection::Bytes)
                 .expect("fixed bytes definition is installed")
                 .source_value_application(SourceGenericValue::UnsignedInteger(*width as u64)),
         }
@@ -4351,7 +4292,7 @@ mod source_reference_tests {
     fn single_type_alias_definition_projects_vector_by_definition_data() {
         let reference = SourceGenericDefinition::single_type(
             "List",
-            SourceSingleTypeReferenceProjection::Vector,
+            SingleTypeReferenceProjection::Vector,
             SourceGenericFieldNamePattern::Suffix("list"),
         )
         .lower(vec![SourceReference::Plain(Name::new("Topic"))])
@@ -4361,7 +4302,7 @@ mod source_reference_tests {
         assert_eq!(reference.derived_field_name(), Name::new("topic_list"));
         assert_eq!(
             reference.to_type_reference(),
-            TypeReference::Vector(Box::new(TypeReference::new("Topic"))),
+            TypeReference::vector(TypeReference::new("Topic")),
         );
     }
 
@@ -4369,7 +4310,7 @@ mod source_reference_tests {
     fn single_type_alias_definition_projects_optional_by_definition_data() {
         let reference = SourceGenericDefinition::single_type(
             "Maybe",
-            SourceSingleTypeReferenceProjection::Optional,
+            SingleTypeReferenceProjection::Optional,
             SourceGenericFieldNamePattern::Prefix("maybe"),
         )
         .lower(vec![SourceReference::Plain(Name::new("Event"))])
@@ -4379,7 +4320,7 @@ mod source_reference_tests {
         assert_eq!(reference.derived_field_name(), Name::new("maybe_event"));
         assert_eq!(
             reference.to_type_reference(),
-            TypeReference::Optional(Box::new(TypeReference::new("Event"))),
+            TypeReference::optional(TypeReference::new("Event")),
         );
     }
 }

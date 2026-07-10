@@ -29,7 +29,8 @@ use std::path::PathBuf;
 use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{
     ApplicationHead, ImportResolver, MacroContext, Name, Root, SchemaEngine, SchemaError,
-    SchemaIdentity, SchemaSourceArtifact, TypeDeclaration, TypeReference,
+    SchemaIdentity, SchemaSourceArtifact, SingleTypeReferenceProjection, TypeDeclaration,
+    TypeReference,
 };
 
 fn lower(namespace: &str) -> schema_language::TrueSchema {
@@ -108,18 +109,15 @@ fn builtin_heads_still_lower_to_their_variants() {
     );
     assert_eq!(
         single_reference(&schema, "VectorField"),
-        TypeReference::Vector(Box::new(TypeReference::new("Value")))
+        TypeReference::vector(TypeReference::new("Value"))
     );
     assert_eq!(
         single_reference(&schema, "OptionalField"),
-        TypeReference::Optional(Box::new(TypeReference::new("Value")))
+        TypeReference::optional(TypeReference::new("Value"))
     );
     assert_eq!(
         single_reference(&schema, "MapField"),
-        TypeReference::Map(
-            Box::new(TypeReference::new("Key")),
-            Box::new(TypeReference::new("Value")),
-        )
+        TypeReference::map(TypeReference::new("Key"), TypeReference::new("Value"))
     );
 }
 
@@ -131,7 +129,13 @@ fn builtin_head_wins_over_broad_application_form() {
     let schema = lower("Value String Field Vector.Value");
     let reference = single_reference(&schema, "Field");
     assert!(
-        matches!(reference, TypeReference::Vector(_)),
+        matches!(
+            reference,
+            TypeReference::SingleTypeApplication {
+                projection: SingleTypeReferenceProjection::Vector,
+                ..
+            }
+        ),
         "a built-in head must win over the application form, got {reference:?}",
     );
     assert!(
@@ -147,7 +151,13 @@ fn dropped_vec_alias_no_longer_lowers_to_vector() {
     let schema = lower("Service String Cluster Vec.Service");
     let reference = single_reference(&schema, "Cluster");
     assert!(
-        !matches!(reference, TypeReference::Vector(_)),
+        !matches!(
+            reference,
+            TypeReference::SingleTypeApplication {
+                projection: SingleTypeReferenceProjection::Vector,
+                ..
+            }
+        ),
         "the dropped `Vec` alias must not lower to a Vector",
     );
     assert_eq!(
@@ -340,10 +350,7 @@ fn map_grouped_payload_lowers_and_dot_chain_arity_fails() {
     let schema = lower("Key String Value String Holder Map.(Key Value)");
     assert_eq!(
         single_reference(&schema, "Holder"),
-        TypeReference::Map(
-            Box::new(TypeReference::new("Key")),
-            Box::new(TypeReference::new("Value")),
-        ),
+        TypeReference::map(TypeReference::new("Key"), TypeReference::new("Value")),
     );
 
     let error = try_lower("Key String Value String Holder Map.Key.Value")

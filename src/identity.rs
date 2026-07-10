@@ -447,14 +447,14 @@ impl<'schema> ClosureWalk<'schema> {
             | TypeReference::Boolean
             | TypeReference::Path
             | TypeReference::Bytes
-            | TypeReference::FixedBytes(_) => Ok(()),
+            | TypeReference::ValueApplication { .. } => Ok(()),
             TypeReference::Plain(name) => self.visit_name(name),
-            TypeReference::Vector(inner)
-            | TypeReference::Optional(inner)
-            | TypeReference::ScopeOf(inner) => self.visit_reference(inner),
-            TypeReference::Map(key, value) => {
-                self.visit_reference(key)?;
-                self.visit_reference(value)
+            TypeReference::SingleTypeApplication { argument, .. } => self.visit_reference(argument),
+            TypeReference::MultiTypeApplication { arguments, .. } => {
+                for argument in arguments {
+                    self.visit_reference(argument)?;
+                }
+                Ok(())
             }
             // A generic application `(Foo A B …)` reaches both its head and
             // each argument. Visiting the head name pulls a cross-crate

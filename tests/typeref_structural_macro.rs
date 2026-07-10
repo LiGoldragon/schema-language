@@ -47,7 +47,7 @@ fn scalar_leaves_round_trip_through_their_bare_atoms() {
 
 #[test]
 fn fixed_bytes_round_trips_through_the_bytes_definition() {
-    assert_round_trip("Bytes.32", TypeReference::FixedBytes(32));
+    assert_round_trip("Bytes.32", TypeReference::fixed_width_bytes(32));
 }
 
 #[test]
@@ -57,18 +57,9 @@ fn plain_name_round_trips_through_a_bare_pascal_case_atom() {
 
 #[test]
 fn unary_generic_definitions_round_trip_through_dotted_forms() {
-    assert_round_trip(
-        "Vector.Topic",
-        TypeReference::Vector(Box::new(plain("Topic"))),
-    );
-    assert_round_trip(
-        "Optional.Topic",
-        TypeReference::Optional(Box::new(plain("Topic"))),
-    );
-    assert_round_trip(
-        "ScopeOf.Topic",
-        TypeReference::ScopeOf(Box::new(plain("Topic"))),
-    );
+    assert_round_trip("Vector.Topic", TypeReference::vector(plain("Topic")));
+    assert_round_trip("Optional.Topic", TypeReference::optional(plain("Topic")));
+    assert_round_trip("ScopeOf.Topic", TypeReference::scope_of(plain("Topic")));
 }
 
 #[test]
@@ -78,10 +69,7 @@ fn map_lowers_through_grouped_positional_payload() {
             "Topic String RecordIdentifier String Holder Map.(Topic RecordIdentifier)",
             "Holder"
         ),
-        TypeReference::Map(
-            Box::new(plain("Topic")),
-            Box::new(plain("RecordIdentifier")),
-        ),
+        TypeReference::map(plain("Topic"), plain("RecordIdentifier")),
     );
 }
 
@@ -89,17 +77,14 @@ fn map_lowers_through_grouped_positional_payload() {
 fn nested_dotted_forms_recurse() {
     assert_round_trip(
         "Vector.Optional.Topic",
-        TypeReference::Vector(Box::new(TypeReference::Optional(Box::new(plain("Topic"))))),
+        TypeReference::vector(TypeReference::optional(plain("Topic"))),
     );
     assert_eq!(
         lower_reference(
             "Topic String Entry String Holder Map.(Topic Vector.Entry)",
             "Holder"
         ),
-        TypeReference::Map(
-            Box::new(plain("Topic")),
-            Box::new(TypeReference::Vector(Box::new(plain("Entry")))),
-        ),
+        TypeReference::map(plain("Topic"), TypeReference::vector(plain("Entry"))),
     );
 }
 
@@ -107,10 +92,7 @@ fn nested_dotted_forms_recurse() {
 fn scalar_leaf_nests_inside_a_grouped_generic_form() {
     assert_eq!(
         lower_reference("Holder Map.(String Boolean)", "Holder"),
-        TypeReference::Map(
-            Box::new(TypeReference::String),
-            Box::new(TypeReference::Boolean),
-        ),
+        TypeReference::map(TypeReference::String, TypeReference::Boolean),
     );
 }
 

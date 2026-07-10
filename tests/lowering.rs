@@ -115,7 +115,7 @@ fn bare_reference_declarations_lower_to_newtypes() {
     };
     assert_eq!(
         topics.reference,
-        TypeReference::Vector(Box::new(TypeReference::new("Topic")))
+        TypeReference::vector(TypeReference::new("Topic"))
     );
 }
 
@@ -190,7 +190,7 @@ fn fixed_size_bytes_lowers_to_a_fixed_bytes_reference() {
     let TypeDeclaration::Newtype(digest) = declaration else {
         panic!("Digest should be a newtype over fixed-size Bytes, got {declaration:?}");
     };
-    assert_eq!(digest.reference, TypeReference::FixedBytes(32));
+    assert_eq!(digest.reference, TypeReference::fixed_width_bytes(32));
 }
 
 #[test]
@@ -915,7 +915,7 @@ fn star_shorthand_derives_fields_and_data_variant_payloads_from_real_schema() {
     assert_eq!(query.fields[0].name.as_str(), "topics");
     assert_eq!(
         query.fields[1].reference,
-        TypeReference::Optional(Box::new(TypeReference::Integer))
+        TypeReference::optional(TypeReference::Integer)
     );
 
     let TypeDeclaration::Enum(some_enum) = schema.type_named("SomeEnum").expect("some enum type")

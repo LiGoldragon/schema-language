@@ -85,8 +85,8 @@ fn reheaded_source_declarations_round_trip_help_forms() {
     let domains = SourceDeclaration::new(
         Name::new("Domains"),
         Some(SourceDeclarationValue::Reference(
-            SourceReference::from_type_reference(&TypeReference::Vector(Box::new(
-                TypeReference::new("Domain"),
+            SourceReference::from_type_reference(&TypeReference::vector(TypeReference::new(
+                "Domain",
             ))),
         )),
     );

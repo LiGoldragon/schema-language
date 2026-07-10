@@ -6,7 +6,10 @@
 //! declared-name shape, while reserved scalar names lower to scalar references
 //! instead of pretending to be user namespace types.
 
-use schema_language::{Name, SchemaEngine, SchemaIdentity, TypeDeclaration, TypeReference};
+use schema_language::{
+    Name, SchemaEngine, SchemaIdentity, SingleTypeReferenceProjection, TypeDeclaration,
+    TypeReference,
+};
 
 fn lower(source: &str) -> schema_language::TrueSchema {
     SchemaEngine::default()
@@ -44,7 +47,7 @@ fn vec_field_lowers_to_vector_reference() {
     let schema = lower(&roots("Service String Cluster Vector.Service"));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        TypeReference::Vector(Box::new(TypeReference::new("Service")))
+        TypeReference::vector(TypeReference::new("Service"))
     );
 }
 
@@ -70,22 +73,19 @@ fn scalar_references_nest_inside_collections() {
     let fields = struct_fields(&schema, "Query");
     assert_eq!(
         fields[0].reference,
-        TypeReference::Optional(Box::new(TypeReference::Integer))
+        TypeReference::optional(TypeReference::Integer)
     );
     assert_eq!(
         fields[1].reference,
-        TypeReference::Vector(Box::new(TypeReference::String))
+        TypeReference::vector(TypeReference::String)
     );
     assert_eq!(
         fields[2].reference,
-        TypeReference::Map(
-            Box::new(TypeReference::String),
-            Box::new(TypeReference::Boolean)
-        )
+        TypeReference::map(TypeReference::String, TypeReference::Boolean)
     );
     assert_eq!(
         fields[3].reference,
-        TypeReference::Optional(Box::new(TypeReference::Path))
+        TypeReference::optional(TypeReference::Path)
     );
 }
 
@@ -114,11 +114,11 @@ fn explicit_structural_field_roles_lower_recursively() {
     // The inline-minted types carry the collection/option reference.
     assert_eq!(
         single_reference(&schema, "Topics"),
-        TypeReference::Vector(Box::new(TypeReference::new("Topic")))
+        TypeReference::vector(TypeReference::new("Topic"))
     );
     assert_eq!(
         single_reference(&schema, "Limit"),
-        TypeReference::Optional(Box::new(TypeReference::Integer))
+        TypeReference::optional(TypeReference::Integer)
     );
 }
 
@@ -132,7 +132,7 @@ fn implicit_composite_field_lowers_directly() {
     assert_eq!(fields[0].name.as_str(), "topic_vector");
     assert_eq!(
         fields[0].reference,
-        TypeReference::Vector(Box::new(TypeReference::new("Topic")))
+        TypeReference::vector(TypeReference::new("Topic"))
     );
     assert!(
         schema.type_named("Topics").is_none(),
@@ -148,7 +148,7 @@ fn pascal_case_dot_composite_field_can_match_derived_composite_name() {
 
     assert_eq!(
         single_reference(&schema, "OptionalAntecedent"),
-        TypeReference::Optional(Box::new(TypeReference::new("Antecedent")))
+        TypeReference::optional(TypeReference::new("Antecedent"))
     );
     assert_eq!(
         single_reference(&schema, "Quote"),
@@ -194,9 +194,9 @@ fn key_value_field_lowers_to_map_reference() {
     ));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        TypeReference::Map(
-            Box::new(TypeReference::new("NodeName")),
-            Box::new(TypeReference::new("NodeProposal")),
+        TypeReference::map(
+            TypeReference::new("NodeName"),
+            TypeReference::new("NodeProposal")
         )
     );
 }
@@ -206,7 +206,7 @@ fn option_field_lowers_to_optional_reference() {
     let schema = lower(&roots("Cache String Cluster Optional.Cache"));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        TypeReference::Optional(Box::new(TypeReference::new("Cache")))
+        TypeReference::optional(TypeReference::new("Cache"))
     );
 }
 
@@ -256,9 +256,21 @@ fn collection_field_and_plain_field_coexist_in_one_struct() {
     assert_eq!(fields[0].name.as_str(), "trust");
     assert_eq!(fields[0].reference, TypeReference::new("Trust"));
     assert_eq!(fields[1].name.as_str(), "service_vector");
-    assert!(matches!(fields[1].reference, TypeReference::Vector(_)));
+    assert!(matches!(
+        fields[1].reference,
+        TypeReference::SingleTypeApplication {
+            projection: SingleTypeReferenceProjection::Vector,
+            ..
+        }
+    ));
     assert_eq!(fields[2].name.as_str(), "optional_trust");
-    assert!(matches!(fields[2].reference, TypeReference::Optional(_)));
+    assert!(matches!(
+        fields[2].reference,
+        TypeReference::SingleTypeApplication {
+            projection: SingleTypeReferenceProjection::Optional,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -269,11 +281,9 @@ fn nested_collections_lower_recursively() {
     ));
     assert_eq!(
         single_reference(&schema, "Nest"),
-        TypeReference::Map(
-            Box::new(TypeReference::new("Key")),
-            Box::new(TypeReference::Vector(Box::new(TypeReference::Optional(
-                Box::new(TypeReference::new("Leaf"))
-            )))),
+        TypeReference::map(
+            TypeReference::new("Key"),
+            TypeReference::vector(TypeReference::optional(TypeReference::new("Leaf"))),
         )
     );
 }
@@ -296,9 +306,9 @@ fn collection_payload_lowers_in_an_output_variant() {
     assert_eq!(payload, &TypeReference::new("ProjectedPayload"));
     assert_eq!(
         single_reference(&schema, "ProjectedPayload"),
-        TypeReference::Map(
-            Box::new(TypeReference::new("NodeName")),
-            Box::new(TypeReference::new("NodeConfig")),
+        TypeReference::map(
+            TypeReference::new("NodeName"),
+            TypeReference::new("NodeConfig")
         )
     );
 }
@@ -314,7 +324,7 @@ fn non_builtin_pascal_head_lowers_to_application() {
         single_reference(&schema, "Bad"),
         TypeReference::Application {
             head: schema_language::ApplicationHead::Local(schema_language::Name::new("HashSet")),
-            arguments: vec![TypeReference::Vector(Box::new(TypeReference::new("Leaf")))],
+            arguments: vec![TypeReference::vector(TypeReference::new("Leaf"))],
         }
     );
 }

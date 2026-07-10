@@ -64,9 +64,11 @@ use crate::{
     resolution::{ImportSource, ResolvedImport},
     schema::{
         ApplicationHead, Declaration, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey,
-        FieldDeclaration, ImplBlock, ImplCatalog, ImportDeclaration, Name, NewtypeDeclaration,
-        RelationDeclaration, RelationValue, Root, RootApplication, SchemaTree, StreamDeclaration,
-        StreamRelation, StructDeclaration, TableName, TypeDeclaration, TypeReference, Visibility,
+        FieldDeclaration, ImplBlock, ImplCatalog, ImportDeclaration, MultiTypeReferenceProjection,
+        Name, NewtypeDeclaration, RelationDeclaration, RelationValue, Root, RootApplication,
+        SchemaTree, SingleTypeReferenceProjection, StreamDeclaration, StreamRelation,
+        StructDeclaration, TableName, TypeDeclaration, TypeReference, ValueReferenceProjection,
+        Visibility,
     },
 };
 
@@ -842,10 +844,12 @@ impl CoreImplBlock {
     }
 }
 
-/// A type at a reference position in the substrate, mirroring the current
-/// per-name [`TypeReference`] variants one-for-one (the per-kind collapse is
-/// separate, tracked work). Scalar leaves and the fixed-bytes width are
-/// structure; `Plain` and local application heads are identifier-addressed.
+/// A type at a reference position in the substrate, mirroring the collapsed
+/// per-kind [`TypeReference`] partition one-for-one. Scalar leaves and the
+/// value/const width are structure, and each generic application carries the
+/// closed projection that names its lowering strategy — so the substrate
+/// dispatches on kind and projection, never on a head name. `Plain` and local
+/// application heads are identifier-addressed, keeping the substrate stringless.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
@@ -864,15 +868,21 @@ pub enum CoreReference {
     Boolean,
     Path,
     Bytes,
-    FixedBytes(u64),
     Plain(NominalIdentifier),
-    Vector(#[rkyv(omit_bounds)] Box<CoreReference>),
-    Map(
-        #[rkyv(omit_bounds)] Box<CoreReference>,
-        #[rkyv(omit_bounds)] Box<CoreReference>,
-    ),
-    Optional(#[rkyv(omit_bounds)] Box<CoreReference>),
-    ScopeOf(#[rkyv(omit_bounds)] Box<CoreReference>),
+    SingleTypeApplication {
+        projection: SingleTypeReferenceProjection,
+        #[rkyv(omit_bounds)]
+        argument: Box<CoreReference>,
+    },
+    MultiTypeApplication {
+        projection: MultiTypeReferenceProjection,
+        #[rkyv(omit_bounds)]
+        arguments: Vec<CoreReference>,
+    },
+    ValueApplication {
+        projection: ValueReferenceProjection,
+        value: u64,
+    },
     Application {
         head: CoreApplicationHead,
         #[rkyv(omit_bounds)]
@@ -888,21 +898,28 @@ impl CoreReference {
             TypeReference::Boolean => Self::Boolean,
             TypeReference::Path => Self::Path,
             TypeReference::Bytes => Self::Bytes,
-            TypeReference::FixedBytes(width) => Self::FixedBytes(*width),
             TypeReference::Plain(name) => Self::Plain(harvest.declare(DeclarationKind::Type, name)),
-            TypeReference::Vector(inner) => {
-                Self::Vector(Box::new(Self::from_reference(inner, harvest)))
-            }
-            TypeReference::Map(key, value) => Self::Map(
-                Box::new(Self::from_reference(key, harvest)),
-                Box::new(Self::from_reference(value, harvest)),
-            ),
-            TypeReference::Optional(inner) => {
-                Self::Optional(Box::new(Self::from_reference(inner, harvest)))
-            }
-            TypeReference::ScopeOf(inner) => {
-                Self::ScopeOf(Box::new(Self::from_reference(inner, harvest)))
-            }
+            TypeReference::SingleTypeApplication {
+                projection,
+                argument,
+            } => Self::SingleTypeApplication {
+                projection: *projection,
+                argument: Box::new(Self::from_reference(argument, harvest)),
+            },
+            TypeReference::MultiTypeApplication {
+                projection,
+                arguments,
+            } => Self::MultiTypeApplication {
+                projection: *projection,
+                arguments: arguments
+                    .iter()
+                    .map(|argument| Self::from_reference(argument, harvest))
+                    .collect(),
+            },
+            TypeReference::ValueApplication { projection, value } => Self::ValueApplication {
+                projection: *projection,
+                value: *value,
+            },
             TypeReference::Application { head, arguments } => Self::Application {
                 head: CoreApplicationHead::from_head(head, harvest),
                 arguments: arguments
@@ -920,17 +937,26 @@ impl CoreReference {
             Self::Boolean => TypeReference::Boolean,
             Self::Path => TypeReference::Path,
             Self::Bytes => TypeReference::Bytes,
-            Self::FixedBytes(width) => TypeReference::FixedBytes(*width),
             Self::Plain(identifier) => {
                 TypeReference::Plain(names.projected_name(identifier)?.clone())
             }
-            Self::Vector(inner) => TypeReference::Vector(Box::new(inner.project(names)?)),
-            Self::Map(key, value) => TypeReference::Map(
-                Box::new(key.project(names)?),
-                Box::new(value.project(names)?),
+            Self::SingleTypeApplication {
+                projection,
+                argument,
+            } => TypeReference::single_type_application(*projection, argument.project(names)?),
+            Self::MultiTypeApplication {
+                projection,
+                arguments,
+            } => TypeReference::multi_type_application(
+                *projection,
+                arguments
+                    .iter()
+                    .map(|argument| argument.project(names))
+                    .collect::<Result<_, _>>()?,
             ),
-            Self::Optional(inner) => TypeReference::Optional(Box::new(inner.project(names)?)),
-            Self::ScopeOf(inner) => TypeReference::ScopeOf(Box::new(inner.project(names)?)),
+            Self::ValueApplication { projection, value } => {
+                TypeReference::value_application(*projection, *value)
+            }
             Self::Application { head, arguments } => TypeReference::Application {
                 head: head.project(names)?,
                 arguments: arguments

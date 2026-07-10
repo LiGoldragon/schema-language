@@ -1747,7 +1747,7 @@ impl<'template> MacroExpansionField<'template> {
         if self.object.demote_to_string().is_none() {
             let reference = self.object.type_reference(registry, context)?;
             return Ok(FieldDeclaration {
-                name: Self::derived_name_for_reference(&reference),
+                name: reference.derived_field_name(),
                 reference,
             });
         }
@@ -1820,7 +1820,7 @@ impl<'template> MacroExpansionField<'template> {
                 found: format!("{field_name}.<reference>"),
             });
         }
-        let derived = Self::derived_name_for_reference(&reference);
+        let derived = reference.derived_field_name();
         if name.field_name() == derived.as_str() {
             return Err(SchemaError::RedundantExplicitFieldRole {
                 found: format!("{field_name}.<reference>"),
@@ -1875,42 +1875,6 @@ impl<'template> MacroExpansionField<'template> {
                         .next()
                         .is_some_and(|character| character.is_ascii_lowercase())
                 })
-    }
-
-    fn derived_name_for_reference(reference: &TypeReference) -> Name {
-        match reference {
-            TypeReference::String => Name::new("string"),
-            TypeReference::Integer => Name::new("integer"),
-            TypeReference::Boolean => Name::new("boolean"),
-            TypeReference::Path => Name::new("path"),
-            TypeReference::Bytes => Name::new("bytes"),
-            TypeReference::FixedBytes(_) => Name::new("bytes"),
-            TypeReference::Plain(name) => Name::new(name.field_name()),
-            TypeReference::Vector(inner) => Name::new(format!(
-                "{}_vector",
-                Self::derived_name_for_reference(inner)
-            )),
-            TypeReference::Map(key, value) => Name::new(format!(
-                "{}_by_{}",
-                Self::derived_name_for_reference(value),
-                Self::derived_name_for_reference(key)
-            )),
-            TypeReference::Optional(inner) => Name::new(format!(
-                "optional_{}",
-                Self::derived_name_for_reference(inner)
-            )),
-            TypeReference::ScopeOf(inner) => {
-                Name::new(format!("{}_scope", Self::derived_name_for_reference(inner)))
-            }
-            TypeReference::Application { head, arguments } => {
-                let mut derived = Name::new(head.name().field_name()).as_str().to_owned();
-                for argument in arguments {
-                    derived.push('_');
-                    derived.push_str(Self::derived_name_for_reference(argument).as_str());
-                }
-                Name::new(derived)
-            }
-        }
     }
 }
 

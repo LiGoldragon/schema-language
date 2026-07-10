@@ -497,7 +497,7 @@ fn design_example_user_declared_macros_extend_structural_and_named_slots() {
     };
     assert_eq!(
         topics.reference,
-        TypeReference::Vector(Box::new(TypeReference::new("Topic"))),
+        TypeReference::vector(TypeReference::new("Topic")),
     );
 }
 

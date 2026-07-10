@@ -17,7 +17,8 @@
 
 use schema_language::{
     DeclarationKind, DefaultValue, FieldMigration, Name, SchemaEdit, SchemaEditApplication,
-    SchemaEngine, SchemaError, SchemaIdentity, TypeDeclaration, TypeReference, UpgradeObject,
+    SchemaEngine, SchemaError, SchemaIdentity, SingleTypeReferenceProjection, TypeDeclaration,
+    TypeReference, UpgradeObject,
 };
 
 fn entry_schema_source() -> &'static str {
@@ -92,7 +93,7 @@ fn change_field_type_swaps_topic_to_vector_with_wrap_singleton() {
     let edit = SchemaEdit::change_field_type(
         "Entry",
         "topic",
-        TypeReference::Vector(Box::new(TypeReference::Plain(Name::new("Topic")))),
+        TypeReference::vector(TypeReference::Plain(Name::new("Topic"))),
         FieldMigration::WrapSingleton,
     );
 
@@ -110,7 +111,10 @@ fn change_field_type_swaps_topic_to_vector_with_wrap_singleton() {
         .find(|field| field.name.as_str() == "topic")
         .expect("topic field present");
     match &topic.reference {
-        TypeReference::Vector(inner) => match inner.as_ref() {
+        TypeReference::SingleTypeApplication {
+            projection: SingleTypeReferenceProjection::Vector,
+            argument,
+        } => match argument.as_ref() {
             TypeReference::Plain(name) => assert_eq!(name.as_str(), "Topic"),
             other => panic!("expected Vector<Topic>, found Vector<{other:?}>"),
         },
@@ -173,7 +177,7 @@ fn upgrade_object_chains_edits_and_stamps_next_identity() {
             SchemaEdit::change_field_type(
                 "Entry",
                 "topic",
-                TypeReference::Vector(Box::new(TypeReference::Plain(Name::new("Topic")))),
+                TypeReference::vector(TypeReference::Plain(Name::new("Topic"))),
                 FieldMigration::WrapSingleton,
             ),
         ],

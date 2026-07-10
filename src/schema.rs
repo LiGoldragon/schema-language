@@ -886,7 +886,13 @@ impl SchemaTree {
     fn verify_enum_arities(&self, declaration: &EnumDeclaration) -> Result<(), SchemaError> {
         for variant in &declaration.variants {
             if let Some(payload) = &variant.payload {
-                if matches!(payload, TypeReference::Optional(_)) {
+                if matches!(
+                    payload,
+                    TypeReference::SingleTypeApplication {
+                        projection: SingleTypeReferenceProjection::Optional,
+                        ..
+                    }
+                ) {
                     return Err(SchemaError::OptionalVariantPayload {
                         enum_name: declaration.name.as_str().to_owned(),
                         variant_name: variant.name.as_str().to_owned(),
@@ -912,14 +918,16 @@ impl SchemaTree {
             | TypeReference::Boolean
             | TypeReference::Path
             | TypeReference::Bytes
-            | TypeReference::FixedBytes(_)
+            | TypeReference::ValueApplication { .. }
             | TypeReference::Plain(_) => Ok(()),
-            TypeReference::Vector(inner)
-            | TypeReference::Optional(inner)
-            | TypeReference::ScopeOf(inner) => self.verify_reference_arities(inner),
-            TypeReference::Map(key, value) => {
-                self.verify_reference_arities(key)?;
-                self.verify_reference_arities(value)
+            TypeReference::SingleTypeApplication { argument, .. } => {
+                self.verify_reference_arities(argument)
+            }
+            TypeReference::MultiTypeApplication { arguments, .. } => {
+                for argument in arguments {
+                    self.verify_reference_arities(argument)?;
+                }
+                Ok(())
             }
             TypeReference::Application { head, arguments } => {
                 if let Some(expected) = self.declared_head_arity(head)
@@ -2438,18 +2446,106 @@ impl DeclarationHead {
     }
 }
 
+/// The within-kind lowering strategy of a single-type generic application.
+///
+/// The single-type kind carries exactly one type argument; the projection is
+/// the closed set of lowering strategies distinguished by meta-shape, never by
+/// the head name. `Vector.T`, `List.T`, and any other single-type generic alias
+/// all lower through one of these strategies; the head name is a `NameTable`
+/// concern, not a dispatch key.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SingleTypeReferenceProjection {
+    Vector,
+    Optional,
+    ScopeOf,
+}
+
+impl SingleTypeReferenceProjection {
+    /// The canonical spelling of this projection in the machine NOTA codec.
+    /// This is an enum-to-spelling projection (the same shape as
+    /// [`TypeReference::scalar_name`]), not a name-dispatch: decoding maps the
+    /// spelling back to the projection through the private `from_canonical_name`
+    /// lookup over this closed set.
+    pub fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Vector => "Vector",
+            Self::Optional => "Optional",
+            Self::ScopeOf => "ScopeOf",
+        }
+    }
+
+    fn from_canonical_name(name: &str) -> Option<Self> {
+        [Self::Vector, Self::Optional, Self::ScopeOf]
+            .into_iter()
+            .find(|projection| projection.canonical_name() == name)
+    }
+}
+
+/// The within-kind lowering strategy of a multi-type generic application.
+///
+/// The multi-type kind carries an arity-as-data argument list; the projection
+/// names the closed lowering strategy. `Map` is the sole builtin strategy, a
+/// keyed pair; user-defined multi-type aliases reuse it by definition data.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MultiTypeReferenceProjection {
+    Map,
+}
+
+impl MultiTypeReferenceProjection {
+    pub fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Map => "Map",
+        }
+    }
+
+    fn from_canonical_name(name: &str) -> Option<Self> {
+        [Self::Map]
+            .into_iter()
+            .find(|projection| projection.canonical_name() == name)
+    }
+}
+
+/// The within-kind lowering strategy of a value/const generic application.
+///
+/// The value kind carries a value argument (a fixed width, not a type). `Bytes`
+/// is the sole builtin strategy: `Bytes.N` is the fixed-width bytes value, named
+/// after the same `Bytes` head the source grammar spells. The dynamic-length
+/// bytes scalar is the separate [`TypeReference::Bytes`] leaf; the kind — value
+/// application versus scalar leaf — is what distinguishes them, exactly as the
+/// grammar distinguishes `Bytes.N` from a bare `Bytes` by the width leaf.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValueReferenceProjection {
+    Bytes,
+}
+
+impl ValueReferenceProjection {
+    pub fn canonical_name(self) -> &'static str {
+        match self {
+            Self::Bytes => "Bytes",
+        }
+    }
+
+    fn from_canonical_name(name: &str) -> Option<Self> {
+        [Self::Bytes]
+            .into_iter()
+            .find(|projection| projection.canonical_name() == name)
+    }
+}
+
 /// A type at a reference position — a struct field's type, an enum
 /// variant's payload, or an import source.
 ///
-/// `String`, `Integer`, `Boolean`, and `Path` are reserved scalar leaves.
-/// `Plain` is a declared-name leaf (`Topic`, `Magnitude`). `Vector`,
-/// `Map`, `Optional`, and `ScopeOf` carry inner references, lowered from the
-/// dotted authored head spelling each: `Vector.T`, `Map.(K V)`, `Optional.T`,
-/// `ScopeOf.T` — the earlier aliases (`Vec`, `Option`, `Scope`, `KeyValue`)
-/// are gone and no longer parse. `Application` is the broad generic-application
-/// form `Foo.(A B …)`: any other PascalCase head carrying a tail of
-/// type-reference arguments. Built-in heads are dispatched by the source
-/// generic definition table before the application form is produced.
+/// `String`, `Integer`, `Boolean`, `Path`, and `Bytes` are reserved scalar
+/// leaves. `Plain` is a declared-name leaf (`Topic`, `Magnitude`). The generic
+/// applications mirror the source kind partition rather than one variant per
+/// builtin name: `SingleTypeApplication` (`Vector.T`, `Optional.T`, `ScopeOf.T`),
+/// `MultiTypeApplication` (`Map.(K V)`), and `ValueApplication` (`Bytes.N`) each
+/// carry a closed projection that names the lowering strategy, so lowering
+/// dispatches on kind and projection and never on a head string. `Application`
+/// is the broad generic-application form `Foo.(A B …)`: any other PascalCase
+/// head carrying a tail of type-reference arguments. Built-in heads are
+/// dispatched by the source generic definition table before an application form
+/// is produced.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
@@ -2468,15 +2564,21 @@ pub enum TypeReference {
     Boolean,
     Path,
     Bytes,
-    FixedBytes(u64),
     Plain(Name),
-    Vector(#[rkyv(omit_bounds)] Box<TypeReference>),
-    Map(
-        #[rkyv(omit_bounds)] Box<TypeReference>,
-        #[rkyv(omit_bounds)] Box<TypeReference>,
-    ),
-    Optional(#[rkyv(omit_bounds)] Box<TypeReference>),
-    ScopeOf(#[rkyv(omit_bounds)] Box<TypeReference>),
+    SingleTypeApplication {
+        projection: SingleTypeReferenceProjection,
+        #[rkyv(omit_bounds)]
+        argument: Box<TypeReference>,
+    },
+    MultiTypeApplication {
+        projection: MultiTypeReferenceProjection,
+        #[rkyv(omit_bounds)]
+        arguments: Vec<TypeReference>,
+    },
+    ValueApplication {
+        projection: ValueReferenceProjection,
+        value: u64,
+    },
     Application {
         head: ApplicationHead,
         #[rkyv(omit_bounds)]
@@ -2526,27 +2628,8 @@ impl NotaDecode for TypeReference {
             })?;
         match variant {
             "Plain" => Ok(Self::Plain(Name::from_nota_block(&children[1])?)),
-            "Vector" => Ok(Self::Vector(Box::new(Self::from_nota_block(&children[1])?))),
-            "Optional" => Ok(Self::Optional(Box::new(Self::from_nota_block(
-                &children[1],
-            )?))),
-            "ScopeOf" => Ok(Self::ScopeOf(Box::new(Self::from_nota_block(
-                &children[1],
-            )?))),
-            "Map" => Self::from_nota_map_payload(children),
-            "FixedBytes" => Ok(Self::FixedBytes(
-                children[1]
-                    .demote_to_string()
-                    .and_then(|text| text.parse::<u64>().ok())
-                    .ok_or(NotaDecodeError::ExpectedAtom {
-                        type_name: "FixedBytes width",
-                    })?,
-            )),
             "Application" => Self::from_nota_application_payload(&children[1]),
-            other => Err(NotaDecodeError::UnknownVariant {
-                enum_name: "TypeReference",
-                variant: other.to_owned(),
-            }),
+            other => Self::from_nota_generic_payload(other, children),
         }
     }
 }
@@ -2559,12 +2642,25 @@ impl NotaEncode for TypeReference {
             Self::Boolean => "Boolean".to_owned(),
             Self::Path => "Path".to_owned(),
             Self::Bytes => "Bytes".to_owned(),
-            Self::FixedBytes(width) => format!("(FixedBytes {width})"),
             Self::Plain(name) => format!("(Plain {})", name.to_nota()),
-            Self::Vector(reference) => format!("(Vector {})", reference.to_nota()),
-            Self::Map(key, value) => format!("(Map {} {})", key.to_nota(), value.to_nota()),
-            Self::Optional(reference) => format!("(Optional {})", reference.to_nota()),
-            Self::ScopeOf(reference) => format!("(ScopeOf {})", reference.to_nota()),
+            Self::SingleTypeApplication {
+                projection,
+                argument,
+            } => format!("({} {})", projection.canonical_name(), argument.to_nota()),
+            Self::MultiTypeApplication {
+                projection,
+                arguments,
+            } => {
+                let arguments = arguments
+                    .iter()
+                    .map(Self::to_nota)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("({} {arguments})", projection.canonical_name())
+            }
+            Self::ValueApplication { projection, value } => {
+                format!("({} {value})", projection.canonical_name())
+            }
             Self::Application { head, arguments } => {
                 let arguments = arguments
                     .iter()
@@ -2682,12 +2778,10 @@ impl TypeReference {
             Self::Boolean => Some("Boolean"),
             Self::Path => Some("Path"),
             Self::Bytes => Some("Bytes"),
-            Self::FixedBytes(_)
-            | Self::Plain(_)
-            | Self::Vector(_)
-            | Self::Map(..)
-            | Self::Optional(_)
-            | Self::ScopeOf(_)
+            Self::Plain(_)
+            | Self::SingleTypeApplication { .. }
+            | Self::MultiTypeApplication { .. }
+            | Self::ValueApplication { .. }
             | Self::Application { .. } => None,
         }
     }
@@ -2707,11 +2801,9 @@ impl TypeReference {
             | Self::Boolean
             | Self::Path
             | Self::Bytes
-            | Self::FixedBytes(_)
-            | Self::Vector(_)
-            | Self::Map(..)
-            | Self::Optional(_)
-            | Self::ScopeOf(_)
+            | Self::SingleTypeApplication { .. }
+            | Self::MultiTypeApplication { .. }
+            | Self::ValueApplication { .. }
             | Self::Application { .. } => None,
         }
     }
@@ -2721,18 +2813,92 @@ impl TypeReference {
         matches!(self, Self::Plain(_))
     }
 
-    fn from_nota_map_payload(children: &[Block]) -> Result<Self, NotaDecodeError> {
-        if children.len() != 3 {
-            return Err(NotaDecodeError::ExpectedRootCount {
-                type_name: "TypeReference::Map",
-                expected: 3,
-                found: children.len(),
-            });
+    /// Construct a single-type generic application (`Vector.T`, `Optional.T`,
+    /// `ScopeOf.T`) from its projection and single argument.
+    pub fn single_type_application(
+        projection: SingleTypeReferenceProjection,
+        argument: TypeReference,
+    ) -> Self {
+        Self::SingleTypeApplication {
+            projection,
+            argument: Box::new(argument),
         }
-        Ok(Self::Map(
-            Box::new(Self::from_nota_block(&children[1])?),
-            Box::new(Self::from_nota_block(&children[2])?),
-        ))
+    }
+
+    /// Construct a multi-type generic application (`Map.(K V)`) from its
+    /// projection and argument list.
+    pub fn multi_type_application(
+        projection: MultiTypeReferenceProjection,
+        arguments: Vec<TypeReference>,
+    ) -> Self {
+        Self::MultiTypeApplication {
+            projection,
+            arguments,
+        }
+    }
+
+    /// Construct a value/const generic application (`Bytes.N`) from its
+    /// projection and value.
+    pub fn value_application(projection: ValueReferenceProjection, value: u64) -> Self {
+        Self::ValueApplication { projection, value }
+    }
+
+    /// The `Vector.T` single-type application.
+    pub fn vector(argument: TypeReference) -> Self {
+        Self::single_type_application(SingleTypeReferenceProjection::Vector, argument)
+    }
+
+    /// The `Optional.T` single-type application.
+    pub fn optional(argument: TypeReference) -> Self {
+        Self::single_type_application(SingleTypeReferenceProjection::Optional, argument)
+    }
+
+    /// The `ScopeOf.T` single-type application.
+    pub fn scope_of(argument: TypeReference) -> Self {
+        Self::single_type_application(SingleTypeReferenceProjection::ScopeOf, argument)
+    }
+
+    /// The `Map.(K V)` multi-type application.
+    pub fn map(key: TypeReference, value: TypeReference) -> Self {
+        Self::multi_type_application(MultiTypeReferenceProjection::Map, vec![key, value])
+    }
+
+    /// The `Bytes.N` fixed-width bytes value application. The dynamic-length
+    /// bytes scalar is the separate [`Self::Bytes`] leaf.
+    pub fn fixed_width_bytes(width: u64) -> Self {
+        Self::value_application(ValueReferenceProjection::Bytes, width)
+    }
+
+    /// Decode a parenthesized generic payload whose head is a projection
+    /// canonical name (`Vector`, `Map`, `Bytes`, …). The head is matched against
+    /// the closed projection vocabularies, never dispatched as a free string.
+    fn from_nota_generic_payload(head: &str, children: &[Block]) -> Result<Self, NotaDecodeError> {
+        if let Some(projection) = SingleTypeReferenceProjection::from_canonical_name(head) {
+            return Ok(Self::single_type_application(
+                projection,
+                Self::from_nota_block(&children[1])?,
+            ));
+        }
+        if let Some(projection) = MultiTypeReferenceProjection::from_canonical_name(head) {
+            let arguments = children[1..]
+                .iter()
+                .map(Self::from_nota_block)
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Self::multi_type_application(projection, arguments));
+        }
+        if let Some(projection) = ValueReferenceProjection::from_canonical_name(head) {
+            let value = children[1]
+                .demote_to_string()
+                .and_then(|text| text.parse::<u64>().ok())
+                .ok_or(NotaDecodeError::ExpectedAtom {
+                    type_name: "value application width",
+                })?;
+            return Ok(Self::value_application(projection, value));
+        }
+        Err(NotaDecodeError::UnknownVariant {
+            enum_name: "TypeReference",
+            variant: head.to_owned(),
+        })
     }
 
     /// Decode the grouped payload of the canonical `Application` machine
