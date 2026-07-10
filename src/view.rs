@@ -134,8 +134,19 @@ impl TrueSchema {
         &self.core.resolved_imports
     }
 
-    pub fn relations(&self) -> &[RelationDeclaration] {
-        &self.core.relations
+    /// The relation declarations, projected. Each relation-path segment that
+    /// names a local declaration resolves its current name through the table,
+    /// so a rename of a relation's target follows into the relation.
+    pub fn relations(&self) -> Vec<RelationDeclaration> {
+        self.core
+            .relations
+            .iter()
+            .map(|relation| {
+                relation
+                    .project(&self.names)
+                    .expect(VIEW_RESOLUTION_INVARIANT)
+            })
+            .collect()
     }
 
     pub fn input_view(&self) -> RootView<'_> {
@@ -656,10 +667,7 @@ pub struct FieldView<'schema> {
 
 impl FieldView<'_> {
     pub fn name(&self) -> Name {
-        match self.names.name_of(&self.core.identifier) {
-            Some(stored) => Name::new(stored.local_part()),
-            None => self.reference().derived_field_name(),
-        }
+        self.core.name(self.names).expect(VIEW_RESOLUTION_INVARIANT)
     }
 
     /// Whether this field's name is an explicit stored disambiguator rather

@@ -519,7 +519,7 @@ impl SourceImports {
         let mut entries = Vec::new();
         for pair in body.root_objects().chunks_exact(2) {
             entries.push(SourceImport {
-                local_name: SourceAtom::from_block(&pair[0])?.into_name(),
+                local_name: SourceAtom::from_block(&pair[0])?.into_name()?,
                 source: SourceReference::from_block(&pair[1])?,
             });
         }
@@ -1261,7 +1261,7 @@ impl SourceImplCatalog {
             // its absence is a marker impl. A trait reference obeys the same
             // PascalCase type-name gate as every other type reference, so a
             // lowercase or otherwise non-type-name atom is rejected here.
-            let trait_name = SourceAtom::from_block(head)?.into_name();
+            let trait_name = SourceAtom::from_block(head)?.into_name()?;
             if !trait_name.qualifies_as_pascal_case() {
                 return Err(SchemaError::NonTypeNameTrait {
                     found: trait_name.as_str().to_owned(),
@@ -1420,7 +1420,7 @@ impl SourceMethodSignature {
                 found: objects.len(),
             });
         };
-        let name = SourceAtom::from_block(name_block)?.into_name();
+        let name = SourceAtom::from_block(name_block)?.into_name()?;
         if !SourceIdentifierCase::new(&name).is_method() {
             return Err(SchemaError::ExpectedSyntaxReference {
                 found: format!("method name {}", name.to_nota()),
@@ -2174,7 +2174,7 @@ impl SourceFamilyBody {
             });
         };
         Ok(Self::new(
-            SourceAtom::from_block(record)?.into_name(),
+            SourceAtom::from_block(record)?.into_name()?,
             TableName::from_nota_block(table)?,
             Self::key_from_block(key)?,
         ))
@@ -2604,7 +2604,7 @@ impl SourceField {
             }
             return Self::from_explicit_field_reference(head, payload);
         }
-        let name = atom.into_name();
+        let name = atom.into_name()?;
         if SourceIdentifierCase::new(&name).is_type() {
             return Ok(Self {
                 name,
@@ -2624,7 +2624,7 @@ impl SourceField {
         if objects.len() != 2 || matches!(objects[1], Block::Atom(_)) {
             return Ok(false);
         }
-        let name = SourceAtom::from_block(&objects[0])?.into_name();
+        let name = SourceAtom::from_block(&objects[0])?.into_name()?;
         Ok(SourceIdentifierCase::new(&name).is_type()
             && !TypeReference::is_reserved_scalar_name(&name))
     }
@@ -4874,8 +4874,19 @@ impl<'source> SourceAtom<'source> {
         Ok(Self(atom.text()))
     }
 
-    fn into_name(self) -> Name {
-        Name::new(self.0)
+    /// Read this source atom as a local declaration or reference name, enforcing
+    /// the well-formedness the `Name` namespace machinery assumes: a
+    /// source-derived local name carries no `:` namespace separator and no empty
+    /// segment. Import source paths do not pass through here — they are read as
+    /// dotted [`SourceReference`] paths — so this boundary rejects only a
+    /// malformed local name.
+    fn into_name(self) -> Result<Name, SchemaError> {
+        if self.0.is_empty() || self.0.contains(':') {
+            return Err(SchemaError::MalformedLocalName {
+                name: self.0.to_owned(),
+            });
+        }
+        Ok(Name::new(self.0))
     }
 }
 

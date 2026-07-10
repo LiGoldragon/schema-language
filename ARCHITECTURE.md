@@ -79,10 +79,18 @@ codec surface stays value-exact with the pre-split format. Derived field names
 are stored nowhere — a field's name is either its explicit disambiguator row in
 the `NameTable` or the composed on-demand derivation from its reference — so a
 rename through the table moves the projection and every derived name without
-touching a substrate byte. A closed set of reference and contract values stays
-as data inside the substrate — imports, resolved imports, impl catalogs,
-relation paths, and table names — under the tenet that a use-site name may be a
-reference/path/name value.
+touching a substrate byte. Member declarations — struct fields, enum variants,
+and generic binders — are anchored to their owner's identifier rather than the
+owner's current name: a member's identifier is minted from its owner identifier
+and its own local name, so renaming the owner leaves every member identifier and
+therefore every substrate byte fixed, and the name table row for a member never
+carries a stale owner-name prefix. A closed set of reference and contract values
+stays as data inside the substrate — imports, resolved imports, impl catalogs,
+table names, and any relation-path segment that names no local declaration —
+under the tenet that a use-site name may be a reference/path/name value; a
+relation-path segment that does name a local declaration is minted to that
+declaration's identifier like every other local reference, so a rename of a
+relation's target follows into the relation.
 
 ### Target model
 

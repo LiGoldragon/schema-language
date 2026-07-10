@@ -10,8 +10,8 @@ use std::path::Path;
 
 use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{
-    DeclarationKind, ImportResolver, Name, NameTable, SchemaEngine, SchemaError, SchemaIdentity,
-    TrueSchema, TypeDeclaration, TypeDeclarationView,
+    DeclarationKind, ImportResolver, Name, NameTable, RelationDeclaration, SchemaEngine,
+    SchemaError, SchemaIdentity, TrueSchema, TypeDeclaration, TypeDeclarationView,
 };
 
 /// One corpus entry: a named `.schema` source and the resolver it needs, if
@@ -321,13 +321,16 @@ fn derived_field_names_project_on_demand_and_match_materialized_names() {
         "explicit disambiguators are stored as name data",
     );
     // And no Field-kind row exists for a derived name anywhere in the table.
+    // Member rows store the LOCAL name and the owner as a separate identifier,
+    // so a derived field would surface as a bare local name if it were stored;
+    // it is not.
     assert!(
         !schema
             .names()
             .entries()
             .iter()
             .any(|row| row.identifier().kind() == DeclarationKind::Field
-                && row.name().as_str().ends_with(":domains")),
+                && row.name().as_str() == "domains"),
         "the table must not hold a row for the derived field name",
     );
 }
@@ -393,5 +396,224 @@ fn rename_through_the_table_moves_projection_but_not_core_bytes() {
     assert_eq!(
         core_bytes_before, core_bytes_after,
         "a rename must not move a single CoreSchema byte",
+    );
+}
+
+/// Fix 1 witness over the reload/re-association path — the path the whole corpus
+/// never exercised because it always decomposes against an empty prior. An owner
+/// renamed through the table, projected to source, and re-lowered against the
+/// renamed table as prior preserves every identifier, MEMBERS INCLUDED, so the
+/// substrate stays byte-for-byte stable. This is exactly the case the audit
+/// proved broken when members minted from the owner's current name: on reload
+/// the members re-qualified under the new owner name, missed the prior table,
+/// and minted fresh identifiers — moving the substrate.
+#[test]
+fn owner_rename_reload_preserves_member_identifiers_and_substrate_bytes() {
+    let engine = SchemaEngine::default();
+    let identity = SchemaIdentity::new("corpus:explicit-disambiguators", "0.1.0");
+    let mut schema =
+        CorpusEntry::plain("explicit-disambiguators", EXPLICIT_DISAMBIGUATOR_SOURCE).lower();
+
+    let core_bytes_before = schema
+        .core()
+        .canonical_bytes()
+        .expect("substrate serializes before rename");
+
+    // Rename the struct owner TimeRange -> Span through the table. Its members
+    // start and end are addressed by TimeRange's IDENTIFIER, not its name, so
+    // they do not move.
+    let owner = schema
+        .identifier_named(DeclarationKind::Type, &Name::new("TimeRange"))
+        .expect("the TimeRange struct is minted");
+    schema
+        .rename(&owner, Name::new("Span"))
+        .expect("owner rename through the table succeeds");
+
+    // Project to source and re-lower it against the renamed table as prior.
+    let projected = schema.to_schema_text();
+    let (reloaded_core, reloaded_names) = engine
+        .lower_core_source(projected.as_str(), identity, schema.names())
+        .expect("projected source re-lowers against the renamed prior");
+
+    // Every identifier — the renamed owner AND its members — is preserved, so the
+    // substrate is byte-for-byte identical to before the rename.
+    assert_eq!(
+        core_bytes_before,
+        reloaded_core
+            .canonical_bytes()
+            .expect("reloaded substrate serializes"),
+        "an owner rename must not move a single substrate byte across reload",
+    );
+    // The renamed table is reproduced too: reload re-associates the owner and its
+    // members rather than minting fresh rows.
+    assert_eq!(
+        schema.names().canonical_bytes().expect("table serializes"),
+        reloaded_names
+            .canonical_bytes()
+            .expect("reloaded table serializes"),
+        "reload re-associates the renamed owner and its members, minting nothing fresh",
+    );
+    // The explicit member disambiguators survive with their local names intact.
+    let Some(TypeDeclaration::Struct(span)) = schema.type_named("Span") else {
+        panic!("the renamed struct projects as Span");
+    };
+    let field_names: Vec<&str> = span
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    assert_eq!(
+        field_names,
+        ["start", "end"],
+        "members keep their local names under an owner rename",
+    );
+}
+
+/// Fix 1 / Fix 5 witness — a member's OWN rename through the table preserves its
+/// identifier, and a reload re-associates it by its new local name under the
+/// unchanged owner, so member lineage survives a member rename.
+#[test]
+fn member_rename_preserves_the_member_identifier_across_reload() {
+    let engine = SchemaEngine::default();
+    let identity = SchemaIdentity::new("corpus:explicit-disambiguators", "0.1.0");
+    let mut schema =
+        CorpusEntry::plain("explicit-disambiguators", EXPLICIT_DISAMBIGUATOR_SOURCE).lower();
+
+    let owner = schema
+        .identifier_named(DeclarationKind::Type, &Name::new("TimeRange"))
+        .expect("the TimeRange struct is minted");
+    let start = schema
+        .names()
+        .member_identifier_of(DeclarationKind::Field, &owner, &Name::new("start"))
+        .expect("the start field is minted under its owner");
+
+    schema
+        .rename(&start, Name::new("begin"))
+        .expect("member rename through the table succeeds");
+
+    // The identifier is unchanged and now resolves to the new local name.
+    assert_eq!(schema.names().name_of(&start), Some(&Name::new("begin")));
+    let Some(TypeDeclaration::Struct(range)) = schema.type_named("TimeRange") else {
+        panic!("TimeRange still projects");
+    };
+    let field_names: Vec<&str> = range
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    assert_eq!(
+        field_names,
+        ["begin", "end"],
+        "the renamed member projects its new local name",
+    );
+
+    // Reload against the renamed table re-associates by (owner, new local name),
+    // reusing the very same identifier.
+    let projected = schema.to_schema_text();
+    let (_, reloaded_names) = engine
+        .lower_core_source(projected.as_str(), identity, schema.names())
+        .expect("projected source re-lowers against the renamed prior");
+    assert_eq!(
+        reloaded_names.member_identifier_of(DeclarationKind::Field, &owner, &Name::new("begin")),
+        Some(start),
+        "reload reuses the member identifier under its unchanged owner",
+    );
+}
+
+/// Fix 4 witness — the "stored disambiguator else derived name" rule lives in
+/// exactly one place: over the whole corpus a struct's borrowing
+/// `FieldView::name` equals the same field's name in the owned struct
+/// projection, so the two former copies of the rule cannot drift.
+#[test]
+fn field_view_name_matches_the_projected_field_name_over_the_corpus() {
+    for entry in corpus() {
+        let schema = entry.lower();
+        for view in schema.namespace_views() {
+            let TypeDeclarationView::Struct(struct_view) = view.value() else {
+                continue;
+            };
+            let projected = struct_view.to_struct();
+            let field_views = struct_view.fields();
+            assert_eq!(
+                field_views.len(),
+                projected.fields.iter().count(),
+                "field counts agree in {} struct {}",
+                entry.name,
+                projected.name.as_str(),
+            );
+            for (field_view, projected_field) in field_views.iter().zip(projected.fields.iter()) {
+                assert_eq!(
+                    field_view.name(),
+                    projected_field.name,
+                    "FieldView::name must equal the projected field name in {} struct {}",
+                    entry.name,
+                    projected.name.as_str(),
+                );
+            }
+        }
+    }
+}
+
+/// Fix 3 witness — a source-derived local name carrying a `:` namespace
+/// separator is a typed error at the boundary where source atoms become local
+/// names, so `Name::local_part` and `Name::qualified_under` never operate on a
+/// malformed name.
+#[test]
+fn a_source_local_name_with_a_colon_is_a_typed_error() {
+    let engine = SchemaEngine::default();
+    let identity = SchemaIdentity::new("corpus:malformed", "0.1.0");
+    let source = "{}\n[]\n[]\n{\n  Entry { Foo:Bar }\n}\n[]";
+    let error = engine
+        .lower_source(source, identity)
+        .expect_err("a ':' in a source-derived local name is rejected");
+    assert!(
+        matches!(error, SchemaError::MalformedLocalName { .. }),
+        "expected a MalformedLocalName error, got {error:?}",
+    );
+}
+
+/// Fix 2 / Fix 5 witness — renaming a declaration a relation path points at
+/// propagates into the relation, because relation-path segments are minted to
+/// the target's identifier rather than copied as raw names. The Hardware variant
+/// of TechnologyLeaf is a relation target; renaming it moves the equivalence
+/// path that walks through it.
+#[test]
+fn relation_target_rename_propagates_into_the_relation() {
+    let mut schema = CorpusEntry::plain(
+        "relations",
+        include_str!("fixtures/source-codec/relations.schema"),
+    )
+    .lower();
+
+    let owner = schema
+        .identifier_named(DeclarationKind::Type, &Name::new("TechnologyLeaf"))
+        .expect("the TechnologyLeaf enum is minted");
+    let hardware = schema
+        .names()
+        .member_identifier_of(DeclarationKind::Variant, &owner, &Name::new("Hardware"))
+        .expect("the Hardware variant is minted under its owner");
+
+    schema
+        .rename(&hardware, Name::new("Circuitry"))
+        .expect("relation target rename through the table succeeds");
+
+    let relations = schema.relations();
+    let RelationDeclaration::Equivalence(values) = &relations[0];
+    let first_path: Vec<&str> = values[0].path().iter().map(Name::as_str).collect();
+    assert_eq!(
+        first_path,
+        ["Technology", "Circuitry", "Networking"],
+        "the relation path follows the renamed variant target",
+    );
+    // The variant projection moved in lockstep — same identifier, one rename.
+    let Some(TypeDeclaration::Enum(technology_leaf)) = schema.type_named("TechnologyLeaf") else {
+        panic!("TechnologyLeaf projects as an enum");
+    };
+    assert!(
+        technology_leaf
+            .variants
+            .iter()
+            .any(|variant| variant.name.as_str() == "Circuitry"),
+        "the variant declaration and the relation segment share one identifier",
     );
 }

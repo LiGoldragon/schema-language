@@ -14,14 +14,20 @@
 //! `ARCHITECTURE.md`. It is NOT a solution to that open problem, and nothing in
 //! this module should be read as claiming otherwise.
 //!
-//! What works: an identifier is minted as a deterministic hash of
-//! `(declaration kind, fully-qualified name at introduction)`, so minting is
-//! order-independent by construction — the same declarations in any source
-//! order yield identical identifiers and, after canonical sorting, identical
-//! `NameTable` bytes. On load, a declaration whose current name is already in a
-//! prior `NameTable` reuses that identifier; a miss mints fresh. A rename
-//! performed through the table keeps the identifier and only updates the name,
-//! so a renamed declaration stays reachable by its current name.
+//! What works: minting is a deterministic hash, order-independent by
+//! construction — the same declarations in any source order yield identical
+//! identifiers and, after canonical sorting, identical `NameTable` bytes. A
+//! top-level declaration mints from `(kind, name at introduction)`. A MEMBER —
+//! a struct field, an enum variant, or a generic parameter binder — mints from
+//! `(kind, owner identifier digest, member local name)` through
+//! [`NominalIdentifier::mint_member`]: it is anchored to its OWNER's identifier,
+//! never the owner's current name, so renaming the owner leaves every member
+//! identifier fixed by construction. On load, a declaration whose kind, owner
+//! scope, and current name are already in a prior `NameTable` reuses that
+//! identifier; a miss mints fresh. A rename through the table keeps the
+//! identifier and only updates the row's name, and a member row carries the
+//! owner as a stable identifier plus the member's local name, so an owner rename
+//! never leaves a member row carrying a stale owner prefix.
 //!
 //! What is unsolved, and why this is possibly unreliable:
 //!
@@ -29,15 +35,17 @@
 //!   itself a lineage question, and lineage is answered by the core hash, which
 //!   cannot be computed until identifiers are assigned. That bootstrap
 //!   circularity is not resolved here.
-//! - An out-of-band rename — editing the name directly in `.schema` source
-//!   rather than through [`NameTable::rename`] — is indistinguishable from a
+//! - An out-of-band rename — editing a name directly in `.schema` source rather
+//!   than through [`NameTable::rename`] — is still indistinguishable from a
 //!   delete-plus-add: the old current name is gone from the table, so
-//!   re-association misses and mints a FRESH identifier, breaking lineage.
+//!   re-association misses and mints a FRESH identifier, breaking lineage. For a
+//!   top-level owner this cascades, because its members are anchored to the
+//!   owner identifier that just moved.
 //!
 //! Both hazards stay OPEN in `ARCHITECTURE.md`. The real answer may only emerge
 //! after the system is implemented and used; until then this substrate must be
 //! treated as possibly unreliable, and it is deliberately not yet wired into
-//! `TrueSchema` or the hashing domains.
+//! the hashing domains.
 
 use nota::{Block, Delimiter, NotaBlock, NotaDecode, NotaDecodeError, NotaEncode};
 
@@ -126,6 +134,27 @@ impl NominalIdentifier {
         Self { kind, digest }
     }
 
+    /// Mint the identifier of a member declaration — a field, an enum variant,
+    /// or a generic parameter binder — anchored to its OWNER's identifier
+    /// rather than the owner's current name. The mint input is the member kind,
+    /// the owner's immutable 16-byte digest, and the member's local current
+    /// name. Because the owner digest never moves when the owner is renamed,
+    /// the member identifier is stable across owner rename by construction, and
+    /// two equal member names under different owners still mint distinct
+    /// identifiers. This is the anchoring the "allocated once at introduction
+    /// and preserved across all edits, including rename" property requires for
+    /// members.
+    pub fn mint_member(kind: DeclarationKind, owner: &NominalIdentifier, local_name: &str) -> Self {
+        let mut hasher = blake3::Hasher::new_derive_key(Self::MINT_CONTEXT);
+        hasher.update(&[kind.mint_tag()]);
+        hasher.update(&owner.digest);
+        hasher.update(local_name.as_bytes());
+        let hash = hasher.finalize();
+        let mut digest = [0u8; 16];
+        digest.copy_from_slice(&hash.as_bytes()[..16]);
+        Self { kind, digest }
+    }
+
     pub fn kind(&self) -> DeclarationKind {
         self.kind
     }
@@ -180,8 +209,13 @@ impl NotaEncode for NominalIdentifier {
     }
 }
 
-/// One row of a [`NameTable`]: a minted identifier paired with the declaration's
-/// current human name.
+/// One row of a [`NameTable`]: a minted identifier, the identifier of its
+/// owner when the declaration is a member, and the declaration's current human
+/// name. Member rows (fields, variants, generic binders) carry the owner as a
+/// stable identifier and store only the member's LOCAL name, so an owner rename
+/// never leaves a member row carrying a stale owner prefix, and re-association
+/// scopes a local name to its owner. Top-level rows carry `None` and store the
+/// full name.
 #[derive(
     rkyv::Archive,
     rkyv::Serialize,
@@ -195,6 +229,7 @@ impl NotaEncode for NominalIdentifier {
 )]
 pub struct NameEntry {
     identifier: NominalIdentifier,
+    owner: Option<NominalIdentifier>,
     name: Name,
 }
 
@@ -203,8 +238,50 @@ impl NameEntry {
         self.identifier
     }
 
+    /// The owner identifier for a member row, or `None` for a top-level row.
+    pub fn owner(&self) -> Option<NominalIdentifier> {
+        self.owner
+    }
+
+    /// The row's stored name: the LOCAL name for a member, the full name for a
+    /// top-level declaration.
     pub fn name(&self) -> &Name {
         &self.name
+    }
+}
+
+/// One declaration to place in a [`NameTable`] build: its kind, its owner when
+/// it is a member, and its stored name (local for members, full for top-level).
+/// A `(DeclarationKind, Name)` pair converts to a top-level declaration, so
+/// callers that only ever build top-level rows stay terse.
+#[derive(Clone, Debug)]
+pub struct NameDeclaration {
+    kind: DeclarationKind,
+    owner: Option<NominalIdentifier>,
+    name: Name,
+}
+
+impl NameDeclaration {
+    pub fn top_level(kind: DeclarationKind, name: Name) -> Self {
+        Self {
+            kind,
+            owner: None,
+            name,
+        }
+    }
+
+    pub fn member(kind: DeclarationKind, owner: NominalIdentifier, local_name: Name) -> Self {
+        Self {
+            kind,
+            owner: Some(owner),
+            name: local_name,
+        }
+    }
+}
+
+impl From<(DeclarationKind, Name)> for NameDeclaration {
+    fn from((kind, name): (DeclarationKind, Name)) -> Self {
+        Self::top_level(kind, name)
     }
 }
 
@@ -259,27 +336,61 @@ impl NameTable {
             })
     }
 
-    /// The identifier currently bound to a name of the given kind, if any. This
-    /// is the reachable-by-current-name lookup: after a rename through the
-    /// table, only the new name resolves, and the old name resolves to nothing.
-    pub fn identifier_of(&self, kind: DeclarationKind, name: &Name) -> Option<NominalIdentifier> {
+    /// The identifier of a declaration matching the given kind, owner scope, and
+    /// stored name, if the table holds it. Top-level lookups pass `owner: None`;
+    /// member lookups pass the owner identifier, so a local name resolves only
+    /// under its owner and never collides with an equal local name elsewhere.
+    fn find(
+        &self,
+        kind: DeclarationKind,
+        owner: Option<&NominalIdentifier>,
+        name: &Name,
+    ) -> Option<NominalIdentifier> {
         self.entries
             .iter()
-            .find(|entry| entry.identifier.kind == kind && &entry.name == name)
+            .find(|entry| {
+                entry.identifier.kind == kind
+                    && entry.owner.as_ref() == owner
+                    && &entry.name == name
+            })
             .map(|entry| entry.identifier)
     }
 
-    /// The identifier a declaration should carry: reuse the one already bound to
-    /// its current name and kind, or mint a fresh one on a miss. This is the
-    /// provisional re-association step — see the module doc for why an
-    /// out-of-band rename defeats it.
-    pub fn associate(
+    /// The top-level identifier currently bound to a full name of the given
+    /// kind, if any. This is the reachable-by-current-name lookup for a
+    /// top-level declaration: after a rename through the table, only the new
+    /// name resolves, and the old name resolves to nothing.
+    pub fn identifier_of(&self, kind: DeclarationKind, name: &Name) -> Option<NominalIdentifier> {
+        self.find(kind, None, name)
+    }
+
+    /// The member identifier currently bound to a local name under the given
+    /// owner and kind, if any. Renaming the owner never moves this binding — the
+    /// owner is addressed by its stable identifier, not its current name.
+    pub fn member_identifier_of(
         &self,
         kind: DeclarationKind,
-        fully_qualified_name: &Name,
+        owner: &NominalIdentifier,
+        local_name: &Name,
+    ) -> Option<NominalIdentifier> {
+        self.find(kind, Some(owner), local_name)
+    }
+
+    /// The identifier a declaration should carry: reuse the one already bound to
+    /// its kind, owner scope, and current name, or mint a fresh one on a miss. A
+    /// member mints from its owner's identifier so the mint is stable across an
+    /// owner rename. This is the provisional re-association step — see the module
+    /// doc for why an out-of-band rename defeats it.
+    fn associate(
+        &self,
+        kind: DeclarationKind,
+        owner: Option<&NominalIdentifier>,
+        name: &Name,
     ) -> NominalIdentifier {
-        self.identifier_of(kind, fully_qualified_name)
-            .unwrap_or_else(|| NominalIdentifier::mint(kind, fully_qualified_name.as_str()))
+        self.find(kind, owner, name).unwrap_or_else(|| match owner {
+            Some(owner) => NominalIdentifier::mint_member(kind, owner, name.as_str()),
+            None => NominalIdentifier::mint(kind, name.as_str()),
+        })
     }
 
     /// Build a table for a set of declarations, re-associating each against a
@@ -287,15 +398,21 @@ impl NameTable {
     /// names keep their identifiers, renamed-through-table names keep theirs,
     /// and genuinely new names mint fresh. The result is canonicalized by
     /// sorting on identifier, so declaration order does not affect the bytes.
-    pub fn build(
+    pub fn build<Declared: Into<NameDeclaration>>(
         prior: &NameTable,
-        declarations: impl IntoIterator<Item = (DeclarationKind, Name)>,
+        declarations: impl IntoIterator<Item = Declared>,
     ) -> Self {
         let mut entries: Vec<NameEntry> = declarations
             .into_iter()
-            .map(|(kind, name)| {
-                let identifier = prior.associate(kind, &name);
-                NameEntry { identifier, name }
+            .map(|declared| {
+                let declared = declared.into();
+                let identifier =
+                    prior.associate(declared.kind, declared.owner.as_ref(), &declared.name);
+                NameEntry {
+                    identifier,
+                    owner: declared.owner,
+                    name: declared.name,
+                }
             })
             .collect();
         entries.sort_by_key(|entry| entry.identifier);
@@ -317,11 +434,22 @@ impl NameTable {
         identifier: &NominalIdentifier,
         new_name: Name,
     ) -> Result<(), SchemaError> {
-        // The identifier-to-name mapping is injective per kind: the new name
-        // must not already belong to a different identifier of the same kind.
-        // Reassigning the same name to the same identifier is a no-op rename and
-        // stays legal.
-        if let Some(holder) = self.identifier_of(identifier.kind, &new_name) {
+        // Resolve the target row first so the conflict check runs in the row's
+        // own owner scope: a member's local name only has to be unique among its
+        // siblings, never across the whole table.
+        let owner = self
+            .entries
+            .iter()
+            .find(|entry| &entry.identifier == identifier)
+            .map(|entry| entry.owner)
+            .ok_or_else(|| SchemaError::NameTableIdentifierAbsent {
+                identifier: identifier.to_hex(),
+            })?;
+        // The identifier-to-name mapping is injective per kind within an owner
+        // scope: the new name must not already belong to a different identifier
+        // of the same kind and owner. Reassigning the same name to the same
+        // identifier is a no-op rename and stays legal.
+        if let Some(holder) = self.find(identifier.kind, owner.as_ref(), &new_name) {
             if &holder != identifier {
                 return Err(SchemaError::NameTableNameConflict {
                     kind: identifier.kind,
@@ -335,9 +463,7 @@ impl NameTable {
             .entries
             .iter_mut()
             .find(|entry| &entry.identifier == identifier)
-            .ok_or_else(|| SchemaError::NameTableIdentifierAbsent {
-                identifier: identifier.to_hex(),
-            })?;
+            .expect("identifier resolved to a row above");
         entry.name = new_name;
         Ok(())
     }
@@ -370,7 +496,7 @@ impl NameTable {
 /// guarantees.
 pub struct NameHarvest<'prior> {
     prior: &'prior NameTable,
-    declarations: Vec<(DeclarationKind, Name)>,
+    declarations: Vec<NameDeclaration>,
 }
 
 impl<'prior> NameHarvest<'prior> {
@@ -381,22 +507,54 @@ impl<'prior> NameHarvest<'prior> {
         }
     }
 
-    /// Record one declaration and answer the identifier it carries: the prior
-    /// table's identifier when the current name is already bound, or the
-    /// deterministic fresh mint otherwise. The answer is exactly the identifier
-    /// the built table will map to this name.
+    /// Record one top-level declaration and answer the identifier it carries:
+    /// the prior table's identifier when the current name is already bound, or
+    /// the deterministic fresh mint otherwise. The answer is exactly the
+    /// identifier the built table will map to this name.
     pub fn declare(&mut self, kind: DeclarationKind, name: &Name) -> NominalIdentifier {
-        let identifier = self.prior.associate(kind, name);
-        self.declarations.push((kind, name.clone()));
+        let identifier = self.prior.associate(kind, None, name);
+        self.declarations
+            .push(NameDeclaration::top_level(kind, name.clone()));
         identifier
     }
 
-    /// Answer the identifier for a declaration WITHOUT recording a table row.
-    /// This is the path for identifier-addressed positions whose current name
-    /// is a pure projection — derived field names — so the table stores only
-    /// real name data.
+    /// Record one member declaration under an owner and answer its identifier.
+    /// The member mints from the owner's identifier and its local name, so the
+    /// answer is stable across an owner rename, and the stored row carries the
+    /// owner identifier plus the local name — never a name-qualified prefix that
+    /// could go stale.
+    pub fn declare_member(
+        &mut self,
+        kind: DeclarationKind,
+        owner: NominalIdentifier,
+        local_name: &Name,
+    ) -> NominalIdentifier {
+        let identifier = self.prior.associate(kind, Some(&owner), local_name);
+        self.declarations
+            .push(NameDeclaration::member(kind, owner, local_name.clone()));
+        identifier
+    }
+
+    /// Answer a member's identifier WITHOUT recording a table row. This is the
+    /// path for identifier-addressed member positions whose current name is a
+    /// pure projection — derived field names — so the table stores only real
+    /// name data.
+    pub fn associate_member(
+        &self,
+        kind: DeclarationKind,
+        owner: NominalIdentifier,
+        local_name: &Name,
+    ) -> NominalIdentifier {
+        self.prior.associate(kind, Some(&owner), local_name)
+    }
+
+    /// Answer a local reference's identifier WITHOUT recording a table row.
+    /// Local references — plain type references, application heads, stream
+    /// relations, family records, impl targets, and relation-path segments —
+    /// point AT a declaration that owns its own row, so re-minting here reuses
+    /// that declaration's identifier without duplicating its row.
     pub fn associate(&self, kind: DeclarationKind, name: &Name) -> NominalIdentifier {
-        self.prior.associate(kind, name)
+        self.prior.associate(kind, None, name)
     }
 
     /// Finish the harvest into the canonical table for everything declared.

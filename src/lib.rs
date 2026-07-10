@@ -33,7 +33,9 @@ pub use environment::{
     SchemaNodeType, SchemaNodeTypeLabel, SchemaRootBlockKind, SchemaRootBlockSummary,
     SchemaSourcePosition, SchemaSourceRange, SchemaSourceSummary,
 };
-pub use identifier::{DeclarationKind, NameEntry, NameHarvest, NameTable, NominalIdentifier};
+pub use identifier::{
+    DeclarationKind, NameDeclaration, NameEntry, NameHarvest, NameTable, NominalIdentifier,
+};
 pub use identity::{ContentHash, FamilyClosure};
 pub use macros::{
     MacroContext, MacroDispatch, MacroNodeDefinition, MacroObject, MacroOutput, MacroPair,

@@ -278,6 +278,14 @@ pub enum SchemaError {
     /// the substrate and the table have diverged.
     #[error("name table has no entry for identifier {identifier}; cannot project its name")]
     CoreProjectionNameAbsent { identifier: String },
+    /// A source atom read as a local declaration or reference name was not a
+    /// well-formed local name: the `Name` namespace machinery (`local_part`,
+    /// `qualified_under`) assumes a source-derived local name carries no `:`
+    /// namespace separator and no empty segment, and this atom violated that.
+    #[error(
+        "source name `{name}` is not a well-formed local name (no `:` or empty segment allowed)"
+    )]
+    MalformedLocalName { name: String },
 }
 
 impl From<nota::MacroError> for SchemaError {

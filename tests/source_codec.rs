@@ -716,8 +716,9 @@ fn schema_source_lowers_relation_declarations() {
         )
         .expect("schema source lowers");
 
-    assert_eq!(schema.relations().len(), 2);
-    let RelationDeclaration::Equivalence(values) = &schema.relations()[0];
+    let relations = schema.relations();
+    assert_eq!(relations.len(), 2);
+    let RelationDeclaration::Equivalence(values) = &relations[0];
     let paths = values
         .iter()
         .map(|value| {

@@ -18,11 +18,14 @@
 //!
 //! Every *local declaration* is identifier-addressed: namespace types (struct,
 //! enum, newtype), fields, enum variants, generic parameter binders, roots,
-//! streams, families, plain type references, local application heads, and
-//! impl-block targets. Member declarations (fields, variants, binders) mint
-//! from their owner-qualified name (`Owner:member`) so equal member names under
-//! different owners stay distinct; their projection takes the qualified name's
-//! local part. Top-level names mint and project verbatim.
+//! streams, families, plain type references, local application heads,
+//! impl-block targets, and relation-path segments. Member declarations (fields,
+//! variants, binders) mint from their OWNER's identifier and their local name
+//! (see [`crate::NominalIdentifier::mint_member`]), so equal member names under
+//! different owners stay distinct AND a member identifier is stable when its
+//! owner is renamed; their row stores the owner identifier plus the local name,
+//! and projection takes the local name directly. Top-level names mint and
+//! project verbatim.
 //!
 //! A closed set of *reference and contract values* stays as data, under the
 //! tenet that a use-site name may be "a reference/path/name value under the
@@ -32,8 +35,10 @@
 //!   the imported contract bodies they carry;
 //! - impl catalogs — Rust-surface contract signatures verified against
 //!   [`crate::RustSurface`] facts;
-//! - relation values — symbol paths whose segment kinds are positional
-//!   reference data, not local declarations; and
+//! - relation-path segments that name no local declaration — an imported name,
+//!   or a segment past the point navigation leaves the local symbol graph —
+//!   which stay raw path data while every segment that DOES name a local
+//!   declaration is minted to its identifier; and
 //! - table names — storage coordinates, explicitly not schema symbols.
 //!
 //! Explicit field disambiguators are name data and therefore live on the
@@ -50,8 +55,8 @@ use crate::{
     schema::{
         ApplicationHead, Declaration, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey,
         FieldDeclaration, ImplBlock, ImplCatalog, ImportDeclaration, Name, NewtypeDeclaration,
-        RelationDeclaration, Root, RootApplication, SchemaTree, StreamDeclaration, StreamRelation,
-        StructDeclaration, TableName, TypeDeclaration, TypeReference, Visibility,
+        RelationDeclaration, RelationValue, Root, RootApplication, SchemaTree, StreamDeclaration,
+        StreamRelation, StructDeclaration, TableName, TypeDeclaration, TypeReference, Visibility,
     },
 };
 
@@ -83,7 +88,11 @@ impl SchemaTree {
                 .iter()
                 .map(|family| CoreFamily::from_family(family, &mut harvest))
                 .collect(),
-            relations: self.relations().to_vec(),
+            relations: self
+                .relations()
+                .iter()
+                .map(|relation| self.resolve_relation(relation, &mut harvest))
+                .collect(),
             impl_blocks: self
                 .impl_blocks()
                 .iter()
@@ -107,7 +116,7 @@ pub struct CoreSchema {
     pub(crate) namespace: Vec<CoreDeclaration>,
     pub(crate) streams: Vec<CoreStream>,
     pub(crate) families: Vec<CoreFamily>,
-    pub(crate) relations: Vec<RelationDeclaration>,
+    pub(crate) relations: Vec<CoreRelationDeclaration>,
     pub(crate) impl_blocks: Vec<CoreImplBlock>,
 }
 
@@ -138,7 +147,10 @@ impl CoreSchema {
                 .iter()
                 .map(|family| family.project(names))
                 .collect::<Result<_, _>>()?,
-            self.relations.clone(),
+            self.relations
+                .iter()
+                .map(|relation| relation.project(names))
+                .collect::<Result<_, _>>()?,
         )
         .with_impl_blocks(
             self.impl_blocks
@@ -269,18 +281,16 @@ impl CoreDeclaration {
         declaration: &Declaration,
         harvest: &mut NameHarvest<'_>,
     ) -> Self {
-        let owner = declaration.name();
+        // A declaration's identity is its value's type identifier. Associate it
+        // up front so the generic binders anchor to the owner IDENTIFIER, then
+        // the value declares the very same identifier as it decomposes.
+        let owner = harvest.associate(DeclarationKind::Type, declaration.name());
         Self {
             visibility: declaration.visibility(),
             parameters: declaration
                 .parameters()
                 .iter()
-                .map(|parameter| {
-                    harvest.declare(
-                        DeclarationKind::Generic,
-                        &parameter.qualified_under(Some(owner)),
-                    )
-                })
+                .map(|parameter| harvest.declare_member(DeclarationKind::Generic, owner, parameter))
                 .collect(),
             value: CoreType::from_type_declaration(declaration.value(), harvest),
             impls: declaration.impls().clone(),
@@ -365,12 +375,13 @@ impl CoreStruct {
         declaration: &StructDeclaration,
         harvest: &mut NameHarvest<'_>,
     ) -> Self {
+        let identifier = harvest.declare(DeclarationKind::Type, &declaration.name);
         Self {
-            identifier: harvest.declare(DeclarationKind::Type, &declaration.name),
+            identifier,
             fields: declaration
                 .fields
                 .iter()
-                .map(|field| CoreField::from_field(field, &declaration.name, harvest))
+                .map(|field| CoreField::from_field(field, identifier, harvest))
                 .collect(),
         }
     }
@@ -402,17 +413,18 @@ pub struct CoreField {
 impl CoreField {
     pub(crate) fn from_field(
         field: &FieldDeclaration,
-        owner: &Name,
+        owner: NominalIdentifier,
         harvest: &mut NameHarvest<'_>,
     ) -> Self {
-        let qualified = field.name.qualified_under(Some(owner));
-        // A field whose current name equals its reference's derivation carries
-        // no name data: the identifier still mints from the qualified current
-        // name, but no table row is stored, and the name is derived on demand.
+        // The field mints from its OWNER's identifier and its local name, so its
+        // identity survives an owner rename by construction. A field whose
+        // current name equals its reference's derivation carries no name data:
+        // the identifier still mints, but no table row is stored, and the name
+        // is derived on demand.
         let identifier = if field.name == field.reference.derived_field_name() {
-            harvest.associate(DeclarationKind::Field, &qualified)
+            harvest.associate_member(DeclarationKind::Field, owner, &field.name)
         } else {
-            harvest.declare(DeclarationKind::Field, &qualified)
+            harvest.declare_member(DeclarationKind::Field, owner, &field.name)
         };
         Self {
             identifier,
@@ -420,13 +432,24 @@ impl CoreField {
         }
     }
 
+    /// The field's projected name — its explicit disambiguator row when one is
+    /// stored, otherwise the on-demand derivation from its reference. This is
+    /// the single source for the "stored disambiguator else derived name" rule;
+    /// both the owned [`CoreField::project`] and the borrowing
+    /// [`crate::view::FieldView::name`] read it, so the rule lives in exactly
+    /// one place.
+    pub(crate) fn name(&self, names: &NameTable) -> Result<Name, SchemaError> {
+        Ok(match names.name_of(&self.identifier) {
+            Some(stored) => stored.clone(),
+            None => self.reference.project(names)?.derived_field_name(),
+        })
+    }
+
     pub(crate) fn project(&self, names: &NameTable) -> Result<FieldDeclaration, SchemaError> {
-        let reference = self.reference.project(names)?;
-        let name = match names.name_of(&self.identifier) {
-            Some(stored) => Name::new(stored.local_part()),
-            None => reference.derived_field_name(),
-        };
-        Ok(FieldDeclaration { name, reference })
+        Ok(FieldDeclaration {
+            name: self.name(names)?,
+            reference: self.reference.project(names)?,
+        })
     }
 }
 
@@ -439,12 +462,13 @@ pub struct CoreEnum {
 
 impl CoreEnum {
     pub(crate) fn from_enum(declaration: &EnumDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+        let identifier = harvest.declare(DeclarationKind::Type, &declaration.name);
         Self {
-            identifier: harvest.declare(DeclarationKind::Type, &declaration.name),
+            identifier,
             variants: declaration
                 .variants
                 .iter()
-                .map(|variant| CoreVariant::from_variant(variant, &declaration.name, harvest))
+                .map(|variant| CoreVariant::from_variant(variant, identifier, harvest))
                 .collect(),
         }
     }
@@ -472,14 +496,11 @@ pub struct CoreVariant {
 impl CoreVariant {
     pub(crate) fn from_variant(
         variant: &EnumVariant,
-        owner: &Name,
+        owner: NominalIdentifier,
         harvest: &mut NameHarvest<'_>,
     ) -> Self {
         Self {
-            identifier: harvest.declare(
-                DeclarationKind::Variant,
-                &variant.name.qualified_under(Some(owner)),
-            ),
+            identifier: harvest.declare_member(DeclarationKind::Variant, owner, &variant.name),
             payload: variant
                 .payload
                 .as_ref()
@@ -751,5 +772,281 @@ impl CoreReference {
                     .collect::<Result<_, _>>()?,
             },
         })
+    }
+}
+
+/// A relation declaration in the substrate, mirroring [`RelationDeclaration`]
+/// with every relation-path segment that names a local declaration replaced by
+/// its identifier. A relation path is the only local-reference class that was
+/// once copied verbatim; minting its segments makes a rename of a relation's
+/// target propagate to the relation exactly as it does to every other local
+/// reference.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+pub enum CoreRelationDeclaration {
+    Equivalence(Vec<CoreRelationValue>),
+}
+
+impl CoreRelationDeclaration {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<RelationDeclaration, SchemaError> {
+        Ok(match self {
+            Self::Equivalence(values) => RelationDeclaration::Equivalence(
+                values
+                    .iter()
+                    .map(|value| value.project(names))
+                    .collect::<Result<_, _>>()?,
+            ),
+        })
+    }
+}
+
+/// One relation path in the substrate: an ordered navigation whose segments are
+/// identifier references to the local declarations they name. A segment that
+/// names no local declaration — an import, or any segment past the point the
+/// navigation leaves the local symbol graph — stays raw path data.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct CoreRelationValue {
+    segments: Vec<CoreRelationSegment>,
+}
+
+impl CoreRelationValue {
+    fn project(&self, names: &NameTable) -> Result<RelationValue, SchemaError> {
+        Ok(RelationValue::new(
+            self.segments
+                .iter()
+                .map(|segment| segment.project(names))
+                .collect::<Result<_, _>>()?,
+        ))
+    }
+}
+
+/// One relation-path segment: an identifier reference to a local declaration, or
+/// raw name data for a segment that names none. A `Local` segment projects the
+/// declaration's current name through the table, so a rename of the target moves
+/// the relation with it.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
+pub enum CoreRelationSegment {
+    Local(NominalIdentifier),
+    Foreign(Name),
+}
+
+impl CoreRelationSegment {
+    fn project(&self, names: &NameTable) -> Result<Name, SchemaError> {
+        Ok(match self {
+            Self::Local(identifier) => names.projected_name(identifier)?.clone(),
+            Self::Foreign(name) => name.clone(),
+        })
+    }
+}
+
+/// The type a relation-path walk currently sits inside, used to resolve the
+/// next segment. `Top` is the pre-first-segment scope; `Lost` means the walk
+/// left the local symbol graph — a scalar, a generic application, or an
+/// imported reference — so every following segment is raw path data.
+#[derive(Clone, Copy)]
+enum RelationCursor<'tree> {
+    Top,
+    Struct(&'tree Name, &'tree StructDeclaration),
+    Enum(&'tree Name, &'tree EnumDeclaration),
+    Lost,
+}
+
+impl SchemaTree {
+    /// Resolve a relation declaration's paths against this tree, minting each
+    /// segment that names a local declaration to that declaration's identifier.
+    ///
+    /// PROVISIONAL note on the starting scope: a path's first segment resolves
+    /// as a top-level namespace type when one bears its name, else as a variant
+    /// of the first enum — searched in input-root, output-root, then namespace
+    /// declaration order — that declares a variant of that name. That
+    /// first-match order is deterministic but is not a resolved disambiguation
+    /// rule for a first segment that is a variant name shared by several enums;
+    /// it rides the same provisional status as the identifier substrate itself.
+    fn resolve_relation(
+        &self,
+        relation: &RelationDeclaration,
+        harvest: &mut NameHarvest<'_>,
+    ) -> CoreRelationDeclaration {
+        match relation {
+            RelationDeclaration::Equivalence(values) => CoreRelationDeclaration::Equivalence(
+                values
+                    .iter()
+                    .map(|value| self.resolve_relation_value(value, harvest))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn resolve_relation_value(
+        &self,
+        value: &RelationValue,
+        harvest: &mut NameHarvest<'_>,
+    ) -> CoreRelationValue {
+        let mut cursor = RelationCursor::Top;
+        let mut segments = Vec::with_capacity(value.path().len());
+        for name in value.path() {
+            let (segment, next) = self.resolve_relation_segment(cursor, name, harvest);
+            segments.push(segment);
+            cursor = next;
+        }
+        CoreRelationValue { segments }
+    }
+
+    fn resolve_relation_segment<'tree>(
+        &'tree self,
+        cursor: RelationCursor<'tree>,
+        name: &Name,
+        harvest: &mut NameHarvest<'_>,
+    ) -> (CoreRelationSegment, RelationCursor<'tree>) {
+        match cursor {
+            RelationCursor::Top => self.resolve_first_relation_segment(name, harvest),
+            RelationCursor::Enum(owner, declaration) => {
+                self.resolve_enum_relation_segment(owner, declaration, name, harvest)
+            }
+            RelationCursor::Struct(owner, declaration) => {
+                self.resolve_struct_relation_segment(owner, declaration, name, harvest)
+            }
+            RelationCursor::Lost => (
+                CoreRelationSegment::Foreign(name.clone()),
+                RelationCursor::Lost,
+            ),
+        }
+    }
+
+    fn resolve_first_relation_segment<'tree>(
+        &'tree self,
+        name: &Name,
+        harvest: &mut NameHarvest<'_>,
+    ) -> (CoreRelationSegment, RelationCursor<'tree>) {
+        if let Some(declaration) = self.type_named(name.as_str()) {
+            let identifier = harvest.associate(DeclarationKind::Type, declaration.name());
+            return (
+                CoreRelationSegment::Local(identifier),
+                self.cursor_of_type(declaration),
+            );
+        }
+        for (owner, declaration) in self.relation_enum_scopes() {
+            if declaration
+                .variants
+                .iter()
+                .any(|variant| &variant.name == name)
+            {
+                return self.resolve_enum_relation_segment(owner, declaration, name, harvest);
+            }
+        }
+        (
+            CoreRelationSegment::Foreign(name.clone()),
+            RelationCursor::Lost,
+        )
+    }
+
+    fn resolve_enum_relation_segment<'tree>(
+        &'tree self,
+        owner: &Name,
+        declaration: &'tree EnumDeclaration,
+        name: &Name,
+        harvest: &mut NameHarvest<'_>,
+    ) -> (CoreRelationSegment, RelationCursor<'tree>) {
+        match declaration
+            .variants
+            .iter()
+            .find(|variant| &variant.name == name)
+        {
+            Some(variant) => {
+                let owner_identifier = harvest.associate(DeclarationKind::Type, owner);
+                let identifier = harvest.associate_member(
+                    DeclarationKind::Variant,
+                    owner_identifier,
+                    &variant.name,
+                );
+                let cursor = variant
+                    .payload
+                    .as_ref()
+                    .map_or(RelationCursor::Lost, |payload| {
+                        self.cursor_of_reference(payload)
+                    });
+                (CoreRelationSegment::Local(identifier), cursor)
+            }
+            None => (
+                CoreRelationSegment::Foreign(name.clone()),
+                RelationCursor::Lost,
+            ),
+        }
+    }
+
+    fn resolve_struct_relation_segment<'tree>(
+        &'tree self,
+        owner: &Name,
+        declaration: &'tree StructDeclaration,
+        name: &Name,
+        harvest: &mut NameHarvest<'_>,
+    ) -> (CoreRelationSegment, RelationCursor<'tree>) {
+        match declaration.fields.iter().find(|field| &field.name == name) {
+            Some(field) => {
+                let owner_identifier = harvest.associate(DeclarationKind::Type, owner);
+                let identifier =
+                    harvest.associate_member(DeclarationKind::Field, owner_identifier, &field.name);
+                (
+                    CoreRelationSegment::Local(identifier),
+                    self.cursor_of_reference(&field.reference),
+                )
+            }
+            None => (
+                CoreRelationSegment::Foreign(name.clone()),
+                RelationCursor::Lost,
+            ),
+        }
+    }
+
+    /// The enum scopes a relation-path first segment may name a variant of, in
+    /// deterministic search order: the input root, the output root, then each
+    /// namespace enum in declaration order. Each carries the owner name minting
+    /// used, so a resolved variant re-mints the very identifier its declaration
+    /// carries.
+    fn relation_enum_scopes(&self) -> Vec<(&Name, &EnumDeclaration)> {
+        let mut scopes = Vec::new();
+        for root in [self.input(), self.output()] {
+            if let Some(declaration) = root.as_enum() {
+                scopes.push((&declaration.name, declaration));
+            }
+        }
+        for declaration in self.namespace() {
+            if let TypeDeclaration::Enum(enum_declaration) = declaration.value() {
+                scopes.push((&enum_declaration.name, enum_declaration));
+            }
+        }
+        scopes
+    }
+
+    /// The cursor a relation walk advances into after resolving a segment whose
+    /// declaration is `declaration`. A newtype is transparent: the walk follows
+    /// its wrapped reference.
+    fn cursor_of_type<'tree>(
+        &'tree self,
+        declaration: &'tree TypeDeclaration,
+    ) -> RelationCursor<'tree> {
+        match declaration {
+            TypeDeclaration::Struct(structure) => {
+                RelationCursor::Struct(&structure.name, structure)
+            }
+            TypeDeclaration::Enum(enumeration) => {
+                RelationCursor::Enum(&enumeration.name, enumeration)
+            }
+            TypeDeclaration::Newtype(newtype) => self.cursor_of_reference(&newtype.reference),
+        }
+    }
+
+    /// The cursor a relation walk advances into after following a reference. A
+    /// plain reference to a local type continues the walk in that type; every
+    /// other reference shape — a scalar, a generic application, or an import —
+    /// ends it.
+    fn cursor_of_reference<'tree>(&'tree self, reference: &TypeReference) -> RelationCursor<'tree> {
+        match reference {
+            TypeReference::Plain(name) => self
+                .type_named(name.as_str())
+                .map_or(RelationCursor::Lost, |declaration| {
+                    self.cursor_of_type(declaration)
+                }),
+            _ => RelationCursor::Lost,
+        }
     }
 }
