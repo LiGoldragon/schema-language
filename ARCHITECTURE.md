@@ -185,6 +185,17 @@ implemented now, even if flawed, as long as it is explicitly marked possibly
 unreliable; the real answer may emerge only after the system is implemented and
 used. The section stays OPEN.
 
+As a long-term goal rather than near-term work, the psyche's stated resolution
+direction is that the real solution is to perpetually develop schema in the
+daemon, using files only for bootstrap. In that architecture schema evolves
+through the daemon's transactional edits, which preserve identifiers natively
+via the live `NameTable`, so reload re-association stops being a steady-state
+problem: the minting ambiguity is paid once, at bootstrap import of a file, and
+the daemon's database thereafter owns the schema and its lineage. The
+provisional minting mechanism is the bridge until the daemon exists. This
+direction does not close the item — the bridge remains provisional and the
+daemon is unbuilt — so the section stays OPEN.
+
 ## Generics
 
 There are no builtin generics; `Vector` is not magic. The builtin mechanism is a
