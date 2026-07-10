@@ -257,18 +257,19 @@ fn schema_is_typed_data_with_named_field_accessors() {
 
     // Typed accessors — TrueSchema is a noun with methods, not a string blob.
     let _: &[schema_language::ImportDeclaration] = schema.imports();
-    let _: &schema_language::Root = schema.input();
-    let _: &schema_language::Root = schema.output();
-    let _: &schema_language::EnumDeclaration = schema
+    let _: schema_language::Root = schema.input();
+    let _: schema_language::Root = schema.output();
+    let _: schema_language::EnumDeclaration = schema
         .input()
         .as_enum()
+        .cloned()
         .expect("core input is an enum root");
-    let _: &[schema_language::Declaration] = schema.namespace();
+    let _: Vec<schema_language::Declaration> = schema.namespace();
 
     // The namespace carries typed `Declaration` values; pick one and
     // confirm it lowers into one of the typed variants of `TypeDeclaration`.
-    let any_declaration = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let any_declaration = namespace
         .first()
         .expect("core schema has at least one namespace declaration");
     match any_declaration.value() {

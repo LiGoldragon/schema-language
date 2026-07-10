@@ -1,7 +1,7 @@
 use nota::{Block, Delimiter, Document, NotaBody, NotaEncode};
 
 use crate::{
-    ImportResolver, SchemaSource,
+    ImportResolver, SchemaSource, TrueSchema,
     declarative::{MacroExpansionStructBody, MacroExpansionVariants},
     expansion::MacroExpansionPass,
     macros::{
@@ -10,7 +10,7 @@ use crate::{
     },
     schema::{
         Declaration, DeclarationHead, EnumDeclaration, EnumVariant, ImportDeclaration, Name,
-        NewtypeDeclaration, RootApplication, TrueSchema, TypeDeclaration, TypeReference,
+        NewtypeDeclaration, RootApplication, TypeDeclaration, TypeReference,
     },
     source::MetadataHead,
 };
@@ -422,7 +422,7 @@ impl SchemaEngine {
     /// stringless [`crate::CoreSchema`] substrate plus its [`crate::NameTable`].
     /// The name-bearing tree exists only transiently inside this lowering; the
     /// durable model is the returned pair, and the human-facing view is
-    /// projected from it on demand through [`crate::CoreSchema::project`].
+    /// projected from it on demand through `crate::CoreSchema::project`.
     /// Identifiers re-associate against `prior` — pass
     /// [`crate::NameTable::empty`] when no prior table applies.
     pub fn lower_core_source(
@@ -432,7 +432,7 @@ impl SchemaEngine {
         prior: &crate::NameTable,
     ) -> Result<(crate::CoreSchema, crate::NameTable), SchemaError> {
         let schema = self.lower_true_schema_source(source, identity)?;
-        Ok(schema.decompose(prior))
+        Ok(schema.tree().decompose(prior))
     }
 
     /// The resolver-carrying twin of [`SchemaEngine::lower_core_source`], for
@@ -445,7 +445,7 @@ impl SchemaEngine {
         prior: &crate::NameTable,
     ) -> Result<(crate::CoreSchema, crate::NameTable), SchemaError> {
         let schema = self.lower_true_schema_source_with_resolver(source, identity, resolver)?;
-        Ok(schema.decompose(prior))
+        Ok(schema.tree().decompose(prior))
     }
 
     pub fn lower_schema_source(

@@ -13,8 +13,9 @@ use crate::{
     FieldDeclaration, ImplBlock, ImplCatalog, ImplReference, ImportDeclaration, MethodParameter,
     MethodSignature, Name, NewtypeDeclaration, RelationDeclaration, RelationValue, ResolvedImport,
     Root, RootApplication, SchemaEngine, SchemaError, SchemaIdentity, StreamDeclaration,
-    StreamRelation, StructDeclaration, TableName, TrueSchema, TypeDeclaration, TypeReference,
+    StreamRelation, StructDeclaration, TableName, TypeDeclaration, TypeReference,
     macros::{BlockDebug, SchemaBlockExt},
+    schema::SchemaTree,
 };
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -112,7 +113,7 @@ impl SchemaSource {
         identity: SchemaIdentity,
         imports: Vec<ImportDeclaration>,
         resolved_imports: Vec<ResolvedImport>,
-    ) -> Result<TrueSchema, SchemaError> {
+    ) -> Result<crate::TrueSchema, SchemaError> {
         let resolver = SourceTypeResolver::from_source(self);
         let mut namespace = SourceLoweredNamespace::from_source(&self.namespace, &resolver)?;
         namespace.push_public_declarations(self.input.public_inline_declarations(&resolver)?)?;
@@ -122,7 +123,10 @@ impl SchemaSource {
         let input = self.input.to_root(&namespace)?;
         let output = self.output.to_root(&namespace)?;
         let impl_blocks = namespace.impl_blocks().to_vec();
-        TrueSchema::new(
+        // The name-bearing tree exists only transiently: it is validated and
+        // immediately decomposed into the split (CoreSchema, NameTable) model
+        // the returned view holds.
+        let tree = SchemaTree::new(
             identity,
             imports,
             resolved_imports,
@@ -135,9 +139,13 @@ impl SchemaSource {
         )
         .with_impl_blocks(impl_blocks)
         .families_verified()
-        .and_then(TrueSchema::product_components_verified)
-        .and_then(TrueSchema::arities_verified)
-        .and_then(TrueSchema::impls_verified)
+        .and_then(SchemaTree::product_components_verified)
+        .and_then(SchemaTree::arities_verified)
+        .and_then(SchemaTree::impls_verified)?;
+        Ok(crate::TrueSchema::from_tree(
+            &tree,
+            &crate::NameTable::empty(),
+        ))
     }
 }
 

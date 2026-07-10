@@ -178,7 +178,28 @@
           '';
           true-schema-public-surface = pkgs.runCommand "schema-true-schema-public-surface" { } ''
             test -f ${src}/tests/true_schema.rs
-            grep -R "pub struct TrueSchema" ${src}/src/schema.rs >/dev/null
+            test -f ${src}/tests/core_projection.rs
+            # TrueSchema is the projected view over the split model: it lives in
+            # src/view.rs holding exactly identity + CoreSchema + NameTable, with
+            # borrowing view types as the on-demand read surface. The
+            # name-bearing tree survives only as the crate-internal codec/hash
+            # sidecar (SchemaTree) and is never re-exported.
+            grep -R "pub struct TrueSchema" ${src}/src/view.rs >/dev/null
+            grep -R "pub struct RootView" ${src}/src/view.rs >/dev/null
+            grep -R "pub struct DeclarationView" ${src}/src/view.rs >/dev/null
+            grep -R "pub struct FieldView" ${src}/src/view.rs >/dev/null
+            grep -R "pub struct CoreSchema" ${src}/src/core.rs >/dev/null
+            if grep -R -n "pub struct TrueSchema" ${src}/src/schema.rs; then
+              echo "the stored name-bearing TrueSchema tree returned to src/schema.rs" >&2
+              exit 1
+            fi
+            if grep -R -n -E 'pub use .*SchemaTree' ${src}/src/lib.rs; then
+              echo "the codec sidecar tree must not be re-exported" >&2
+              exit 1
+            fi
+            grep -R "rename_through_the_table_moves_projection_but_not_core_bytes" ${src}/tests/core_projection.rs >/dev/null
+            grep -R "derived_field_names_project_on_demand_and_match_materialized_names" ${src}/tests/core_projection.rs >/dev/null
+            grep -R "view_codecs_round_trip_value_exactly_over_the_corpus" ${src}/tests/core_projection.rs >/dev/null
             grep -R "authored_schema_decodes_directly_to_true_schema" ${src}/tests/true_schema.rs >/dev/null
             grep -R "true_schema_round_trips_through_binary_and_structured_nota" ${src}/tests/true_schema.rs >/dev/null
             grep -R "product_components_accept_implicit_unique_types" ${src}/tests/true_schema.rs >/dev/null

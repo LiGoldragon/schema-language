@@ -18,24 +18,21 @@ fn roots(namespace: &str) -> String {
     format!("{{}} [] [] {{ {namespace} }} []")
 }
 
-fn struct_fields<'schema>(
-    schema: &'schema schema_language::TrueSchema,
+fn struct_fields(
+    schema: &schema_language::TrueSchema,
     name: &str,
-) -> &'schema [schema_language::FieldDeclaration] {
+) -> Vec<schema_language::FieldDeclaration> {
     match schema.type_named(name).expect("type present") {
-        TypeDeclaration::Struct(declaration) => &declaration.fields,
+        TypeDeclaration::Struct(declaration) => declaration.fields.entries().to_vec(),
         TypeDeclaration::Newtype(_) | TypeDeclaration::Enum(_) => {
             panic!("{name} should be a struct")
         }
     }
 }
 
-fn single_reference<'schema>(
-    schema: &'schema schema_language::TrueSchema,
-    name: &str,
-) -> &'schema TypeReference {
+fn single_reference(schema: &schema_language::TrueSchema, name: &str) -> TypeReference {
     match schema.type_named(name).expect("type present") {
-        TypeDeclaration::Newtype(declaration) => &declaration.reference,
+        TypeDeclaration::Newtype(declaration) => declaration.reference,
         TypeDeclaration::Struct(_) | TypeDeclaration::Enum(_) => {
             panic!("{name} should be a single-reference declaration")
         }
@@ -47,7 +44,7 @@ fn vec_field_lowers_to_vector_reference() {
     let schema = lower(&roots("Service String Cluster Vector.Service"));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        &TypeReference::Vector(Box::new(TypeReference::new("Service")))
+        TypeReference::Vector(Box::new(TypeReference::new("Service")))
     );
 }
 
@@ -117,11 +114,11 @@ fn explicit_structural_field_roles_lower_recursively() {
     // The inline-minted types carry the collection/option reference.
     assert_eq!(
         single_reference(&schema, "Topics"),
-        &TypeReference::Vector(Box::new(TypeReference::new("Topic")))
+        TypeReference::Vector(Box::new(TypeReference::new("Topic")))
     );
     assert_eq!(
         single_reference(&schema, "Limit"),
-        &TypeReference::Optional(Box::new(TypeReference::Integer))
+        TypeReference::Optional(Box::new(TypeReference::Integer))
     );
 }
 
@@ -151,11 +148,11 @@ fn pascal_case_dot_composite_field_can_match_derived_composite_name() {
 
     assert_eq!(
         single_reference(&schema, "OptionalAntecedent"),
-        &TypeReference::Optional(Box::new(TypeReference::new("Antecedent")))
+        TypeReference::Optional(Box::new(TypeReference::new("Antecedent")))
     );
     assert_eq!(
         single_reference(&schema, "Quote"),
-        &TypeReference::Plain(Name::new("OptionalAntecedent"))
+        TypeReference::Plain(Name::new("OptionalAntecedent"))
     );
 }
 
@@ -197,7 +194,7 @@ fn key_value_field_lowers_to_map_reference() {
     ));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        &TypeReference::Map(
+        TypeReference::Map(
             Box::new(TypeReference::new("NodeName")),
             Box::new(TypeReference::new("NodeProposal")),
         )
@@ -209,7 +206,7 @@ fn option_field_lowers_to_optional_reference() {
     let schema = lower(&roots("Cache String Cluster Optional.Cache"));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        &TypeReference::Optional(Box::new(TypeReference::new("Cache")))
+        TypeReference::Optional(Box::new(TypeReference::new("Cache")))
     );
 }
 
@@ -272,7 +269,7 @@ fn nested_collections_lower_recursively() {
     ));
     assert_eq!(
         single_reference(&schema, "Nest"),
-        &TypeReference::Map(
+        TypeReference::Map(
             Box::new(TypeReference::new("Key")),
             Box::new(TypeReference::Vector(Box::new(TypeReference::Optional(
                 Box::new(TypeReference::new("Leaf"))
@@ -288,8 +285,8 @@ fn collection_payload_lowers_in_an_output_variant() {
     let schema = lower(
         "{} [] [Projected.ProjectedPayload] { NodeName String NodeConfig String ProjectedPayload Map.(NodeName NodeConfig) } []",
     );
-    let payload = schema
-        .output()
+    let output_root = schema.output();
+    let payload = output_root
         .as_enum()
         .expect("output is the enum-body form")
         .variants[0]
@@ -299,7 +296,7 @@ fn collection_payload_lowers_in_an_output_variant() {
     assert_eq!(payload, &TypeReference::new("ProjectedPayload"));
     assert_eq!(
         single_reference(&schema, "ProjectedPayload"),
-        &TypeReference::Map(
+        TypeReference::Map(
             Box::new(TypeReference::new("NodeName")),
             Box::new(TypeReference::new("NodeConfig")),
         )
@@ -315,7 +312,7 @@ fn non_builtin_pascal_head_lowers_to_application() {
     let schema = lower(&roots("Leaf String Bad HashSet.Vector.Leaf"));
     assert_eq!(
         single_reference(&schema, "Bad"),
-        &TypeReference::Application {
+        TypeReference::Application {
             head: schema_language::ApplicationHead::Local(schema_language::Name::new("HashSet")),
             arguments: vec![TypeReference::Vector(Box::new(TypeReference::new("Leaf")))],
         }
@@ -330,7 +327,7 @@ fn dropped_vec_alias_no_longer_lowers_to_vector() {
     let schema = lower(&roots("Service String Cluster Vec.Service"));
     assert_eq!(
         single_reference(&schema, "Cluster"),
-        &TypeReference::Application {
+        TypeReference::Application {
             head: schema_language::ApplicationHead::Local(schema_language::Name::new("Vec")),
             arguments: vec![TypeReference::new("Service")],
         }

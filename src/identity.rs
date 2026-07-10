@@ -24,9 +24,10 @@ use std::fmt;
 use crate::{
     SchemaError,
     schema::{
-        Declaration, EnumDeclaration, ImportDeclaration, Name, StreamDeclaration, TrueSchema,
+        Declaration, EnumDeclaration, ImportDeclaration, Name, SchemaTree, StreamDeclaration,
         TypeDeclaration, TypeReference,
     },
+    view::TrueSchema,
 };
 
 /// The hash domains content identity is derived under. Each domain
@@ -167,9 +168,12 @@ impl TrueSchema {
     /// The declaration closure of the named family. The name must be a
     /// namespace declaration or an input/output root enum of this
     /// schema; every type name reachable from it must resolve to a
-    /// namespace declaration, a root enum, or a declared import.
+    /// namespace declaration, a root enum, or a declared import. The walk
+    /// runs over the projected sidecar tree, so the closure and its hash
+    /// stay identical to the pre-split stored-tree behavior.
     pub fn family_closure(&self, family_name: &str) -> Result<FamilyClosure, SchemaError> {
-        ClosureWalk::new(self, family_name).into_closure()
+        let tree = self.tree();
+        ClosureWalk::new(&tree, family_name).into_closure()
     }
 }
 
@@ -178,7 +182,7 @@ impl TrueSchema {
 /// revisits terminate and the finished closure comes out sorted
 /// canonically.
 struct ClosureWalk<'schema> {
-    schema: &'schema TrueSchema,
+    schema: &'schema SchemaTree,
     family: &'schema str,
     declarations: Vec<(String, Declaration)>,
     imports: Vec<(String, ImportDeclaration)>,
@@ -218,7 +222,7 @@ impl FamilyRoot {
 }
 
 impl<'schema> ClosureWalk<'schema> {
-    fn new(schema: &'schema TrueSchema, family: &'schema str) -> Self {
+    fn new(schema: &'schema SchemaTree, family: &'schema str) -> Self {
         Self {
             schema,
             family,

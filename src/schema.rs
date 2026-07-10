@@ -296,7 +296,7 @@ pub enum Root {
     /// The application-form root `(Head Arg …)` — the position is a typed
     /// sum produced by applying a parameterized head to its arguments. The
     /// application is boxed: an imported head carries a `ResolvedImport`, so
-    /// an unboxed `RootApplication` would make `Root` (and every `TrueSchema`
+    /// an unboxed `RootApplication` would make `Root` (and every `SchemaTree`
     /// holding two roots) carry that weight even for the common enum root.
     Application(Box<RootApplication>),
 }
@@ -460,7 +460,7 @@ impl From<&RootApplication> for TypeReference {
     Eq,
     PartialEq,
 )]
-pub struct TrueSchema {
+pub struct SchemaTree {
     identity: super::SchemaIdentity,
     imports: Vec<ImportDeclaration>,
     resolved_imports: Vec<super::ResolvedImport>,
@@ -473,7 +473,7 @@ pub struct TrueSchema {
     impl_blocks: Vec<ImplBlock>,
 }
 
-impl TrueSchema {
+impl SchemaTree {
     // The schema-language's fields are each a distinct typed section of the model;
     // the constructor takes them as separate typed vectors rather than a
     // bag struct. (Newer clippy raises `too_many_arguments`; the repo's
@@ -1456,7 +1456,7 @@ impl Declaration {
     /// The lowered impl catalog referenced by this declaration's trailing
     /// `{| … |}` block. Empty for a declaration with no impl block. This is
     /// the per-type reach of the enumerable manifest; the schema-wide walk
-    /// ([`TrueSchema::referenced_impls`]) unions these with the standalone
+    /// (`SchemaTree::referenced_impls`) unions these with the standalone
     /// body-optional impl blocks.
     pub fn impls(&self) -> &ImplCatalog {
         &self.impls
@@ -1750,7 +1750,7 @@ impl ImplBlock {
 }
 
 /// A single impl entry from the schema-wide manifest, paired with the type
-/// it targets. Borrowed view produced by [`TrueSchema::referenced_impls`]; the
+/// it targets. Borrowed view produced by `SchemaTree::referenced_impls`; the
 /// `target` is the declaring (fused) type or the body-optional block's
 /// referenced type.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1807,7 +1807,7 @@ impl ImplFact {
 /// exposes. The schema-language's impl catalog is *out of band* from the crate, so
 /// the trust boundary is verifying that every referenced trait/method
 /// signature is actually present here before any code trusts the catalog.
-/// [`Self::verify_catalog`] is that boundary check.
+/// `Self::verify_catalog` is that boundary check.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RustSurface {
     facts: Vec<ImplFact>,
@@ -1826,20 +1826,15 @@ impl RustSurface {
     /// [`SchemaError::UnverifiedImplReference`] naming the exact target and
     /// signature; an all-present catalog returns `Ok(())`. This proves the
     /// out-of-band catalog can be checked without parsing a real crate.
-    pub fn verify_catalog(&self, schema: &TrueSchema) -> Result<(), SchemaError> {
+    pub fn verify_catalog(&self, schema: &crate::TrueSchema) -> Result<(), SchemaError> {
         for reference in schema.referenced_impls() {
-            self.verify_reference(reference)?;
-        }
-        Ok(())
-    }
-
-    fn verify_reference(&self, reference: ReferencedImpl<'_>) -> Result<(), SchemaError> {
-        let target = reference.target();
-        if let Some(trait_name) = reference.entry().trait_name() {
-            self.verify_trait(target, trait_name)?;
-        }
-        for signature in reference.entry().methods() {
-            self.verify_method(target, signature)?;
+            let target = reference.target();
+            if let Some(trait_name) = reference.entry().trait_name() {
+                self.verify_trait(target, trait_name)?;
+            }
+            for signature in reference.entry().methods() {
+                self.verify_method(target, signature)?;
+            }
         }
         Ok(())
     }

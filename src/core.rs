@@ -4,10 +4,10 @@
 //!
 //! Two orthogonal walks live here:
 //!
-//! - decomposition — [`TrueSchema::decompose`] splits today's name-bearing
+//! - decomposition — `SchemaTree::decompose` splits today's name-bearing
 //!   semantic tree into `(CoreSchema, NameTable)`, minting or re-associating an
 //!   identifier for every local declaration; and
-//! - projection — [`CoreSchema::project`] reassembles the human-facing tree
+//! - projection — `CoreSchema::project` reassembles the human-facing tree
 //!   from the substrate plus a table, so a rename through the table changes the
 //!   projection without touching the substrate.
 //!
@@ -41,7 +41,7 @@
 //!
 //! `SchemaIdentity` is deliberately absent: the target core hash is over the
 //! substrate with identity pulled out, so the identity rides on the view, and
-//! [`CoreSchema::project`] takes it as an argument.
+//! `CoreSchema::project` takes it as an argument.
 
 use crate::{
     SchemaError, SchemaIdentity,
@@ -50,18 +50,18 @@ use crate::{
     schema::{
         ApplicationHead, Declaration, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey,
         FieldDeclaration, ImplBlock, ImplCatalog, ImportDeclaration, Name, NewtypeDeclaration,
-        RelationDeclaration, Root, RootApplication, StreamDeclaration, StreamRelation,
-        StructDeclaration, TableName, TrueSchema, TypeDeclaration, TypeReference, Visibility,
+        RelationDeclaration, Root, RootApplication, SchemaTree, StreamDeclaration, StreamRelation,
+        StructDeclaration, TableName, TypeDeclaration, TypeReference, Visibility,
     },
 };
 
-impl TrueSchema {
+impl SchemaTree {
     /// Split this name-bearing tree into the stringless substrate and its name
     /// table, re-associating identifiers against `prior` (use
     /// [`NameTable::empty`] when there is none). Decomposition is total: every
     /// local declaration receives an identifier, and every identifier the
     /// substrate carries has a row in the returned table.
-    pub fn decompose(&self, prior: &NameTable) -> (CoreSchema, NameTable) {
+    pub(crate) fn decompose(&self, prior: &NameTable) -> (CoreSchema, NameTable) {
         let mut harvest = NameHarvest::new(prior);
         let core = CoreSchema {
             imports: self.imports().to_vec(),
@@ -97,30 +97,30 @@ impl TrueSchema {
 /// The stringless schema substrate. Structure only: every local declaration is
 /// carried by its [`NominalIdentifier`], and the human names live in the
 /// [`NameTable`] produced by the same decomposition. The identity is not part
-/// of the substrate; [`CoreSchema::project`] takes it as an argument.
+/// of the substrate; `CoreSchema::project` takes it as an argument.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreSchema {
-    imports: Vec<ImportDeclaration>,
-    resolved_imports: Vec<ResolvedImport>,
-    input: CoreRoot,
-    output: CoreRoot,
-    namespace: Vec<CoreDeclaration>,
-    streams: Vec<CoreStream>,
-    families: Vec<CoreFamily>,
-    relations: Vec<RelationDeclaration>,
-    impl_blocks: Vec<CoreImplBlock>,
+    pub(crate) imports: Vec<ImportDeclaration>,
+    pub(crate) resolved_imports: Vec<ResolvedImport>,
+    pub(crate) input: CoreRoot,
+    pub(crate) output: CoreRoot,
+    pub(crate) namespace: Vec<CoreDeclaration>,
+    pub(crate) streams: Vec<CoreStream>,
+    pub(crate) families: Vec<CoreFamily>,
+    pub(crate) relations: Vec<RelationDeclaration>,
+    pub(crate) impl_blocks: Vec<CoreImplBlock>,
 }
 
 impl CoreSchema {
     /// Reassemble the human-facing tree from this substrate plus a name table.
     /// Every identifier the substrate carries must resolve through the table;
     /// a miss is the typed [`SchemaError::CoreProjectionNameAbsent`] error.
-    pub fn project(
+    pub(crate) fn project(
         &self,
         names: &NameTable,
         identity: SchemaIdentity,
-    ) -> Result<TrueSchema, SchemaError> {
-        Ok(TrueSchema::new(
+    ) -> Result<SchemaTree, SchemaError> {
+        Ok(SchemaTree::new(
             identity,
             self.imports.clone(),
             self.resolved_imports.clone(),
@@ -170,7 +170,7 @@ pub enum CoreRoot {
 }
 
 impl CoreRoot {
-    fn from_root(root: &Root, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_root(root: &Root, harvest: &mut NameHarvest<'_>) -> Self {
         match root {
             Root::Enum(declaration) => Self::Enum(CoreEnum::from_enum(declaration, harvest)),
             Root::Application(application) => Self::Application(Box::new(
@@ -179,7 +179,7 @@ impl CoreRoot {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<Root, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<Root, SchemaError> {
         Ok(match self {
             Self::Enum(declaration) => Root::Enum(declaration.project(names)?),
             Self::Application(application) => Root::application(application.project(names)?),
@@ -191,13 +191,16 @@ impl CoreRoot {
 /// arguments, mirroring [`RootApplication`].
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreRootApplication {
-    identifier: NominalIdentifier,
-    head: CoreApplicationHead,
-    arguments: Vec<CoreReference>,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) head: CoreApplicationHead,
+    pub(crate) arguments: Vec<CoreReference>,
 }
 
 impl CoreRootApplication {
-    fn from_application(application: &RootApplication, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_application(
+        application: &RootApplication,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
         Self {
             identifier: harvest.declare(DeclarationKind::Type, application.name()),
             head: CoreApplicationHead::from_head(application.head(), harvest),
@@ -209,7 +212,7 @@ impl CoreRootApplication {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<RootApplication, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<RootApplication, SchemaError> {
         Ok(RootApplication::new(
             names.projected_name(&self.identifier)?.clone(),
             self.head.project(names)?,
@@ -231,7 +234,7 @@ pub enum CoreApplicationHead {
 }
 
 impl CoreApplicationHead {
-    fn from_head(head: &ApplicationHead, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_head(head: &ApplicationHead, harvest: &mut NameHarvest<'_>) -> Self {
         match head {
             ApplicationHead::Local(name) => {
                 Self::Local(harvest.declare(DeclarationKind::Type, name))
@@ -240,7 +243,7 @@ impl CoreApplicationHead {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<ApplicationHead, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<ApplicationHead, SchemaError> {
         Ok(match self {
             Self::Local(identifier) => {
                 ApplicationHead::Local(names.projected_name(identifier)?.clone())
@@ -255,14 +258,17 @@ impl CoreApplicationHead {
 /// [`Declaration`], whose name is always its value's name.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreDeclaration {
-    visibility: Visibility,
-    parameters: Vec<NominalIdentifier>,
-    value: CoreType,
-    impls: ImplCatalog,
+    pub(crate) visibility: Visibility,
+    pub(crate) parameters: Vec<NominalIdentifier>,
+    pub(crate) value: CoreType,
+    pub(crate) impls: ImplCatalog,
 }
 
 impl CoreDeclaration {
-    fn from_declaration(declaration: &Declaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_declaration(
+        declaration: &Declaration,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
         let owner = declaration.name();
         Self {
             visibility: declaration.visibility(),
@@ -281,7 +287,7 @@ impl CoreDeclaration {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<Declaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<Declaration, SchemaError> {
         let value = self.value.project(names)?;
         let declaration = match self.visibility {
             Visibility::Public => Declaration::public(value),
@@ -313,7 +319,10 @@ pub enum CoreType {
 }
 
 impl CoreType {
-    fn from_type_declaration(declaration: &TypeDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_type_declaration(
+        declaration: &TypeDeclaration,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
         match declaration {
             TypeDeclaration::Struct(declaration) => {
                 Self::Struct(CoreStruct::from_struct(declaration, harvest))
@@ -327,7 +336,7 @@ impl CoreType {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<TypeDeclaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<TypeDeclaration, SchemaError> {
         Ok(match self {
             Self::Struct(declaration) => TypeDeclaration::Struct(declaration.project(names)?),
             Self::Enum(declaration) => TypeDeclaration::Enum(declaration.project(names)?),
@@ -347,12 +356,15 @@ impl CoreType {
 /// A struct declaration in the substrate, mirroring [`StructDeclaration`].
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreStruct {
-    identifier: NominalIdentifier,
-    fields: Vec<CoreField>,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) fields: Vec<CoreField>,
 }
 
 impl CoreStruct {
-    fn from_struct(declaration: &StructDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_struct(
+        declaration: &StructDeclaration,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
         Self {
             identifier: harvest.declare(DeclarationKind::Type, &declaration.name),
             fields: declaration
@@ -363,7 +375,7 @@ impl CoreStruct {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<StructDeclaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<StructDeclaration, SchemaError> {
         Ok(StructDeclaration::new(
             names.projected_name(&self.identifier)?.clone(),
             self.fields
@@ -375,41 +387,58 @@ impl CoreStruct {
 }
 
 /// A struct field in the substrate, mirroring [`FieldDeclaration`]. The field
-/// mints from its owner-qualified name and projects the local part back.
+/// mints its identifier from its owner-qualified current name; only an
+/// explicit disambiguator is stored as a table row. A derived field name is a
+/// pure projection — snake_case of a plain type name, or the generic
+/// definition's per-kind pattern for an application — recomputed on demand
+/// from the reference, so a rename of the referenced type moves the derived
+/// name without any stored name data.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreField {
-    identifier: NominalIdentifier,
-    reference: CoreReference,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) reference: CoreReference,
 }
 
 impl CoreField {
-    fn from_field(field: &FieldDeclaration, owner: &Name, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_field(
+        field: &FieldDeclaration,
+        owner: &Name,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
+        let qualified = field.name.qualified_under(Some(owner));
+        // A field whose current name equals its reference's derivation carries
+        // no name data: the identifier still mints from the qualified current
+        // name, but no table row is stored, and the name is derived on demand.
+        let identifier = if field.name == field.reference.derived_field_name() {
+            harvest.associate(DeclarationKind::Field, &qualified)
+        } else {
+            harvest.declare(DeclarationKind::Field, &qualified)
+        };
         Self {
-            identifier: harvest.declare(
-                DeclarationKind::Field,
-                &field.name.qualified_under(Some(owner)),
-            ),
+            identifier,
             reference: CoreReference::from_reference(&field.reference, harvest),
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<FieldDeclaration, SchemaError> {
-        Ok(FieldDeclaration {
-            name: Name::new(names.projected_name(&self.identifier)?.local_part()),
-            reference: self.reference.project(names)?,
-        })
+    pub(crate) fn project(&self, names: &NameTable) -> Result<FieldDeclaration, SchemaError> {
+        let reference = self.reference.project(names)?;
+        let name = match names.name_of(&self.identifier) {
+            Some(stored) => Name::new(stored.local_part()),
+            None => reference.derived_field_name(),
+        };
+        Ok(FieldDeclaration { name, reference })
     }
 }
 
 /// An enum declaration in the substrate, mirroring [`EnumDeclaration`].
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreEnum {
-    identifier: NominalIdentifier,
-    variants: Vec<CoreVariant>,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) variants: Vec<CoreVariant>,
 }
 
 impl CoreEnum {
-    fn from_enum(declaration: &EnumDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_enum(declaration: &EnumDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
         Self {
             identifier: harvest.declare(DeclarationKind::Type, &declaration.name),
             variants: declaration
@@ -420,7 +449,7 @@ impl CoreEnum {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<EnumDeclaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<EnumDeclaration, SchemaError> {
         Ok(EnumDeclaration::new(
             names.projected_name(&self.identifier)?.clone(),
             self.variants
@@ -435,13 +464,17 @@ impl CoreEnum {
 /// mints from its enum-qualified name and projects the local part back.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreVariant {
-    identifier: NominalIdentifier,
-    payload: Option<CoreReference>,
-    stream_relation: Option<CoreStreamRelation>,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) payload: Option<CoreReference>,
+    pub(crate) stream_relation: Option<CoreStreamRelation>,
 }
 
 impl CoreVariant {
-    fn from_variant(variant: &EnumVariant, owner: &Name, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_variant(
+        variant: &EnumVariant,
+        owner: &Name,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
         Self {
             identifier: harvest.declare(
                 DeclarationKind::Variant,
@@ -458,7 +491,7 @@ impl CoreVariant {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<EnumVariant, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<EnumVariant, SchemaError> {
         Ok(EnumVariant {
             name: Name::new(names.projected_name(&self.identifier)?.local_part()),
             payload: self
@@ -484,7 +517,7 @@ pub enum CoreStreamRelation {
 }
 
 impl CoreStreamRelation {
-    fn from_relation(relation: &StreamRelation, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_relation(relation: &StreamRelation, harvest: &mut NameHarvest<'_>) -> Self {
         match relation {
             StreamRelation::Opens(name) => {
                 Self::Opens(harvest.declare(DeclarationKind::Type, name))
@@ -495,7 +528,7 @@ impl CoreStreamRelation {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<StreamRelation, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<StreamRelation, SchemaError> {
         Ok(match self {
             Self::Opens(identifier) => {
                 StreamRelation::Opens(names.projected_name(identifier)?.clone())
@@ -510,19 +543,22 @@ impl CoreStreamRelation {
 /// A newtype declaration in the substrate, mirroring [`NewtypeDeclaration`].
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreNewtype {
-    identifier: NominalIdentifier,
-    reference: CoreReference,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) reference: CoreReference,
 }
 
 impl CoreNewtype {
-    fn from_newtype(declaration: &NewtypeDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_newtype(
+        declaration: &NewtypeDeclaration,
+        harvest: &mut NameHarvest<'_>,
+    ) -> Self {
         Self {
             identifier: harvest.declare(DeclarationKind::Type, &declaration.name),
             reference: CoreReference::from_reference(&declaration.reference, harvest),
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<NewtypeDeclaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<NewtypeDeclaration, SchemaError> {
         Ok(NewtypeDeclaration::new(
             names.projected_name(&self.identifier)?.clone(),
             self.reference.project(names)?,
@@ -533,15 +569,15 @@ impl CoreNewtype {
 /// A stream declaration in the substrate, mirroring [`StreamDeclaration`].
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreStream {
-    identifier: NominalIdentifier,
-    token: CoreReference,
-    opened: CoreReference,
-    event: CoreReference,
-    close: CoreReference,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) token: CoreReference,
+    pub(crate) opened: CoreReference,
+    pub(crate) event: CoreReference,
+    pub(crate) close: CoreReference,
 }
 
 impl CoreStream {
-    fn from_stream(stream: &StreamDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_stream(stream: &StreamDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
         Self {
             identifier: harvest.declare(DeclarationKind::Type, &stream.name),
             token: CoreReference::from_reference(&stream.token, harvest),
@@ -551,7 +587,7 @@ impl CoreStream {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<StreamDeclaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<StreamDeclaration, SchemaError> {
         Ok(StreamDeclaration::new(
             names.projected_name(&self.identifier)?.clone(),
             self.token.project(names)?,
@@ -567,14 +603,14 @@ impl CoreStream {
 /// a storage coordinate — explicitly not a schema symbol — and stays data.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreFamily {
-    identifier: NominalIdentifier,
-    record: NominalIdentifier,
-    table: TableName,
-    key: FamilyKey,
+    pub(crate) identifier: NominalIdentifier,
+    pub(crate) record: NominalIdentifier,
+    pub(crate) table: TableName,
+    pub(crate) key: FamilyKey,
 }
 
 impl CoreFamily {
-    fn from_family(family: &FamilyDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_family(family: &FamilyDeclaration, harvest: &mut NameHarvest<'_>) -> Self {
         Self {
             identifier: harvest.declare(DeclarationKind::Type, &family.name),
             record: harvest.declare(DeclarationKind::Type, &family.record),
@@ -583,7 +619,7 @@ impl CoreFamily {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<FamilyDeclaration, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<FamilyDeclaration, SchemaError> {
         Ok(FamilyDeclaration::new(
             names.projected_name(&self.identifier)?.clone(),
             names.projected_name(&self.record)?.clone(),
@@ -598,19 +634,19 @@ impl CoreFamily {
 /// Rust-surface contract data.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct CoreImplBlock {
-    target: NominalIdentifier,
-    catalog: ImplCatalog,
+    pub(crate) target: NominalIdentifier,
+    pub(crate) catalog: ImplCatalog,
 }
 
 impl CoreImplBlock {
-    fn from_impl_block(block: &ImplBlock, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_impl_block(block: &ImplBlock, harvest: &mut NameHarvest<'_>) -> Self {
         Self {
             target: harvest.declare(DeclarationKind::Type, block.target()),
             catalog: block.catalog().clone(),
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<ImplBlock, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<ImplBlock, SchemaError> {
         Ok(ImplBlock::new(
             names.projected_name(&self.target)?.clone(),
             self.catalog.clone(),
@@ -657,7 +693,7 @@ pub enum CoreReference {
 }
 
 impl CoreReference {
-    fn from_reference(reference: &TypeReference, harvest: &mut NameHarvest<'_>) -> Self {
+    pub(crate) fn from_reference(reference: &TypeReference, harvest: &mut NameHarvest<'_>) -> Self {
         match reference {
             TypeReference::String => Self::String,
             TypeReference::Integer => Self::Integer,
@@ -689,7 +725,7 @@ impl CoreReference {
         }
     }
 
-    fn project(&self, names: &NameTable) -> Result<TypeReference, SchemaError> {
+    pub(crate) fn project(&self, names: &NameTable) -> Result<TypeReference, SchemaError> {
         Ok(match self {
             Self::String => TypeReference::String,
             Self::Integer => TypeReference::Integer,

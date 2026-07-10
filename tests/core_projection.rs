@@ -1,13 +1,17 @@
-//! Projection-equivalence witnesses for the stringless `CoreSchema` substrate:
-//! over the fixture corpus, decomposing today's stored `TrueSchema` tree into
-//! `(CoreSchema, NameTable)` and projecting back yields a tree equal to the
-//! original, and the retargeted lowering entry (`lower_core_source`) produces
-//! exactly that pair.
+//! Witnesses for the split TrueSchema view: over the fixture corpus the view's
+//! codec projections round-trip value-exactly (the post-flip form of the
+//! projection-equivalence witness), derived field names are computed on demand
+//! and match what lowering previously materialized, a rename through the
+//! `NameTable` changes the projection and the derived names without touching
+//! the `CoreSchema` bytes, and only explicit disambiguators are stored as
+//! field name data.
 
 use std::path::Path;
 
+use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{
-    ImportResolver, NameTable, SchemaEngine, SchemaError, SchemaIdentity, TrueSchema,
+    DeclarationKind, ImportResolver, Name, NameTable, SchemaEngine, SchemaError, SchemaIdentity,
+    TrueSchema, TypeDeclaration, TypeDeclarationView,
 };
 
 /// One corpus entry: a named `.schema` source and the resolver it needs, if
@@ -63,6 +67,11 @@ fn marker_core_resolver() -> ImportResolver {
         .join("schema");
     ImportResolver::new().with_dependency("marker-core", schema_dir, "0.1.0")
 }
+
+/// The source of the explicit-disambiguator fixture: TimeRange duplicates the
+/// Time component, so start/end are stored explicit field names, while every
+/// Entry field name is derived.
+const EXPLICIT_DISAMBIGUATOR_SOURCE: &str = "{}\n[Record.Entry]\n[Recorded.Entry]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains Vector.Domain\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents Vector.String\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}\n[]";
 
 /// The fixture corpus: every checked-in positive-lowering fixture family, the
 /// two self-describing repo schemas, and inline fixtures covering explicit
@@ -144,12 +153,7 @@ fn corpus() -> Vec<CorpusEntry> {
             "body-optional",
             include_str!("fixtures/impl-catalog/body-optional.schema"),
         ),
-        // The explicit-disambiguator fixture: TimeRange duplicates the Time
-        // component, so start/end are stored explicit field names.
-        CorpusEntry::plain(
-            "explicit-disambiguators",
-            "{}\n[Record.Entry]\n[Recorded.Entry]\n{\n  Record Entry\n  Recorded Entry\n  Domain String\n  Domains Vector.Domain\n  EntryKind [Belief Principle Constraint]\n  Description String\n  Referents Vector.String\n  Entry { Domains EntryKind Description Referents }\n  Time Integer\n  TimeRange { start.Time end.Time }\n}\n[]",
-        ),
+        CorpusEntry::plain("explicit-disambiguators", EXPLICIT_DISAMBIGUATOR_SOURCE),
         // The application-form Input root over a locally-declared
         // four-parameter frame head.
         CorpusEntry::plain(
@@ -165,65 +169,229 @@ fn corpus() -> Vec<CorpusEntry> {
     ]
 }
 
-/// For every corpus fixture, decomposing the stored tree and projecting the
-/// substrate back through its name table yields exactly the stored tree.
+/// The post-flip projection-equivalence witness: for every corpus fixture the
+/// view's codec projections round-trip value-exactly through both structured
+/// NOTA and the canonical binary bytes — the encoded form is the projected
+/// sidecar tree, so a passing round trip proves the projection reproduces the
+/// value lowering built.
 #[test]
-fn projection_over_the_fixture_corpus_equals_the_stored_tree() {
+fn view_codecs_round_trip_value_exactly_over_the_corpus() {
     for entry in corpus() {
         let schema = entry.lower();
-        let (core, names) = schema.decompose(&NameTable::empty());
-        let projected = core
-            .project(&names, schema.identity().clone())
-            .unwrap_or_else(|error| panic!("fixture {} projects: {error}", entry.name));
+
+        let bytes = schema
+            .to_binary_bytes()
+            .unwrap_or_else(|error| panic!("fixture {} encodes to rkyv: {error}", entry.name));
+        let from_binary = TrueSchema::from_binary_bytes(&bytes)
+            .unwrap_or_else(|error| panic!("fixture {} decodes from rkyv: {error}", entry.name));
         assert_eq!(
-            projected, schema,
-            "projected TrueSchema view must equal the stored tree for fixture {}",
+            from_binary, schema,
+            "binary round trip must be value-exact for fixture {}",
+            entry.name,
+        );
+
+        let nota = schema.to_nota();
+        let document = Document::parse(&nota)
+            .unwrap_or_else(|error| panic!("fixture {} NOTA parses: {error:?}", entry.name));
+        let from_nota = TrueSchema::from_nota_block(&document.root_objects()[0])
+            .unwrap_or_else(|error| panic!("fixture {} decodes from NOTA: {error}", entry.name));
+        assert_eq!(
+            from_nota, schema,
+            "NOTA round trip must be value-exact for fixture {}",
             entry.name,
         );
     }
 }
 
-/// The retargeted lowering entry produces exactly the pair the stored tree
-/// decomposes to: source → (CoreSchema, NameTable) is the same split model.
+/// The retargeted lowering entry produces exactly the split pair the lowered
+/// view holds: source → (CoreSchema, NameTable) is the same model.
 #[test]
-fn lower_core_source_produces_the_decomposed_pair() {
+fn lower_core_source_produces_the_view_pair() {
     for entry in corpus() {
         let schema = entry.lower();
-        let (expected_core, expected_names) = schema.decompose(&NameTable::empty());
         let (core, names) = entry
             .lower_core()
             .unwrap_or_else(|error| panic!("fixture {} lowers to core: {error}", entry.name));
         assert_eq!(
-            core, expected_core,
-            "lower_core_source substrate must match decomposition for fixture {}",
+            &core,
+            schema.core(),
+            "lower_core_source substrate must match the view's for fixture {}",
             entry.name,
         );
         assert_eq!(
-            names, expected_names,
-            "lower_core_source name table must match decomposition for fixture {}",
+            &names,
+            schema.names(),
+            "lower_core_source name table must match the view's for fixture {}",
             entry.name,
         );
     }
 }
 
-/// Decomposition is deterministic: decomposing the same tree twice yields
-/// identical substrate values and identical canonical table bytes.
+/// Lowering is deterministic in the split model: the same source yields equal
+/// views, equal substrate canonical bytes, and equal table canonical bytes.
 #[test]
-fn decomposition_is_deterministic() {
+fn lowering_the_split_model_is_deterministic() {
     for entry in corpus() {
-        let schema = entry.lower();
-        let (first_core, first_names) = schema.decompose(&NameTable::empty());
-        let (second_core, second_names) = schema.decompose(&NameTable::empty());
-        assert_eq!(first_core, second_core, "substrate for {}", entry.name);
+        let first = entry.lower();
+        let second = entry.lower();
+        assert_eq!(first, second, "views for {}", entry.name);
         assert_eq!(
-            first_names
+            first
+                .core()
+                .canonical_bytes()
+                .expect("first substrate serializes"),
+            second
+                .core()
+                .canonical_bytes()
+                .expect("second substrate serializes"),
+            "substrate canonical bytes for {}",
+            entry.name,
+        );
+        assert_eq!(
+            first
+                .names()
                 .canonical_bytes()
                 .expect("first table serializes"),
-            second_names
+            second
+                .names()
                 .canonical_bytes()
                 .expect("second table serializes"),
-            "canonical table bytes for {}",
+            "table canonical bytes for {}",
             entry.name,
         );
     }
+}
+
+/// Derived field names are computed on demand and match what lowering
+/// previously materialized: Entry's fields derive from their references, and
+/// TimeRange's duplicated component keeps its explicit disambiguators.
+#[test]
+fn derived_field_names_project_on_demand_and_match_materialized_names() {
+    let schema =
+        CorpusEntry::plain("explicit-disambiguators", EXPLICIT_DISAMBIGUATOR_SOURCE).lower();
+
+    let Some(TypeDeclaration::Struct(entry)) = schema.type_named("Entry") else {
+        panic!("Entry lowers to a struct");
+    };
+    let entry_names: Vec<String> = entry
+        .fields
+        .iter()
+        .map(|field| field.name.as_str().to_owned())
+        .collect();
+    assert_eq!(
+        entry_names,
+        ["domains", "entry_kind", "description", "referents"],
+        "derived field names computed on demand match the previously materialized names",
+    );
+
+    let Some(TypeDeclaration::Struct(range)) = schema.type_named("TimeRange") else {
+        panic!("TimeRange lowers to a struct");
+    };
+    let range_names: Vec<String> = range
+        .fields
+        .iter()
+        .map(|field| field.name.as_str().to_owned())
+        .collect();
+    assert_eq!(
+        range_names,
+        ["start", "end"],
+        "explicit disambiguators survive projection",
+    );
+
+    // The view layer reports which names are stored data: TimeRange's are
+    // explicit rows, Entry's are on-demand derivations with no row at all.
+    let Some(TypeDeclarationView::Struct(entry_view)) = schema.type_view_named("Entry") else {
+        panic!("Entry views as a struct");
+    };
+    assert!(
+        entry_view
+            .fields()
+            .iter()
+            .all(|field| !field.has_explicit_name()),
+        "derived field names must not be stored as name data",
+    );
+    let Some(TypeDeclarationView::Struct(range_view)) = schema.type_view_named("TimeRange") else {
+        panic!("TimeRange views as a struct");
+    };
+    assert!(
+        range_view
+            .fields()
+            .iter()
+            .all(|field| field.has_explicit_name()),
+        "explicit disambiguators are stored as name data",
+    );
+    // And no Field-kind row exists for a derived name anywhere in the table.
+    assert!(
+        !schema
+            .names()
+            .entries()
+            .iter()
+            .any(|row| row.identifier().kind() == DeclarationKind::Field
+                && row.name().as_str().ends_with(":domains")),
+        "the table must not hold a row for the derived field name",
+    );
+}
+
+/// A rename applied through the `NameTable` changes the projection and every
+/// derived field name without touching the `CoreSchema` bytes.
+#[test]
+fn rename_through_the_table_moves_projection_but_not_core_bytes() {
+    let mut schema =
+        CorpusEntry::plain("explicit-disambiguators", EXPLICIT_DISAMBIGUATOR_SOURCE).lower();
+
+    let core_bytes_before = schema
+        .core()
+        .canonical_bytes()
+        .expect("substrate serializes before rename");
+
+    let domains = schema
+        .identifier_named(DeclarationKind::Type, &Name::new("Domains"))
+        .expect("the Domains newtype is minted");
+    schema
+        .rename(&domains, Name::new("TopicSet"))
+        .expect("rename through the table succeeds");
+
+    // The projection follows the new name: the old name is gone, the new name
+    // resolves, and every reference projects the new spelling.
+    assert!(
+        schema.type_named("Domains").is_none(),
+        "the old name no longer projects",
+    );
+    assert!(
+        schema.type_named("TopicSet").is_some(),
+        "the new name projects",
+    );
+
+    // The derived field name follows the rename with no stored-name change:
+    // Entry's first field derives snake_case of the current type name.
+    let Some(TypeDeclaration::Struct(entry)) = schema.type_named("Entry") else {
+        panic!("Entry lowers to a struct");
+    };
+    assert_eq!(
+        entry
+            .fields
+            .first()
+            .expect("Entry has fields")
+            .name
+            .as_str(),
+        "topic_set",
+        "the derived field name follows the renamed type on demand",
+    );
+
+    // The canonical schema text — the full human projection — carries the new
+    // name too.
+    assert!(
+        schema.to_schema_text().contains("TopicSet"),
+        "the projected schema text follows the rename",
+    );
+
+    // And the substrate is untouched: identical canonical bytes.
+    let core_bytes_after = schema
+        .core()
+        .canonical_bytes()
+        .expect("substrate serializes after rename");
+    assert_eq!(
+        core_bytes_before, core_bytes_after,
+        "a rename must not move a single CoreSchema byte",
+    );
 }

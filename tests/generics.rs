@@ -43,12 +43,9 @@ fn try_lower(namespace: &str) -> Result<schema_language::TrueSchema, SchemaError
     )
 }
 
-fn single_reference<'schema>(
-    schema: &'schema schema_language::TrueSchema,
-    name: &str,
-) -> &'schema TypeReference {
+fn single_reference(schema: &schema_language::TrueSchema, name: &str) -> TypeReference {
     match schema.type_named(name).expect("type present") {
-        TypeDeclaration::Newtype(declaration) => &declaration.reference,
+        TypeDeclaration::Newtype(declaration) => declaration.reference,
         TypeDeclaration::Struct(_) | TypeDeclaration::Enum(_) => {
             panic!("{name} should be a single-reference declaration")
         }
@@ -62,7 +59,7 @@ fn multi_argument_application_lowers_to_application() {
     let schema = lower("Alpha String Beta String Holder Foo.(Alpha Beta)");
     assert_eq!(
         single_reference(&schema, "Holder"),
-        &TypeReference::Application {
+        TypeReference::Application {
             head: ApplicationHead::Local(Name::new("Foo")),
             arguments: vec![TypeReference::new("Alpha"), TypeReference::new("Beta")],
         }
@@ -111,15 +108,15 @@ fn builtin_heads_still_lower_to_their_variants() {
     );
     assert_eq!(
         single_reference(&schema, "VectorField"),
-        &TypeReference::Vector(Box::new(TypeReference::new("Value")))
+        TypeReference::Vector(Box::new(TypeReference::new("Value")))
     );
     assert_eq!(
         single_reference(&schema, "OptionalField"),
-        &TypeReference::Optional(Box::new(TypeReference::new("Value")))
+        TypeReference::Optional(Box::new(TypeReference::new("Value")))
     );
     assert_eq!(
         single_reference(&schema, "MapField"),
-        &TypeReference::Map(
+        TypeReference::Map(
             Box::new(TypeReference::new("Key")),
             Box::new(TypeReference::new("Value")),
         )
@@ -155,7 +152,7 @@ fn dropped_vec_alias_no_longer_lowers_to_vector() {
     );
     assert_eq!(
         reference,
-        &TypeReference::Application {
+        TypeReference::Application {
             head: ApplicationHead::Local(Name::new("Vec")),
             arguments: vec![TypeReference::new("Service")],
         }
@@ -209,16 +206,14 @@ fn closure_over_imported_generic_head_records_the_import() {
 // (decision O8).
 // ----------------------------------------------------------------------
 
-fn declaration_parameters<'schema>(
-    schema: &'schema schema_language::TrueSchema,
-    name: &str,
-) -> &'schema [Name] {
+fn declaration_parameters(schema: &schema_language::TrueSchema, name: &str) -> Vec<Name> {
     schema
         .namespace()
-        .iter()
+        .into_iter()
         .find(|declaration| declaration.name().as_str() == name)
         .expect("declaration present")
         .parameters()
+        .to_vec()
 }
 
 // (a) A parameterized declaration whose body uses its parameters as Plain
@@ -276,7 +271,7 @@ fn application_with_correct_argument_count_lowers() {
     let schema = lower("(| Plane Input Output |) { Input Output } Holder Plane.(String Integer)");
     assert_eq!(
         single_reference(&schema, "Holder"),
-        &TypeReference::Application {
+        TypeReference::Application {
             head: ApplicationHead::Local(Name::new("Plane")),
             arguments: vec![TypeReference::String, TypeReference::Integer],
         },
@@ -307,7 +302,7 @@ fn declared_parameterized_head_wins_over_unresolved_application() {
     let schema = lower("Holder Foo.String");
     assert_eq!(
         single_reference(&schema, "Holder"),
-        &TypeReference::Application {
+        TypeReference::Application {
             head: ApplicationHead::Local(Name::new("Foo")),
             arguments: vec![TypeReference::String],
         },
@@ -345,7 +340,7 @@ fn map_grouped_payload_lowers_and_dot_chain_arity_fails() {
     let schema = lower("Key String Value String Holder Map.(Key Value)");
     assert_eq!(
         single_reference(&schema, "Holder"),
-        &TypeReference::Map(
+        TypeReference::Map(
             Box::new(TypeReference::new("Key")),
             Box::new(TypeReference::new("Value")),
         ),
@@ -470,8 +465,8 @@ fn root_position_application_lowers_to_root_application() {
         "Input root should be the application form, got {:?}",
         schema.input(),
     );
-    let application = schema
-        .input()
+    let input = schema.input();
+    let application = input
         .as_application()
         .expect("Input root is the application form");
     assert_eq!(application.name().as_str(), "Input");

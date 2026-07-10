@@ -97,31 +97,26 @@ fn expand_root(
         application.arguments().len(),
         "frame head {frame_name} arity must match the application argument count",
     );
-    application.expand_with(parameters, variants)
+    application.expand_with(&parameters, &variants)
 }
 
-fn application_root<'schema>(
-    schema: &'schema TrueSchema,
-    position: &str,
-) -> &'schema RootApplication {
+fn application_root(schema: &TrueSchema, position: &str) -> RootApplication {
     schema
         .root_named(position)
         .unwrap_or_else(|| panic!("{position} root present"))
         .as_application()
         .unwrap_or_else(|| panic!("{position} root is the application form"))
+        .clone()
 }
 
-fn concrete_root_variants<'schema>(
-    schema: &'schema TrueSchema,
-    position: &str,
-) -> &'schema [EnumVariant] {
+fn concrete_root_variants(schema: &TrueSchema, position: &str) -> Vec<EnumVariant> {
     let Root::Enum(declaration) = schema
         .root_named(position)
         .unwrap_or_else(|| panic!("concrete {position} root present"))
     else {
         panic!("concrete {position} root is the enum-body form");
     };
-    &declaration.variants
+    declaration.variants
 }
 
 // ----------------------------------------------------------------------
@@ -319,7 +314,7 @@ fn migrated_input_frame_expands_to_the_concrete_input_root() {
 
     // Expand `(Work SignalInput SemaWriteOutput SemaReadOutput EffectOutcome)`.
     let input = application_root(&migrated, "Input");
-    let expanded = expand_root(&reaction, "Work", input);
+    let expanded = expand_root(&reaction, "Work", &input);
 
     // The concrete Input root was hand-written as the same four legs.
     let concrete_variants = concrete_root_variants(&concrete, "Input");
@@ -377,7 +372,7 @@ fn migrated_output_frame_expands_to_the_concrete_output_root() {
     // payload-binding legs exactly, then confirm the Continuation leg name and
     // that its migrated payload is the Work application.
     let output = application_root(&migrated, "Output");
-    let expanded = expand_root(&reaction, "Action", output);
+    let expanded = expand_root(&reaction, "Action", &output);
     let concrete_variants = concrete_root_variants(&concrete, "Output");
 
     // Same variant names, same order, for all five legs.
@@ -458,8 +453,8 @@ fn spirit_binds_every_frame_leg_full_frame() {
 
     // Every expanded leg carries a payload — no leg bound to an absent /
     // uninhabitable type (the omittable-leg mechanism stays unexercised).
-    let input_legs = expand_root(&reaction, "Work", input);
-    let output_legs = expand_root(&reaction, "Action", output);
+    let input_legs = expand_root(&reaction, "Work", &input);
+    let output_legs = expand_root(&reaction, "Action", &output);
     for leg in input_legs.iter().chain(output_legs.iter()) {
         assert!(
             leg.payload.is_some(),

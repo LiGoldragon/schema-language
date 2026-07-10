@@ -430,10 +430,8 @@ fn root_header_explicit_names_resolve_to_exported_namespace_payloads() {
         )
         .expect("schema source lowers");
 
-    let input = schema
-        .input()
-        .as_enum()
-        .expect("input is the enum-body form");
+    let input_root = schema.input();
+    let input = input_root.as_enum().expect("input is the enum-body form");
     assert_eq!(input.variants[0].name.as_str(), "Lookup");
     assert_eq!(
         input.variants[0]
@@ -798,8 +796,8 @@ fn schema_source_lowers_stream_declarations_and_variant_relations() {
         "semantic schema re-emission must not reintroduce named-brace Stream application"
     );
 
-    let watch_relation = schema
-        .input()
+    let input_root = schema.input();
+    let watch_relation = input_root
         .as_enum()
         .expect("input is the enum-body form")
         .variants[0]
@@ -867,8 +865,8 @@ fn source_enum_variants_are_typed_structural_macro_nodes() {
             SchemaIdentity::new("example:lib", "0.1.0"),
         )
         .expect("schema source lowers");
-    let variants = schema
-        .input()
+    let input_root = schema.input();
+    let variants = input_root
         .as_enum()
         .expect("input is the enum-body form")
         .variants

@@ -18,8 +18,8 @@ use schema_language::{
 
 /// The enum body of a root known to be the enum-body form — the shape of
 /// every root in these design fixtures.
-fn root_enum(root: &Root) -> &EnumDeclaration {
-    root.as_enum().expect("root is the enum-body form")
+fn root_enum(root: Root) -> EnumDeclaration {
+    root.as_enum().cloned().expect("root is the enum-body form")
 }
 
 /// Illustrates: a schema document is positional and has exactly five root
@@ -71,18 +71,18 @@ fn design_example_namespace_brace_contains_key_value_declarations() {
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("key/value namespace lowers");
 
-    let names: Vec<&str> = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let names: Vec<&str> = namespace
         .iter()
         .map(|declaration| declaration.name().as_str())
         .collect();
     assert_eq!(names, vec!["Topic", "Kind"]);
 
-    let TypeDeclaration::Newtype(topic) = schema.namespace()[0].value() else {
+    let TypeDeclaration::Newtype(topic) = namespace[0].value() else {
         panic!("Topic should lower as a newtype");
     };
     assert_eq!(topic.reference, TypeReference::String);
-    let TypeDeclaration::Enum(kind) = schema.namespace()[1].value() else {
+    let TypeDeclaration::Enum(kind) = namespace[1].value() else {
         panic!("Kind should lower as an enum");
     };
     let variant_names: Vec<&str> = kind
@@ -423,7 +423,8 @@ fn design_example_root_enum_uses_direct_variant_shapes() {
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("direct variants lower");
 
-    let variants: Vec<(&str, Option<&str>)> = root_enum(schema.input())
+    let input = root_enum(schema.input());
+    let variants: Vec<(&str, Option<&str>)> = input
         .variants
         .iter()
         .map(|variant| {
@@ -533,8 +534,8 @@ fn design_example_signal_nexus_and_sema_are_schema_declared_planes() {
     assert_eq!(schema.input().name().as_str(), "Input");
     assert_eq!(schema.output().name().as_str(), "Output");
 
-    let names: Vec<&str> = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let names: Vec<&str> = namespace
         .iter()
         .map(|declaration| declaration.name().as_str())
         .collect();

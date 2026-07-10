@@ -6,8 +6,14 @@ use schema_language::{
 
 /// The enum body of a root known to be the enum-body form, for the fixtures
 /// in this file whose roots are all `[Variant …]`.
-fn root_enum(root: &Root) -> &EnumDeclaration {
-    root.as_enum().expect("root is the enum-body form")
+fn root_enum(root: Root) -> EnumDeclaration {
+    root.as_enum().cloned().expect("root is the enum-body form")
+}
+
+/// The projected type body of the namespace declaration at `index`, owned, so
+/// let-else matching does not borrow from a projection temporary.
+fn declaration_value(schema: &schema_language::TrueSchema, index: usize) -> TypeDeclaration {
+    schema.namespace()[index].value().clone()
 }
 
 #[test]
@@ -337,11 +343,11 @@ fn colon_qualified_names_lower_as_schema_names() {
         schema.namespace()[1].name().namespace_segments(),
         vec!["schema", "spirit", "Entry"]
     );
-    let TypeDeclaration::Newtype(topic) = schema.namespace()[0].value() else {
+    let TypeDeclaration::Newtype(topic) = declaration_value(&schema, 0) else {
         panic!("topic should be an alias");
     };
     assert_eq!(topic.name.local_part(), "Topic");
-    let TypeDeclaration::Newtype(entry) = schema.namespace()[1].value() else {
+    let TypeDeclaration::Newtype(entry) = declaration_value(&schema, 1) else {
         panic!("entry should be an alias");
     };
     assert_eq!(
@@ -714,7 +720,7 @@ fn field_names_are_derived_from_type_names() {
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("schema lowers");
-    let TypeDeclaration::Struct(entry) = schema.namespace()[2].value() else {
+    let TypeDeclaration::Struct(entry) = declaration_value(&schema, 2) else {
         panic!("entry should be a struct");
     };
 
@@ -754,8 +760,8 @@ fn default_engine_lowers_through_registered_structural_forms() {
         vec!["RecordAccepted", "RecordsObserved"]
     );
 
-    let entry = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let entry = namespace
         .iter()
         .find(|declaration| declaration.name().as_str() == "Entry")
         .expect("entry declaration");
@@ -779,8 +785,7 @@ fn default_engine_lowers_through_registered_structural_forms() {
         ]
     );
 
-    let kind = schema
-        .namespace()
+    let kind = namespace
         .iter()
         .find(|declaration| declaration.name().as_str() == "Kind")
         .expect("kind declaration");
@@ -862,7 +867,7 @@ fn strict_declaration_field_pairs_lower_through_default_engine() {
     let schema = SchemaEngine::default()
         .lower_source(source, SchemaIdentity::new("example", "0.1.0"))
         .expect("at declaration lowers");
-    let TypeDeclaration::Struct(entry) = schema.namespace()[2].value() else {
+    let TypeDeclaration::Struct(entry) = declaration_value(&schema, 2) else {
         panic!("entry should be a struct");
     };
 
@@ -960,7 +965,7 @@ fn inline_pascal_declaration_creates_ordered_namespace_type() {
         ]
     );
 
-    let TypeDeclaration::Struct(entry) = schema.namespace()[2].value() else {
+    let TypeDeclaration::Struct(entry) = declaration_value(&schema, 2) else {
         panic!("entry should be a struct");
     };
     assert_eq!(entry.fields[0].name, Name::new("current"));

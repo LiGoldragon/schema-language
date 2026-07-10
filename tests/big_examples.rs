@@ -102,7 +102,7 @@ fn assert_schema_data_shape(name: &str, schema: &TrueSchema) {
     }
 }
 
-fn assert_has_type(declarations: &[Declaration], name: &str) {
+fn assert_has_type(declarations: Vec<Declaration>, name: &str) {
     let found = declarations
         .iter()
         .any(|declaration| match declaration.value() {
@@ -113,11 +113,11 @@ fn assert_has_type(declarations: &[Declaration], name: &str) {
     assert!(found, "missing namespace type {name}");
 }
 
-fn root_enum(root: &schema_language::Root) -> &EnumDeclaration {
-    root.as_enum().expect("root is the enum-body form")
+fn root_enum(root: schema_language::Root) -> EnumDeclaration {
+    root.as_enum().cloned().expect("root is the enum-body form")
 }
 
-fn assert_has_variant(root: &schema_language::Root, name: &str) {
+fn assert_has_variant(root: schema_language::Root, name: &str) {
     let declaration = root_enum(root);
     assert!(
         declaration

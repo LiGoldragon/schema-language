@@ -69,8 +69,20 @@ value category.
 
 ## Core and True schema
 
-The semantic schema is one model viewed two ways. Today the model is a single
-string-bearing `TrueSchema` data tree; the target design splits it.
+The semantic schema is one model viewed two ways. The split is landed: the
+stored model is the stringless `CoreSchema` substrate (`src/core.rs`) plus the
+`NameTable` (`src/identifier.rs`), and `TrueSchema` (`src/view.rs`) is the
+projected view over that pair. The name-bearing tree survives only as the
+crate-internal codec and hash sidecar (`SchemaTree` in `src/schema.rs`): NOTA
+text, canonical schema text, and rkyv binary bytes project through it, so every
+codec surface stays value-exact with the pre-split format. Derived field names
+are stored nowhere — a field's name is either its explicit disambiguator row in
+the `NameTable` or the composed on-demand derivation from its reference — so a
+rename through the table moves the projection and every derived name without
+touching a substrate byte. A closed set of reference and contract values stays
+as data inside the substrate — imports, resolved imports, impl catalogs,
+relation paths, and table names — under the tenet that a use-site name may be a
+reference/path/name value.
 
 ### Target model
 
@@ -404,14 +416,18 @@ name-only `Rename` edit that touches only the `NameTable` does not yet exist.
 
 ### Identity is inside the core-hashed bytes today
 
-`TrueSchema` (`src/schema.rs`) holds `identity: SchemaIdentity` as its first
-field. Two hash domains already exist in `src/identity.rs`: the whole-schema
-domain hashes the full semantic value including `SchemaIdentity`, so it is not a
-pure-structure address, and a rename moves it. The per-family-closure domain
-already excludes `SchemaIdentity` and is a pure-structure address, but it is
-per-family, not the whole-schema lineage address the target design needs. The
-target pulls `SchemaIdentity` out of the whole-schema core hash so the core hash
-becomes the structural lineage address, and renames stop moving it.
+The whole-schema hash still runs over the projected sidecar tree (`SchemaTree`
+in `src/schema.rs`), which carries `identity: SchemaIdentity` as its first
+field — deliberately unchanged by the view flip so hash behavior is stable
+while the split lands. Two hash domains exist in `src/identity.rs`: the
+whole-schema domain hashes the full projected semantic value including
+`SchemaIdentity`, so it is not a pure-structure address, and a rename moves it.
+The per-family-closure domain already excludes `SchemaIdentity` and is a
+pure-structure address, but it is per-family, not the whole-schema lineage
+address the target design needs. The target moves the whole-schema hash onto
+the `CoreSchema` substrate bytes — which already exclude both `SchemaIdentity`
+and every name — so the core hash becomes the structural lineage address, and
+renames stop moving it.
 
 ## Checked-in schema files
 

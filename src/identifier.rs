@@ -391,6 +391,14 @@ impl<'prior> NameHarvest<'prior> {
         identifier
     }
 
+    /// Answer the identifier for a declaration WITHOUT recording a table row.
+    /// This is the path for identifier-addressed positions whose current name
+    /// is a pure projection — derived field names — so the table stores only
+    /// real name data.
+    pub fn associate(&self, kind: DeclarationKind, name: &Name) -> NominalIdentifier {
+        self.prior.associate(kind, name)
+    }
+
     /// Finish the harvest into the canonical table for everything declared.
     pub fn into_table(self) -> NameTable {
         NameTable::build(self.prior, self.declarations)

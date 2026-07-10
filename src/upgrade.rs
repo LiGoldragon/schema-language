@@ -325,15 +325,16 @@ struct SchemaEditor {
 
 impl SchemaEditor {
     fn new(schema: TrueSchema) -> Self {
+        let tree = schema.tree();
         Self {
-            identity: schema.identity().clone(),
-            imports: schema.imports().to_vec(),
-            resolved_imports: schema.resolved_imports().to_vec(),
-            input: schema.input().clone(),
-            output: schema.output().clone(),
-            namespace: schema.namespace().to_vec(),
-            streams: schema.streams().to_vec(),
-            families: schema.families().to_vec(),
+            identity: tree.identity().clone(),
+            imports: tree.imports().to_vec(),
+            resolved_imports: tree.resolved_imports().to_vec(),
+            input: tree.input().clone(),
+            output: tree.output().clone(),
+            namespace: tree.namespace().to_vec(),
+            streams: tree.streams().to_vec(),
+            families: tree.families().to_vec(),
         }
     }
 
@@ -398,7 +399,7 @@ impl SchemaEditor {
     }
 
     fn into_true_schema(self) -> TrueSchema {
-        TrueSchema::new(
+        let tree = crate::schema::SchemaTree::new(
             self.identity,
             self.imports,
             self.resolved_imports,
@@ -408,7 +409,8 @@ impl SchemaEditor {
             self.streams,
             self.families,
             Vec::new(),
-        )
+        );
+        TrueSchema::from_tree(&tree, &crate::NameTable::empty())
     }
 }
 
@@ -546,33 +548,5 @@ impl UpgradeReceipt {
 
     pub fn edit_receipts(&self) -> &[SchemaEditReceipt] {
         &self.edit_receipts
-    }
-}
-
-impl TrueSchema {
-    /// Replace this schema's identity with a new version stamp without
-    /// changing its declarations. `UpgradeObject::apply` calls this once
-    /// at the end of applying every edit, so the stored schema records
-    /// the new version.
-    pub fn with_identity(self, identity: SchemaIdentity) -> Self {
-        let imports = self.imports().to_vec();
-        let resolved_imports = self.resolved_imports().to_vec();
-        let input = self.input().clone();
-        let output = self.output().clone();
-        let namespace = self.namespace().to_vec();
-        let streams = self.streams().to_vec();
-        let families = self.families().to_vec();
-        let relations = self.relations().to_vec();
-        Self::new(
-            identity,
-            imports,
-            resolved_imports,
-            input,
-            output,
-            namespace,
-            streams,
-            families,
-            relations,
-        )
     }
 }

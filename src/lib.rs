@@ -13,6 +13,7 @@ mod resolution;
 mod schema;
 mod source;
 mod upgrade;
+mod view;
 
 pub use instance::InstanceSchemaText;
 
@@ -50,10 +51,10 @@ pub use schema::{
     ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration,
     FamilyKey, FieldDeclaration, ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact,
     ImplReference, ImportDeclaration, MethodParameter, MethodSignature, Name, NewtypeDeclaration,
-    ReferencedImpl, RelationDeclaration, RelationValue, Root, RootApplication, RustSurface,
-    SchemaDeclaredType, SchemaNode, SchemaNodeData, SchemaNodePair, SchemaNodeValue,
-    StreamDeclaration, StreamRelation, StructDeclaration, StructFieldMap, SymbolPath,
-    SymbolPathPosition, TableName, TrueSchema, TypeDeclaration, TypeReference, Visibility,
+    RelationDeclaration, RelationValue, Root, RootApplication, RustSurface, SchemaNode,
+    SchemaNodeData, SchemaNodePair, SchemaNodeValue, StreamDeclaration, StreamRelation,
+    StructDeclaration, StructFieldMap, SymbolPath, SymbolPathPosition, TableName, TypeDeclaration,
+    TypeReference, Visibility,
 };
 pub use source::{
     SchemaSource, SchemaSourceArtifact, SourceDeclaration, SourceDeclarationValue,
@@ -67,4 +68,9 @@ pub use source::{
 pub use upgrade::{
     AddField, AddVariant, ChangeFieldType, DefaultValue, FieldMigration, MigrationSpec, SchemaEdit,
     SchemaEditApplication, SchemaEditReceipt, UpgradeObject, UpgradeReceipt,
+};
+pub use view::{
+    DeclarationView, EnumView, FamilyView, FieldView, ImplBlockView, NewtypeView,
+    ReferencedImplView, RootApplicationView, RootView, SchemaDeclaredType, StreamView, StructView,
+    TrueSchema, TypeDeclarationView, VariantView,
 };

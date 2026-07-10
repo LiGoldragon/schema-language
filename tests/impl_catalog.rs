@@ -242,8 +242,8 @@ fn engine_namespace_walk_accepts_fused_and_body_optional_entries() {
     // The macro/engine path now carries the impl catalog too (Ruling/Fix 3
     // parity): the fused markers ride on RecordIdentifier, and the
     // body-optional block targets StatementText.
-    let record_identifier_impls = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let record_identifier_impls = namespace
         .iter()
         .find(|declaration| declaration.name().as_str() == "RecordIdentifier")
         .expect("RecordIdentifier declared")
@@ -255,11 +255,9 @@ fn engine_namespace_walk_accepts_fused_and_body_optional_entries() {
         "the engine path carries the fused marker catalog"
     );
 
-    let [block] = schema.impl_blocks() else {
-        panic!(
-            "expected one standalone impl block on the engine path, found {:?}",
-            schema.impl_blocks()
-        );
+    let impl_blocks = schema.impl_blocks();
+    let [block] = impl_blocks.as_slice() else {
+        panic!("expected one standalone impl block on the engine path, found {impl_blocks:?}");
     };
     assert_eq!(block.target().as_str(), "StatementText");
 }
@@ -286,8 +284,8 @@ fn leading_impl_block_is_rejected() {
 #[test]
 fn fused_markers_lower_onto_the_declaration() {
     let schema = lower_fixture("fused-markers");
-    let declaration = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let declaration = namespace
         .iter()
         .find(|declaration| declaration.name().as_str() == "RecordIdentifier")
         .expect("RecordIdentifier lowers");
@@ -318,8 +316,8 @@ fn fused_markers_lower_onto_the_declaration() {
 #[test]
 fn trait_method_signatures_lower_with_resolved_references() {
     let schema = lower_fixture("trait-method-sigs");
-    let declaration = schema
-        .namespace()
+    let namespace = schema.namespace();
+    let declaration = namespace
         .iter()
         .find(|declaration| declaration.name().as_str() == "NodeQuery")
         .expect("NodeQuery lowers");
@@ -367,11 +365,9 @@ fn body_optional_lowers_to_a_standalone_impl_block() {
         "the body-optional target is declared by a separate entry, not minted twice"
     );
 
-    let [block] = schema.impl_blocks() else {
-        panic!(
-            "expected one standalone impl block, found {:?}",
-            schema.impl_blocks()
-        );
+    let impl_blocks = schema.impl_blocks();
+    let [block] = impl_blocks.as_slice() else {
+        panic!("expected one standalone impl block, found {impl_blocks:?}");
     };
     assert_eq!(block.target().as_str(), "StatementText");
     let entries = block.catalog().entries();
