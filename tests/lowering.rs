@@ -297,7 +297,7 @@ fn brace_namespace_rejects_parenthesized_named_objects() {
     assert!(matches!(
         error,
         schema_language::SchemaError::ExpectedSymbol { .. }
-            | schema_language::SchemaError::ExpectedEvenMapEntries { .. }
+            | schema_language::SchemaError::NotaDecode(_)
             | schema_language::SchemaError::ExpectedDelimiter { .. }
             | schema_language::SchemaError::MacroDidNotMatch { .. }
             | schema_language::SchemaError::UnsupportedMacroNodeStructure { .. }
@@ -316,7 +316,7 @@ fn brace_namespace_rejects_redundant_key_value_declarations() {
     assert!(matches!(
         error,
         schema_language::SchemaError::ExpectedSymbol { .. }
-            | schema_language::SchemaError::ExpectedEvenMapEntries { .. }
+            | schema_language::SchemaError::NotaDecode(_)
             | schema_language::SchemaError::ExpectedDelimiter { .. }
             | schema_language::SchemaError::UnsupportedMacroNodeStructure { .. }
     ));

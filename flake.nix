@@ -254,7 +254,7 @@
             grep -R "raw_core_schema_reads_datatype_key_value_map" ${src}/tests/raw_core_schema.rs >/dev/null
             grep -R "raw_core_schema_preserves_native_key_value_and_enum_forms" ${src}/tests/raw_core_schema.rs >/dev/null
             grep -R "RawDatatypeMap" ${src}/tests/fixtures/raw-core/core.schema >/dev/null
-            grep -F "{ key Name value RawDatatype }" ${src}/tests/fixtures/raw-core/core.schema >/dev/null
+            grep -F "{ key.Name value.RawDatatype }" ${src}/tests/fixtures/raw-core/core.schema >/dev/null
             touch $out
           '';
           no-production-free-functions = pkgs.runCommand "schema-no-production-free-functions" { } ''

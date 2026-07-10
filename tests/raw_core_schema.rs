@@ -125,13 +125,19 @@ fn raw_core_schema_rejects_non_map_root() {
 }
 
 #[test]
-fn raw_core_schema_rejects_odd_key_value_count() {
+fn raw_core_schema_rejects_entry_without_top_level_dot() {
     Document::parse(ODD_MAP_SCHEMA).expect("negative fixture remains NOTA-legal");
 
     let error = RawSchemaFile::from_path_and_source("schemas/core.schema", ODD_MAP_SCHEMA)
-        .expect_err("brace map must have key/value pairs");
+        .expect_err("each datatype map entry must be a dotted key.datatype form");
 
-    assert_eq!(error, SchemaError::ExpectedEvenMapEntries { found: 3 });
+    assert!(
+        matches!(
+            error,
+            SchemaError::NotaDecode(nota::NotaDecodeError::ExpectedDottedEntry { .. })
+        ),
+        "a map entry lacking a top-level dot is rejected, got {error:?}"
+    );
 }
 
 fn assert_atom_sequence(sequence: &RawNotaSequence, expected: &[&str]) {

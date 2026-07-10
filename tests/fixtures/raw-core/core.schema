@@ -1,55 +1,55 @@
 {
-  Text [String]
-  Integer AtomInteger
-  Boolean (False True)
-  Version [String]
-  Name [String]
-  TypeName [Name]
-  FieldName [Name]
-  ModuleName [Name]
-  ModulePath [Vector.ModuleName]
-  CrateName [Name]
-  Description [String]
-  Documentation [|Core schema raw NOTA fixture with apostrophe's text, a closing bracket ], and no double quotes.|]
-  Topic [Text]
-  Topics [Vector.Topic]
-  Magnitude (Trace Low Medium High Maximum)
-  Certainty (Possible Likely Certain)
-  RecordKind (Decision Principle Correction Clarification Constraint Observation Question)
-  RawAtom { text Text }
-  RawText { text Text }
-  RawRecord { items RawDatatypeList }
-  RawVector { items RawDatatypeList }
-  RawKeyValue { entries RawDatatypeMap }
-  RawPipeParenthesis { items RawDatatypeList }
-  RawPipeBrace { items RawDatatypeList }
-  RawDatatype [RawAtom RawText RawRecord RawVector RawKeyValue RawPipeParenthesis RawPipeBrace]
-  RawDatatypeList [Vector.RawDatatype]
-  RawDatatypeMap { key Name value RawDatatype }
-  OptionalTopic Optional.Topic
-  DescriptionIndex { key Topic value Description }
-  Field { name FieldName datatype RawDatatype }
-  Fields [Vector.Field]
-  StructDeclaration { name TypeName fields Fields }
-  UnitVariant { name TypeName }
-  DataVariant { name TypeName payload RawDatatype }
-  EnumVariant [UnitVariant DataVariant]
-  EnumVariants [Vector.EnumVariant]
-  EnumDeclaration { name TypeName variants EnumVariants }
-  NewtypeDeclaration { name TypeName inner RawDatatype }
-  DatatypeDeclaration [StructDeclaration EnumDeclaration NewtypeDeclaration]
-  DatatypeDeclarations [Vector.DatatypeDeclaration]
-  ImportPath [ModuleName]
-  ImportAll { path ImportPath }
-  ImportSome { path ImportPath names TypeNames }
-  TypeNames [Vector.TypeName]
-  ImportDeclaration [ImportAll ImportSome]
-  ImportDeclarations [ImportDeclaration]
-  SchemaNode { tag Name data RawDatatype }
-  MacroParameter { name Name datatype RawDatatype }
-  MacroParameters [Vector.MacroParameter]
-  MacroExpansion { output RawDatatype }
-  MacroDefinition { name Name parameters MacroParameters expansion MacroExpansion }
-  MacroDefinitions [Vector.MacroDefinition]
-  CoreSchemaFile { datatypes RawDatatypeMap }
+  Text.[String]
+  Integer.AtomInteger
+  Boolean.(False True)
+  Version.[String]
+  Name.[String]
+  TypeName.[Name]
+  FieldName.[Name]
+  ModuleName.[Name]
+  ModulePath.[Vector.ModuleName]
+  CrateName.[Name]
+  Description.[String]
+  Documentation.[|Core schema raw NOTA fixture with apostrophe's text, a closing bracket ], and no double quotes.|]
+  Topic.[Text]
+  Topics.[Vector.Topic]
+  Magnitude.(Trace Low Medium High Maximum)
+  Certainty.(Possible Likely Certain)
+  RecordKind.(Decision Principle Correction Clarification Constraint Observation Question)
+  RawAtom.{ text.Text }
+  RawText.{ text.Text }
+  RawRecord.{ items.RawDatatypeList }
+  RawVector.{ items.RawDatatypeList }
+  RawKeyValue.{ entries.RawDatatypeMap }
+  RawPipeParenthesis.{ items.RawDatatypeList }
+  RawPipeBrace.{ items.RawDatatypeList }
+  RawDatatype.[RawAtom RawText RawRecord RawVector RawKeyValue RawPipeParenthesis RawPipeBrace]
+  RawDatatypeList.[Vector.RawDatatype]
+  RawDatatypeMap.{ key.Name value.RawDatatype }
+  OptionalTopic.Optional.Topic
+  DescriptionIndex.{ key.Topic value.Description }
+  Field.{ name.FieldName datatype.RawDatatype }
+  Fields.[Vector.Field]
+  StructDeclaration.{ name.TypeName fields.Fields }
+  UnitVariant.{ name.TypeName }
+  DataVariant.{ name.TypeName payload.RawDatatype }
+  EnumVariant.[UnitVariant DataVariant]
+  EnumVariants.[Vector.EnumVariant]
+  EnumDeclaration.{ name.TypeName variants.EnumVariants }
+  NewtypeDeclaration.{ name.TypeName inner.RawDatatype }
+  DatatypeDeclaration.[StructDeclaration EnumDeclaration NewtypeDeclaration]
+  DatatypeDeclarations.[Vector.DatatypeDeclaration]
+  ImportPath.[ModuleName]
+  ImportAll.{ path.ImportPath }
+  ImportSome.{ path.ImportPath names.TypeNames }
+  TypeNames.[Vector.TypeName]
+  ImportDeclaration.[ImportAll ImportSome]
+  ImportDeclarations.[ImportDeclaration]
+  SchemaNode.{ tag.Name data.RawDatatype }
+  MacroParameter.{ name.Name datatype.RawDatatype }
+  MacroParameters.[Vector.MacroParameter]
+  MacroExpansion.{ output.RawDatatype }
+  MacroDefinition.{ name.Name parameters.MacroParameters expansion.MacroExpansion }
+  MacroDefinitions.[Vector.MacroDefinition]
+  CoreSchemaFile.{ datatypes.RawDatatypeMap }
 }

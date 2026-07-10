@@ -1,4 +1,4 @@
-use nota::{Block, Delimiter, Document, NotaBody, NotaEncode};
+use nota::{Block, Delimiter, Document, DottedExpectation, NotaBody, NotaEncode};
 
 use crate::{
     ImportResolver, SchemaSource, TrueSchema,
@@ -66,8 +66,6 @@ pub enum SchemaError {
     },
     #[error("expected {expected} delimiter")]
     ExpectedDelimiter { expected: &'static str },
-    #[error("expected an even number of map entries, found {found}")]
-    ExpectedEvenMapEntries { found: usize },
     #[error(
         "retired struct field syntax {found}; struct bodies are positional field types, use TypeName or field_name.TypeName"
     )]
@@ -796,16 +794,17 @@ impl SchemaMacroHandler for RootImportsMacro {
     ) -> Result<MacroOutput, SchemaError> {
         self.signature.remember(position, context);
         let body = object.delimited_body(Delimiter::Brace, self.signature.expected_delimiter())?;
-        if body.root_objects().len() % 2 != 0 {
-            return Err(SchemaError::ExpectedEvenMapEntries {
-                found: body.root_objects().len(),
-            });
-        }
 
+        // Each import entry is one dotted map entry read through the shared NOTA
+        // reader, walking by consumed blocks rather than fixed pairs.
         let mut imports = Vec::new();
-        for chunk in body.root_objects().chunks_exact(2) {
-            let local_name = chunk[0].schema_name()?;
-            let source = chunk[1].schema_name()?;
+        let objects = body.root_objects();
+        let mut index = 0;
+        while index < objects.len() {
+            let entry = DottedExpectation::Uncapitalized.read_entry(&objects[index..])?;
+            index += entry.consumed();
+            let local_name = entry.key().schema_name()?;
+            let source = entry.value().schema_name()?;
             imports.push(ImportDeclaration {
                 local_name,
                 source: TypeReference::from_name(source),

@@ -475,14 +475,17 @@ impl SourceImports {
 
     fn from_block(block: &Block) -> Result<Self, SchemaError> {
         let body = NotaBody::from_delimited(block, Delimiter::Brace, "source imports")?;
-        if body.root_objects().len() % 2 != 0 {
-            return Err(SchemaError::ExpectedEvenMapEntries {
-                found: body.root_objects().len(),
-            });
+        let root_objects = body.root_objects();
+        if root_objects.len() % 2 != 0 {
+            return Err(SchemaError::from(NotaDecodeError::ExpectedRootCount {
+                type_name: "source imports",
+                expected: root_objects.len() + 1,
+                found: root_objects.len(),
+            }));
         }
 
         let mut entries = Vec::new();
-        for pair in body.root_objects().chunks_exact(2) {
+        for pair in root_objects.chunks_exact(2) {
             entries.push(SourceImport {
                 local_name: SourceAtom::from_block(&pair[0])?.into_name()?,
                 source: SourceReference::from_block(&pair[1])?,

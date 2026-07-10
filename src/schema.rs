@@ -1,8 +1,8 @@
 use std::fmt;
 
 use nota::{
-    Block, Delimiter, NotaBlock, NotaBody, NotaDecode, NotaDecodeError, NotaEncode, NotaString,
-    StructuralMacroNode,
+    Block, Delimiter, DottedExpectation, NotaBlock, NotaBody, NotaDecode, NotaDecodeError,
+    NotaEncode, NotaString, StructuralMacroNode,
 };
 
 use crate::{
@@ -1903,18 +1903,14 @@ impl NotaDecode for StructFieldMap {
     fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
         let body = NotaBody::from_delimited(block, Delimiter::Brace, "StructFieldMap")?;
         let root_objects = body.root_objects();
-        if root_objects.len() % 2 != 0 {
-            return Err(NotaDecodeError::ExpectedRootCount {
-                type_name: "StructFieldMap",
-                expected: root_objects.len() + 1,
-                found: root_objects.len(),
-            });
-        }
         let mut entries = Vec::new();
-        for chunk in root_objects.chunks_exact(2) {
+        let mut index = 0;
+        while index < root_objects.len() {
+            let entry = DottedExpectation::Uncapitalized.read_entry(&root_objects[index..])?;
+            index += entry.consumed();
             entries.push(FieldDeclaration {
-                name: Name::from_nota_block(&chunk[0])?,
-                reference: TypeReference::from_nota_block(&chunk[1])?,
+                name: Name::from_nota_block(entry.key())?,
+                reference: TypeReference::from_nota_block(entry.value())?,
             });
         }
         Ok(Self::new(entries))
@@ -1923,11 +1919,11 @@ impl NotaDecode for StructFieldMap {
 
 impl NotaEncode for StructFieldMap {
     fn to_nota(&self) -> String {
-        let mut fields = Vec::new();
-        for entry in self.entries() {
-            fields.push(entry.name.to_nota());
-            fields.push(entry.reference.to_nota());
-        }
+        let fields = self
+            .entries()
+            .iter()
+            .map(|entry| format!("{}.{}", entry.name.to_nota(), entry.reference.to_nota()))
+            .collect::<Vec<_>>();
         format!("{{{}}}", fields.join(" "))
     }
 }
@@ -2805,16 +2801,14 @@ impl<'schema> SchemaNodeMapEntries<'schema> {
     }
 
     fn read(&self) -> Result<Vec<SchemaNodePair>, SchemaError> {
-        if self.objects.len() % 2 != 0 {
-            return Err(SchemaError::ExpectedEvenMapEntries {
-                found: self.objects.len(),
-            });
-        }
         let mut pairs = Vec::new();
-        for chunk in self.objects.chunks_exact(2) {
+        let mut index = 0;
+        while index < self.objects.len() {
+            let entry = DottedExpectation::Uncapitalized.read_entry(&self.objects[index..])?;
+            index += entry.consumed();
             pairs.push(SchemaNodePair::new(
-                chunk[0].schema_name()?,
-                SchemaNodeValue::from_block(&chunk[1])?,
+                entry.key().schema_name()?,
+                SchemaNodeValue::from_block(entry.value())?,
             ));
         }
         Ok(pairs)

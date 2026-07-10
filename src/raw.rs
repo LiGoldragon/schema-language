@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use nota::{Block, Delimiter, Document};
+use nota::{Block, Delimiter, Document, NotaDecodeError};
 
 use crate::{Name, SchemaError, macros::SchemaBlockExt};
 
@@ -32,21 +32,49 @@ pub struct RawDatatypeMap {
 }
 
 impl RawDatatypeMap {
+    /// Read the datatype map as a sequence of dotted `key.datatype` entries,
+    /// walking by how many blocks each entry consumes rather than pairing by a
+    /// fixed stride. This is the raw, pre-semantic reflection layer: its keys are
+    /// arbitrary NOTA atoms — capitalized type names at the top level, lowercase
+    /// field roles inside a record — so the split is decided by the first
+    /// top-level dot alone, through the shared NOTA split primitive, without the
+    /// case gate that the two semantic dotted expectations apply.
     pub fn from_blocks(objects: &[Block]) -> Result<Self, SchemaError> {
-        if objects.len() % 2 != 0 {
-            return Err(SchemaError::ExpectedEvenMapEntries {
-                found: objects.len(),
-            });
-        }
         let mut entries = Vec::new();
-        for pair in objects.chunks_exact(2) {
+        let mut index = 0;
+        while index < objects.len() {
+            let atom = objects[index].atom().ok_or_else(|| {
+                SchemaError::from(NotaDecodeError::ExpectedDottedEntry {
+                    expectation: Self::ENTRY_EXPECTATION,
+                })
+            })?;
+            let (prefix, remainder) = atom.split_at_first_dot().ok_or_else(|| {
+                SchemaError::from(NotaDecodeError::ExpectedDottedEntry {
+                    expectation: Self::ENTRY_EXPECTATION,
+                })
+            })?;
+            let name = Block::Atom(prefix).schema_name()?;
+            let (value, consumed) = match remainder {
+                Some(value_atom) => (Block::Atom(value_atom), 1),
+                None => {
+                    let value = objects.get(index + 1).cloned().ok_or_else(|| {
+                        SchemaError::from(NotaDecodeError::DottedEntryMissingValue {
+                            expectation: Self::ENTRY_EXPECTATION,
+                        })
+                    })?;
+                    (value, 2)
+                }
+            };
             entries.push(RawDatatypeEntry {
-                name: pair[0].schema_name()?,
-                datatype: RawNotaDatatype::from_block(&pair[1])?,
+                name,
+                datatype: RawNotaDatatype::from_block(&value)?,
             });
+            index += consumed;
         }
         Ok(Self { entries })
     }
+
+    const ENTRY_EXPECTATION: &'static str = "raw datatype map entry";
 
     pub fn entries(&self) -> &[RawDatatypeEntry] {
         &self.entries
