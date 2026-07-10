@@ -60,7 +60,7 @@ always-known type at the value layer:
 - A capitalized leading atom is an object: a type, generic, or variant. It
   lowers to a Rust object.
 - A lowercase-leading atom is a name or reference: a field role, a path
-  segment, or an alias. It introduces no new lowered object.
+  segment, or an indirection name. It introduces no new lowered object.
 
 Capitalization is not a runtime decoder input. The fixed slot type decides
 string-versus-variant; a bare atom value may be capitalized, and a capitalized
@@ -90,10 +90,17 @@ string-bearing `TrueSchema` data tree; the target design splits it.
 - The core hash is over `CoreSchema` — nominal identifiers plus structure —
   with `SchemaIdentity` (component name and authored version) pulled out of the
   core-hashed bytes.
-- The core hash is a lineage address. Equal core hash means compatible, shared
-  ancestry; a common ancestor is found by core hash.
-- A separate true/name hash may exist for the human view. It moves on rename;
-  the core hash does not.
+- The core hash is a lineage address: equal core hash means compatible, shared
+  ancestry.
+- Lineage is stored as a graph of receipt edges. Each accepted structural edit
+  records a parent-core-hash-to-child-core-hash pair carrying its migration
+  receipt. The historical-to-current conversion chain between two versions is the
+  composition of the receipts along the path between them, and common-ancestor
+  search is a walk over the stored receipt edges.
+- A `Rename` edit records a `NameTable` delta on the same chain but contributes
+  no receipt, because it is a zero-migration edit.
+- A separate true/name hash exists per version for the human view. It lives
+  outside the receipt chain and moves on rename; the core hash does not.
 
 ### Evolution runs on the core
 
@@ -102,14 +109,31 @@ string-bearing `TrueSchema` data tree; the target design splits it.
 - Structural edits (`AddField`, `ChangeFieldType`, `AddVariant`) change core
   bytes and emit historical-to-current `From` implementations.
 
-### OPEN: identifier reuse on reload
+### OPEN: deterministic identifier and NameTable creation
 
-The mechanism by which the schema daemon re-associates a reloaded or modified
-schema's declarations with their already-allocated identifiers is OPEN and being
-weighed separately. It is the linchpin of "allocated once, preserved across
-edits": unchanged declarations and renames must keep their identifiers, and only
-genuinely new declarations mint fresh ones. Do not design or assume a specific
-mechanism here until it is decided.
+Lowering into `CoreSchema` needs stable identifiers, and stable identifiers come
+from the `NameTable`. Selecting which persisted `NameTable` applies to a source
+being loaded is itself a lineage question — but lineage is answered by the core
+hash, and the core hash cannot be computed until identifiers are assigned. That
+is a bootstrap circularity: identity depends on the table, and choosing the table
+depends on identity.
+
+The assignment scheme compounds it. Any assignment that walks the source makes
+identifiers a function of walk order, so the same schema with its items written
+in a different order yields different core identifiers and a different core hash.
+A name-derived scheme instead makes identifiers a function of rename history
+rather than source order.
+
+The desired property is deterministic `NameTable` and identifier creation
+regardless of item order in the source: loading the same source always creates
+the same stable identifiers and the same `NameTable`. This subsumes the narrower
+reload re-association problem — unchanged declarations and renames keep their
+identifiers, and only genuinely new declarations mint fresh ones.
+
+This is not an outright implementation blocker. A provisional mechanism may be
+implemented now, even if flawed, as long as it is explicitly marked possibly
+unreliable; the real answer may emerge only after the system is implemented and
+used. The section stays OPEN.
 
 ## Generics
 
@@ -133,11 +157,14 @@ strategy), not by arity and not by name.
   reference type mirrors the kind partition (single, multi, const, template
   application variants); it is neither one uniform application variant nor a
   per-name variant set.
-- Field-name derivation from the type name is intended per-generic behavior and
-  is correct (`Vector.X` gives `x_vector`, `Optional.X` gives `optional_x`,
-  `ScopeOf.X` gives `x_scope`). Its pattern must be data carried on the
-  definition and defaulted by kind, not a `match "Vector"` in Rust, so a defined
-  generic such as a `List` or `Maybe` derives correctly (`x_list`, `maybe_x`).
+- Field-name derivation composes by reference shape. A plain type field derives
+  its name as the snake_case of the type name. A generic application derives
+  per-kind, with the pattern carried as data on the generic definition (`Vector.X`
+  gives `x_vector`, `Optional.X` gives `optional_x`, `ScopeOf.X` gives `x_scope`);
+  the pattern is defaulted by kind, never a `match "Vector"` in Rust, so a defined
+  generic such as a `List` or `Maybe` derives correctly (`x_list`, `maybe_x`). An
+  explicit lowercase disambiguator is stored only when the field type is
+  duplicated within the struct.
 - Validation rejects duplicate generic rows and duplicate frame parameters.
 
 ## Dotted-everywhere source projection
@@ -159,6 +186,29 @@ A map entry splits on the first top-level dot. The key is one dotless block;
 keys are atoms only, with no non-atom or structured keys. The value may be
 dotted.
 
+### Dot-splitting is decided by expectation, never by scanning
+
+Whether a leading atom carries a dotted prefix is decided purely by expectation
+mode, never by scanning content. The parser is fully typed and positional and
+always knows whether the next position can carry a dotted prefix; only in that
+mode does it look for a top-level dot in the leading atom. In every other mode —
+expected `String` above all — a period is an ordinary character, since strings
+can contain periods and the dot is never a primary parsing character.
+
+There are exactly two dotted-prefix expectation kinds:
+
+- CAPITALIZED — the head is a capitalized object, as in a type application
+  (`Vector.X`, `Map.(Key Value)`); and
+- UNCAPITALIZED — the head is one or more leading lowercase name segments, as in
+  map keys, import path segments, and field disambiguators.
+
+The mechanism is shared with NOTA: it is implemented once in the NOTA reader and
+exported, and `schema-language` reuses it rather than hand-rolling dot-splitting
+in `src/source.rs`.
+
+There are no space-separated pair forms anywhere in the language. Map entries are
+the dotted `key.value` form, and no other space-separated key-value form remains.
+
 ### The three legitimate lowercase-name uses
 
 A leading lowercase name (`name.Value`) is legitimate in exactly three places:
@@ -166,17 +216,40 @@ A leading lowercase name (`name.Value`) is legitimate in exactly three places:
 - struct-field disambiguation, required only when the field type is duplicated
   within the struct;
 - dotted import paths; and
-- namespace readability aliases.
+- namespace indirection names — the lowercase alias a human writes to name a
+  hoisted subtree (see below).
 
-### Readability aliases
+### Indirection names and the round-trip contract
 
-Readability aliases are source-only sugar. They have no `CoreSchema` or
-`TrueSchema` representation; the referenced object inlines at lowering, and
-re-emission does not restore the alias. Aliases legitimately do not round-trip.
+An indirection name is one construct with two authors. The lowercase alias a
+human writes in the namespace section to avoid writing a deeply nested datatype,
+and the linkname the encoder synthesizes when it decomposes a deep structure,
+are the same mechanism. Both name a hoisted subtree, both stay in the lowercase
+"name" register of the capitalization semantics, and both inline at lowering:
+they have no `CoreSchema` or `TrueSchema` representation.
 
-OPEN: the exact rules for readability aliases are not fully pinned. OPEN: an
-optional decode-out depth cap could programmatically invent names for legible
-help printing; it would be intentionally non-round-tripping. Neither is decided.
+The encoder synthesizes indirection names under a decoding configuration that
+caps how deeply nested a type may be before it is decomposed behind a lowercase
+indirection name, derived programmatically from the names in the concerned
+structures. The configuration is a typed record with no boolean flags. It carries
+two independent depths: the main-structure depth cap, and the linked-structure
+expansion level. Hoisted structures print after the main structures, each on new
+lines and introduced by its linkname. A derived linkname is the lowerCamel
+projection of the type name — keeping it visibly in the lowercase name register —
+with the standard duplicate-disambiguation rule applied when two hoisted types
+would collide.
+
+Schema help printing is one configuration of this same record. A help print may
+truncate; truncation is a projection, distinct from encoding. Encoding always
+emits the complete value.
+
+The round-trip contract governs what survives. Schema syntax round-trips both
+ways: decoding a text form and re-encoding the resulting value is value-exact.
+The only permitted loss is the factoring — which subtrees are hoisted behind
+lowercase indirection names, and what those names are. The text layout does not
+promise identical factoring, but the value always survives exactly. The depth cap
+is therefore not non-round-tripping: the value round-trips, and only the factoring
+is lossy.
 
 ### Named-brace application is not valid schema
 
@@ -230,6 +303,12 @@ hand-written reading, backed by single-source-of-truth vocabularies, is the
 accepted shape. This settles that the `Stream` and `Family` metadata heads are
 recognized by hand-written code (through `MetadataHead`); that recognition is
 accepted, not drift.
+
+What is hand-written and accepted is the per-context dispatch — which context
+expects which dotted-prefix expectation kind. The low-level dotted-prefix split
+itself is not hand-rolled here: it is the shared expectation-mode mechanism
+exported from the NOTA reader (see "Dot-splitting is decided by expectation"), so
+`src/source.rs` chooses the expectation and the NOTA reader performs the split.
 
 Parenthesized builtin applications such as `(Vector T)`, `(Optional T)`,
 `(ScopeOf T)`, `(Map K V)`, and `(Bytes N)` are rejected rather than routed
@@ -369,4 +448,7 @@ becomes the structural lineage address, and renames stop moving it.
   collapses the semantic `TypeReference` per-name variants to mirror the kind
   partition, touching the semantic type, `root.schema`, and lowering together.
   The legacy reference-pipeline split is closed.
-- Identifier reuse on reload is parked (OPEN) and is sequenced separately.
+- Deterministic identifier and `NameTable` creation is OPEN and sequenced
+  separately; it subsumes the narrower reload re-association problem. It is not an
+  outright blocker: a provisional mechanism may be built now if it is marked
+  possibly unreliable.
