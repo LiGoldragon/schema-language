@@ -177,10 +177,6 @@ impl MacroContext {
         self.structure_headers.push(header);
     }
 
-    pub(crate) fn remember_inline_declaration(&mut self, declaration: Declaration) {
-        self.inline_declarations.push(declaration);
-    }
-
     pub(crate) fn inline_declaration_count(&self) -> usize {
         self.inline_declarations.len()
     }

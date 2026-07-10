@@ -754,8 +754,7 @@ impl TypeTemplate {
                         reference.compact_notation()
                     ),
                 );
-                let reference =
-                    ObjectView::Expanded(&reference).type_reference(registry, context)?;
+                let reference = ObjectView::Expanded(&reference).type_reference()?;
                 Ok(TypeDeclaration::Newtype(NewtypeDeclaration::new(
                     name, reference,
                 )))
@@ -1007,8 +1006,6 @@ pub enum MacroDelimiter {
     Parenthesis,
     SquareBracket,
     Brace,
-    PipeParenthesis,
-    PipeBrace,
 }
 
 impl MacroDelimiter {
@@ -1017,8 +1014,6 @@ impl MacroDelimiter {
             Delimiter::Parenthesis => Self::Parenthesis,
             Delimiter::SquareBracket => Self::SquareBracket,
             Delimiter::Brace => Self::Brace,
-            Delimiter::PipeParenthesis => Self::PipeParenthesis,
-            Delimiter::PipeBrace => Self::PipeBrace,
         }
     }
 
@@ -1027,8 +1022,6 @@ impl MacroDelimiter {
             Self::Parenthesis => Delimiter::Parenthesis,
             Self::SquareBracket => Delimiter::SquareBracket,
             Self::Brace => Delimiter::Brace,
-            Self::PipeParenthesis => Delimiter::PipeParenthesis,
-            Self::PipeBrace => Delimiter::PipeBrace,
         }
     }
 }
@@ -1384,14 +1377,10 @@ impl<'object> ObjectView<'object> {
         }
     }
 
-    fn type_reference(
-        &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
+    fn type_reference(&self) -> Result<TypeReference, SchemaError> {
         match self {
             Self::Block(block) => TypeReference::from_block(block),
-            Self::Expanded(object) => object.type_reference(registry, context),
+            Self::Expanded(object) => object.type_reference(),
         }
     }
 }
@@ -1487,11 +1476,7 @@ impl ExpandedObject {
         }
     }
 
-    fn type_reference(
-        &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
+    fn type_reference(&self) -> Result<TypeReference, SchemaError> {
         match self {
             Self::Captured(block) => TypeReference::from_block(block),
             Self::Atom(_) => ExpandedReference::new(std::slice::from_ref(self)).type_reference(),
@@ -1513,14 +1498,6 @@ impl ExpandedObject {
                 head: "Brace".to_owned(),
                 argument_count: children.len(),
             }),
-            Self::Delimited {
-                delimiter: Delimiter::PipeBrace,
-                children,
-            } => ExpandedReference::new(children).inline_struct(registry, context),
-            Self::Delimited {
-                delimiter: Delimiter::PipeParenthesis,
-                children,
-            } => ExpandedReference::new(children).inline_enum(registry, context),
         }
     }
 }
@@ -1545,62 +1522,6 @@ impl<'object> ExpandedReference<'object> {
             self.children.iter().map(ObjectView::Expanded).collect(),
         )
         .lower_source()
-    }
-
-    fn inline_struct(
-        &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
-        let name = self.inline_declaration_name("inline struct declaration")?;
-        let fields = MacroExpansionFields::from_objects(
-            self.children[1..]
-                .iter()
-                .map(ObjectView::Expanded)
-                .collect(),
-        )
-        .lower(registry, context)?;
-        if fields.len() == 1 {
-            let reference = fields.into_iter().next().expect("length checked").reference;
-            context.remember_inline_declaration(crate::Declaration::private(
-                TypeDeclaration::Newtype(NewtypeDeclaration::new(name.clone(), reference)),
-            ));
-        } else {
-            context.remember_inline_declaration(crate::Declaration::private(
-                TypeDeclaration::Struct(StructDeclaration::new(name.clone(), fields)),
-            ));
-        }
-        Ok(TypeReference::Plain(name))
-    }
-
-    fn inline_enum(
-        &self,
-        registry: &MacroRegistry,
-        context: &mut MacroContext,
-    ) -> Result<TypeReference, SchemaError> {
-        let name = self.inline_declaration_name("inline enum declaration")?;
-        let variants = MacroExpansionVariants::from_objects(
-            self.children[1..]
-                .iter()
-                .map(ObjectView::Expanded)
-                .collect(),
-        )
-        .lower(registry, context)?;
-        context.remember_inline_declaration(crate::Declaration::private(TypeDeclaration::Enum(
-            EnumDeclaration::new(name.clone(), variants),
-        )));
-        Ok(TypeReference::Plain(name))
-    }
-
-    fn inline_declaration_name(&self, form: &'static str) -> Result<Name, SchemaError> {
-        let Some(name) = self.children.first() else {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                form,
-                expected: "declaration name plus body",
-                found: 0,
-            });
-        };
-        ObjectView::Expanded(name).schema_name()
     }
 }
 
@@ -1679,6 +1600,10 @@ impl<'template> MacroExpansionFields<'template> {
         registry: &MacroRegistry,
         context: &mut MacroContext,
     ) -> Result<Option<FieldDeclaration>, SchemaError> {
+        // The macro field/variant lowering tree threads a uniform
+        // `(registry, context)` lowering context; this arm no longer consumes
+        // it since the retired pipe inline-declaration path was its only user.
+        let _ = (registry, context);
         let object = self.objects[*index];
         let Some(text) = object.demote_to_string() else {
             return Ok(None);
@@ -1701,7 +1626,7 @@ impl<'template> MacroExpansionFields<'template> {
         *index += 2;
         MacroExpansionField::explicit_reference_field(
             field_name,
-            reference_object.type_reference(registry, context)?,
+            reference_object.type_reference()?,
         )
         .map(Some)
     }
@@ -1744,7 +1669,7 @@ impl<'template> MacroExpansionField<'template> {
             return Ok(field);
         }
         if self.object.demote_to_string().is_none() {
-            let reference = self.object.type_reference(registry, context)?;
+            let reference = self.object.type_reference()?;
             return Ok(FieldDeclaration {
                 name: reference.derived_field_name(),
                 reference,
@@ -1934,6 +1859,9 @@ impl<'template> MacroExpansionVariant<'template> {
         registry: &MacroRegistry,
         context: &mut MacroContext,
     ) -> Result<EnumVariant, SchemaError> {
+        // Uniform `(registry, context)` lowering context, unused here after the
+        // retired pipe inline-declaration path was removed.
+        let _ = (registry, context);
         match self.object.holds_root_objects() {
             1 => {
                 let name = self
@@ -1955,7 +1883,7 @@ impl<'template> MacroExpansionVariant<'template> {
                     self.object
                         .root_object_at(1)
                         .expect("count checked")
-                        .type_reference(registry, context)?,
+                        .type_reference()?,
                 ),
             )),
             _ => Err(SchemaError::ExpectedEnumVariant),
@@ -2055,8 +1983,6 @@ impl DelimitedNotation {
             Delimiter::Parenthesis => "(",
             Delimiter::SquareBracket => "[",
             Delimiter::Brace => "{",
-            Delimiter::PipeParenthesis => "(|",
-            Delimiter::PipeBrace => "{|",
         }
     }
 
@@ -2065,8 +1991,6 @@ impl DelimitedNotation {
             Delimiter::Parenthesis => ")",
             Delimiter::SquareBracket => "]",
             Delimiter::Brace => "}",
-            Delimiter::PipeParenthesis => "|)",
-            Delimiter::PipeBrace => "|}",
         }
     }
 }

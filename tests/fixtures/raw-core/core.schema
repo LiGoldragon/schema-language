@@ -21,9 +21,7 @@
   RawRecord.{ items.RawDatatypeList }
   RawVector.{ items.RawDatatypeList }
   RawKeyValue.{ entries.RawDatatypeMap }
-  RawPipeParenthesis.{ items.RawDatatypeList }
-  RawPipeBrace.{ items.RawDatatypeList }
-  RawDatatype.[RawAtom RawText RawRecord RawVector RawKeyValue RawPipeParenthesis RawPipeBrace]
+  RawDatatype.[RawAtom RawText RawRecord RawVector RawKeyValue]
   RawDatatypeList.[Vector.RawDatatype]
   RawDatatypeMap.{ key.Name value.RawDatatype }
   OptionalTopic.Optional.Topic

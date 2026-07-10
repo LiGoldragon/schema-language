@@ -705,20 +705,6 @@ impl<'schema> KeyValueDeclaration<'schema> {
         _registry: &MacroRegistry,
         _context: &mut MacroContext,
     ) -> Result<TypeDeclaration, SchemaError> {
-        // Pipe delimiters carry no surviving construct — the `{| … |}` impl
-        // tail and the `(| … |)` binder head are retired — so either is
-        // illegal at a value position.
-        if matches!(
-            definition,
-            Block::Delimited {
-                delimiter: nota::Delimiter::PipeBrace | nota::Delimiter::PipeParenthesis,
-                ..
-            }
-        ) {
-            return Err(SchemaError::ExpectedDelimiter {
-                expected: "namespace value reference, not pipe declaration block",
-            });
-        }
         let reference = TypeReference::from_block(definition)?;
         Ok(TypeDeclaration::Newtype(NewtypeDeclaration::new(
             name, reference,

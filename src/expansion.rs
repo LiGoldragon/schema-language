@@ -267,8 +267,6 @@ impl DelimiterText {
             Delimiter::Parenthesis => "(",
             Delimiter::SquareBracket => "[",
             Delimiter::Brace => "{",
-            Delimiter::PipeParenthesis => "(|",
-            Delimiter::PipeBrace => "{|",
         }
     }
 
@@ -277,8 +275,6 @@ impl DelimiterText {
             Delimiter::Parenthesis => ")",
             Delimiter::SquareBracket => "]",
             Delimiter::Brace => "}",
-            Delimiter::PipeParenthesis => "|)",
-            Delimiter::PipeBrace => "|}",
         }
     }
 }

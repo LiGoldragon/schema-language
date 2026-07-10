@@ -186,7 +186,7 @@ dependencies = [
 [[package]]
 name = "nota"
 version = "0.5.1"
-source = "git+https://github.com/LiGoldragon/nota.git?branch=main#e6f6f3ffd5d63da3fec57bf0457f49a0fc0df37d"
+source = "git+https://github.com/LiGoldragon/nota.git?branch=main#7dc0ab7ef15a1aeb695243a535a3585452917e18"
 dependencies = [
  "nota-derive",
  "rkyv",
@@ -195,7 +195,7 @@ dependencies = [
 [[package]]
 name = "nota-derive"
 version = "0.3.0"
-source = "git+https://github.com/LiGoldragon/nota.git?branch=main#e6f6f3ffd5d63da3fec57bf0457f49a0fc0df37d"
+source = "git+https://github.com/LiGoldragon/nota.git?branch=main#7dc0ab7ef15a1aeb695243a535a3585452917e18"
 dependencies = [
  "proc-macro2",
  "quote",

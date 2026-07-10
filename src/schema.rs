@@ -2105,14 +2105,15 @@ impl ApplicationHead {
     }
 }
 
-/// A declaration's type-name position: either a bare `Name` (the ordinary
-/// declaration head) or a pipe-parenthesized `(| Name Param Param … |)` head
-/// that introduces type-parameter binders. Authored use-site generic
-/// application is dotted (`Head.(Arg …)`); declaration binders use the pipe form
-/// so binding syntax and application syntax remain structurally distinct. The
-/// parameterized form is deliberately gated by the pipe delimiter: each tail
-/// item must be a bare binder name, since a parameter is a binder, not an
-/// applied type.
+/// A declaration's type-name position: a bare `Name` declaration head. The
+/// pipe-parenthesized `(| Name Param Param … |)` binder head is retired along
+/// with the structural pipe delimiters, so a declaration head introduces no
+/// inline type-parameter binders. Generic type-parameter binders now live in
+/// the dedicated generics block (`GenericName.((Params …) Body)`), read by the
+/// source-side generics reader, while authored use-site generic application
+/// stays dotted (`Head.(Arg …)`); binding and application remain structurally
+/// distinct without a pipe fence. The `parameters` vector is accordingly always
+/// decoded empty here.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeclarationHead {
     name: Name,
@@ -2755,16 +2756,6 @@ impl SchemaNodeValue {
                 root_objects,
                 ..
             } => Ok(Self::Map(SchemaNodeMapEntries::new(root_objects).read()?)),
-            Block::Delimited {
-                delimiter: Delimiter::PipeParenthesis,
-                ..
-            }
-            | Block::Delimited {
-                delimiter: Delimiter::PipeBrace,
-                ..
-            } => Err(SchemaError::MalformedSchemaNode {
-                found: SchemaNodeNotation::new(block).compact(),
-            }),
         }
     }
 }
@@ -2884,8 +2875,6 @@ impl SchemaNodeDelimitedNotation {
             Delimiter::Parenthesis => "(",
             Delimiter::SquareBracket => "[",
             Delimiter::Brace => "{",
-            Delimiter::PipeParenthesis => "(|",
-            Delimiter::PipeBrace => "{|",
         }
     }
 
@@ -2894,8 +2883,6 @@ impl SchemaNodeDelimitedNotation {
             Delimiter::Parenthesis => ")",
             Delimiter::SquareBracket => "]",
             Delimiter::Brace => "}",
-            Delimiter::PipeParenthesis => "|)",
-            Delimiter::PipeBrace => "|}",
         }
     }
 }

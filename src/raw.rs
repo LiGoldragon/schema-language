@@ -111,8 +111,6 @@ pub enum RawNotaDatatype {
     Record(RawNotaSequence),
     Vector(RawNotaSequence),
     KeyValue(RawDatatypeMap),
-    PipeParenthesis(RawNotaSequence),
-    PipeBrace(RawNotaSequence),
 }
 
 impl RawNotaDatatype {
@@ -135,102 +133,41 @@ impl RawNotaDatatype {
                 root_objects,
                 ..
             } => Ok(Self::KeyValue(RawDatatypeMap::from_blocks(root_objects)?)),
-            Block::Delimited {
-                delimiter: Delimiter::PipeParenthesis,
-                root_objects,
-                ..
-            } => Ok(Self::PipeParenthesis(RawNotaSequence::from_blocks(
-                root_objects,
-            )?)),
-            Block::Delimited {
-                delimiter: Delimiter::PipeBrace,
-                root_objects,
-                ..
-            } => Ok(Self::PipeBrace(RawNotaSequence::from_blocks(root_objects)?)),
         }
     }
 
     pub fn as_atom(&self) -> Option<&str> {
         match self {
             Self::Atom(text) => Some(text),
-            Self::Text(_)
-            | Self::Record(_)
-            | Self::Vector(_)
-            | Self::KeyValue(_)
-            | Self::PipeParenthesis(_)
-            | Self::PipeBrace(_) => None,
+            Self::Text(_) | Self::Record(_) | Self::Vector(_) | Self::KeyValue(_) => None,
         }
     }
 
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(text) => Some(text),
-            Self::Atom(_)
-            | Self::Record(_)
-            | Self::Vector(_)
-            | Self::KeyValue(_)
-            | Self::PipeParenthesis(_)
-            | Self::PipeBrace(_) => None,
+            Self::Atom(_) | Self::Record(_) | Self::Vector(_) | Self::KeyValue(_) => None,
         }
     }
 
     pub fn as_record(&self) -> Option<&RawNotaSequence> {
         match self {
             Self::Record(sequence) => Some(sequence),
-            Self::Atom(_)
-            | Self::Text(_)
-            | Self::Vector(_)
-            | Self::KeyValue(_)
-            | Self::PipeParenthesis(_)
-            | Self::PipeBrace(_) => None,
+            Self::Atom(_) | Self::Text(_) | Self::Vector(_) | Self::KeyValue(_) => None,
         }
     }
 
     pub fn as_vector(&self) -> Option<&RawNotaSequence> {
         match self {
             Self::Vector(sequence) => Some(sequence),
-            Self::Atom(_)
-            | Self::Text(_)
-            | Self::Record(_)
-            | Self::KeyValue(_)
-            | Self::PipeParenthesis(_)
-            | Self::PipeBrace(_) => None,
+            Self::Atom(_) | Self::Text(_) | Self::Record(_) | Self::KeyValue(_) => None,
         }
     }
 
     pub fn as_key_value(&self) -> Option<&RawDatatypeMap> {
         match self {
             Self::KeyValue(map) => Some(map),
-            Self::Atom(_)
-            | Self::Text(_)
-            | Self::Record(_)
-            | Self::Vector(_)
-            | Self::PipeParenthesis(_)
-            | Self::PipeBrace(_) => None,
-        }
-    }
-
-    pub fn as_pipe_parenthesis(&self) -> Option<&RawNotaSequence> {
-        match self {
-            Self::PipeParenthesis(sequence) => Some(sequence),
-            Self::Atom(_)
-            | Self::Text(_)
-            | Self::Record(_)
-            | Self::Vector(_)
-            | Self::KeyValue(_)
-            | Self::PipeBrace(_) => None,
-        }
-    }
-
-    pub fn as_pipe_brace(&self) -> Option<&RawNotaSequence> {
-        match self {
-            Self::PipeBrace(sequence) => Some(sequence),
-            Self::Atom(_)
-            | Self::Text(_)
-            | Self::Record(_)
-            | Self::Vector(_)
-            | Self::KeyValue(_)
-            | Self::PipeParenthesis(_) => None,
+            Self::Atom(_) | Self::Text(_) | Self::Record(_) | Self::Vector(_) => None,
         }
     }
 }

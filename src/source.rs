@@ -1728,24 +1728,6 @@ impl SourceDeclarationValue {
                 delimiter: Delimiter::SquareBracket,
                 ..
             } => Ok(Self::Enum(SourceEnumBody::from_block(block)?)),
-            // Pipe delimiters carry no surviving construct — the `{| … |}`
-            // impl tail and the `(| … |)` binder head are retired, so either
-            // is rejected at a value position.
-            Block::Delimited {
-                delimiter: Delimiter::PipeBrace,
-                ..
-            } => Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!(
-                    "retired impl block {} at a value position",
-                    block.reemit_fallback()
-                ),
-            }),
-            Block::Delimited {
-                delimiter: Delimiter::PipeParenthesis,
-                ..
-            } => Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: block.reemit_fallback(),
-            }),
         }
     }
 
@@ -3507,11 +3489,7 @@ impl SourceReference {
                 head: "Brace".to_owned(),
                 argument_count: root_objects.len(),
             }),
-            Block::Delimited {
-                delimiter: Delimiter::PipeBrace | Delimiter::PipeParenthesis,
-                ..
-            }
-            | Block::PipeText(_) => Err(SchemaError::ExpectedSyntaxReference {
+            Block::PipeText(_) => Err(SchemaError::ExpectedSyntaxReference {
                 found: block.reemit_fallback(),
             }),
         }
