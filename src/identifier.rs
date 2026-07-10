@@ -248,6 +248,17 @@ impl NameTable {
             .map(|entry| &entry.name)
     }
 
+    /// The current name of an identifier, as a typed projection error when the
+    /// table has no entry. Projecting a `CoreSchema` node into its human-facing
+    /// form requires every carried identifier to resolve; a miss means the
+    /// substrate and the table have diverged.
+    pub fn projected_name(&self, identifier: &NominalIdentifier) -> Result<&Name, SchemaError> {
+        self.name_of(identifier)
+            .ok_or_else(|| SchemaError::CoreProjectionNameAbsent {
+                identifier: identifier.to_hex(),
+            })
+    }
+
     /// The identifier currently bound to a name of the given kind, if any. This
     /// is the reachable-by-current-name lookup: after a rename through the
     /// table, only the new name resolves, and the old name resolves to nothing.
@@ -344,5 +355,44 @@ impl NameTable {
     /// the original, so the archive is a faithful durable form of the mapping.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SchemaError> {
         rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|_| SchemaError::ArchiveDecode)
+    }
+}
+
+/// An in-progress declaration harvest for one `NameTable` build.
+///
+/// Decomposing a schema into its stringless substrate walks every declaration
+/// exactly where it stands, needing the declaration's identifier at the walk
+/// site while the full table does not exist yet. The harvest answers each
+/// `declare` with the identifier the finished table will hold — re-association
+/// against the prior table is a pure per-row function — and `into_table` builds
+/// the canonical table from everything declared. Duplicate declarations of the
+/// same kind and name collapse to one row, exactly as [`NameTable::build`]
+/// guarantees.
+pub struct NameHarvest<'prior> {
+    prior: &'prior NameTable,
+    declarations: Vec<(DeclarationKind, Name)>,
+}
+
+impl<'prior> NameHarvest<'prior> {
+    pub fn new(prior: &'prior NameTable) -> Self {
+        Self {
+            prior,
+            declarations: Vec::new(),
+        }
+    }
+
+    /// Record one declaration and answer the identifier it carries: the prior
+    /// table's identifier when the current name is already bound, or the
+    /// deterministic fresh mint otherwise. The answer is exactly the identifier
+    /// the built table will map to this name.
+    pub fn declare(&mut self, kind: DeclarationKind, name: &Name) -> NominalIdentifier {
+        let identifier = self.prior.associate(kind, name);
+        self.declarations.push((kind, name.clone()));
+        identifier
+    }
+
+    /// Finish the harvest into the canonical table for everything declared.
+    pub fn into_table(self) -> NameTable {
+        NameTable::build(self.prior, self.declarations)
     }
 }

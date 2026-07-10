@@ -272,6 +272,12 @@ pub enum SchemaError {
         holder: String,
         requested: String,
     },
+    /// A `CoreSchema` projection met an identifier the `NameTable` does not
+    /// hold. The substrate carries only identifiers, so every one of them must
+    /// resolve through the table to produce the human-facing view; a miss means
+    /// the substrate and the table have diverged.
+    #[error("name table has no entry for identifier {identifier}; cannot project its name")]
+    CoreProjectionNameAbsent { identifier: String },
 }
 
 impl From<nota::MacroError> for SchemaError {
@@ -410,6 +416,36 @@ impl SchemaEngine {
     ) -> Result<TrueSchema, SchemaError> {
         let mut context = MacroContext::default();
         self.lower_source_with_resolver(source, identity, &mut context, resolver)
+    }
+
+    /// Lower authored `.schema` source into the split target model: the
+    /// stringless [`crate::CoreSchema`] substrate plus its [`crate::NameTable`].
+    /// The name-bearing tree exists only transiently inside this lowering; the
+    /// durable model is the returned pair, and the human-facing view is
+    /// projected from it on demand through [`crate::CoreSchema::project`].
+    /// Identifiers re-associate against `prior` — pass
+    /// [`crate::NameTable::empty`] when no prior table applies.
+    pub fn lower_core_source(
+        &self,
+        source: &str,
+        identity: SchemaIdentity,
+        prior: &crate::NameTable,
+    ) -> Result<(crate::CoreSchema, crate::NameTable), SchemaError> {
+        let schema = self.lower_true_schema_source(source, identity)?;
+        Ok(schema.decompose(prior))
+    }
+
+    /// The resolver-carrying twin of [`SchemaEngine::lower_core_source`], for
+    /// sources with cross-crate imports.
+    pub fn lower_core_source_with_resolver(
+        &self,
+        source: &str,
+        identity: SchemaIdentity,
+        resolver: &ImportResolver,
+        prior: &crate::NameTable,
+    ) -> Result<(crate::CoreSchema, crate::NameTable), SchemaError> {
+        let schema = self.lower_true_schema_source_with_resolver(source, identity, resolver)?;
+        Ok(schema.decompose(prior))
     }
 
     pub fn lower_schema_source(
