@@ -10,8 +10,8 @@ use std::path::Path;
 
 use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{
-    DeclarationKind, ImportResolver, Name, NameTable, RelationDeclaration, SchemaEngine,
-    SchemaError, SchemaIdentity, TrueSchema, TypeDeclaration, TypeDeclarationView,
+    DeclarationKind, ImportResolver, Name, NameTable, SchemaEngine, SchemaError, SchemaIdentity,
+    TrueSchema, TypeDeclaration, TypeDeclarationView,
 };
 
 /// One corpus entry: a named `.schema` source and the resolver it needs, if
@@ -100,18 +100,6 @@ fn corpus() -> Vec<CorpusEntry> {
         CorpusEntry::plain(
             "reference-fields",
             include_str!("fixtures/source-codec/reference-fields.schema"),
-        ),
-        CorpusEntry::plain(
-            "stream-relations",
-            include_str!("fixtures/source-codec/stream-relations.schema"),
-        ),
-        CorpusEntry::plain(
-            "relations",
-            include_str!("fixtures/source-codec/relations.schema"),
-        ),
-        CorpusEntry::plain(
-            "family-declarations",
-            include_str!("fixtures/source-codec/family-declarations.schema"),
         ),
         CorpusEntry::plain(
             "nested-router-namespace",
@@ -572,48 +560,3 @@ fn a_source_local_name_with_a_colon_is_a_typed_error() {
     );
 }
 
-/// Fix 2 / Fix 5 witness — renaming a declaration a relation path points at
-/// propagates into the relation, because relation-path segments are minted to
-/// the target's identifier rather than copied as raw names. The Hardware variant
-/// of TechnologyLeaf is a relation target; renaming it moves the equivalence
-/// path that walks through it.
-#[test]
-fn relation_target_rename_propagates_into_the_relation() {
-    let mut schema = CorpusEntry::plain(
-        "relations",
-        include_str!("fixtures/source-codec/relations.schema"),
-    )
-    .lower();
-
-    let owner = schema
-        .identifier_named(DeclarationKind::Type, &Name::new("TechnologyLeaf"))
-        .expect("the TechnologyLeaf enum is minted");
-    let hardware = schema
-        .names()
-        .member_identifier_of(DeclarationKind::Variant, &owner, &Name::new("Hardware"))
-        .expect("the Hardware variant is minted under its owner");
-
-    schema
-        .rename(&hardware, Name::new("Circuitry"))
-        .expect("relation target rename through the table succeeds");
-
-    let relations = schema.relations();
-    let RelationDeclaration::Equivalence(values) = &relations[0];
-    let first_path: Vec<&str> = values[0].path().iter().map(Name::as_str).collect();
-    assert_eq!(
-        first_path,
-        ["Technology", "Circuitry", "Networking"],
-        "the relation path follows the renamed variant target",
-    );
-    // The variant projection moved in lockstep — same identifier, one rename.
-    let Some(TypeDeclaration::Enum(technology_leaf)) = schema.type_named("TechnologyLeaf") else {
-        panic!("TechnologyLeaf projects as an enum");
-    };
-    assert!(
-        technology_leaf
-            .variants
-            .iter()
-            .any(|variant| variant.name.as_str() == "Circuitry"),
-        "the variant declaration and the relation segment share one identifier",
-    );
-}

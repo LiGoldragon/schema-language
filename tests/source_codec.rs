@@ -1,9 +1,9 @@
 use std::fs;
 
 use schema_language::{
-    Name, RelationDeclaration, SchemaEngine, SchemaError, SchemaIdentity, SchemaSourceArtifact,
-    SourceDeclaration, SourceDeclarationValue, SourceDeclarations, SourceField, SourceReference,
-    SourceStructBody, SourceVariantSignature, TypeDeclaration, TypeReference,
+    Name, SchemaEngine, SchemaError, SchemaIdentity, SchemaSourceArtifact, SourceDeclaration,
+    SourceDeclarationValue, SourceDeclarations, SourceField, SourceReference, SourceStructBody,
+    SourceVariantSignature, TypeDeclaration, TypeReference,
 };
 
 fn source_codec_fixture(name: &str) -> String {
@@ -57,13 +57,11 @@ fn schema_source_lowers_through_engine_schema_source_endpoint() {
 
 #[test]
 fn reheaded_source_declarations_round_trip_help_forms() {
-    let declarations = SourceDeclarations::from_schema_text(
-        "(Record { Entry Justification })\n(IntentEventStream Stream.(SubscriptionToken SubscriptionStarted IntentEvent SubscriptionToken))",
-    )
-    .expect("help declaration document decodes");
+    let declarations = SourceDeclarations::from_schema_text("(Record { Entry Justification })")
+        .expect("help declaration document decodes");
     assert_eq!(
         declarations.to_schema_text(),
-        "(Record { Entry Justification })\n(IntentEventStream Stream.(SubscriptionToken SubscriptionStarted IntentEvent SubscriptionToken))"
+        "(Record { Entry Justification })"
     );
 
     let record = SourceDeclaration::new(
@@ -100,30 +98,6 @@ fn reheaded_source_declarations_round_trip_help_forms() {
         encoded,
         "(Record { Entry Justification })\n(Kind [Decision Principle])\n(Domains Vector.Domain)\n(Version)"
     );
-}
-
-#[test]
-fn named_brace_stream_application_is_rejected() {
-    for source in [
-        "(IntentEventStream (Stream { token.SubscriptionToken opened.SubscriptionStarted event.IntentEvent close.SubscriptionToken }))",
-        "(IntentEventStream Stream.{ token.SubscriptionToken opened.SubscriptionStarted event.IntentEvent close.SubscriptionToken })",
-    ] {
-        let error = SourceDeclarations::from_schema_text(source)
-            .expect_err("named-brace stream application must be rejected");
-        assert!(matches!(
-            &error,
-            SchemaError::ExpectedSyntaxDeclaration { .. }
-        ));
-        let message = error.to_string();
-        assert!(
-            message.contains("named-brace Stream application is invalid"),
-            "error should name the retired Stream named-brace form: {message}"
-        );
-        assert!(
-            message.contains("Stream.(Token Opened Event Close)"),
-            "error should show the positional dotted Stream shape: {message}"
-        );
-    }
 }
 
 #[test]
@@ -688,139 +662,6 @@ fn schema_source_artifact_round_trips_through_binary_archive() {
 
     assert_eq!(artifact, recovered);
     assert_eq!(recovered.to_schema_text(), source);
-}
-
-#[test]
-fn schema_source_lowers_relation_declarations() {
-    let source = source_codec_fixture("relations");
-    let artifact = SchemaSourceArtifact::from_schema_text(&source).expect("schema source decodes");
-
-    assert_eq!(
-        artifact.to_schema_text(),
-        source,
-        "relation declarations should round-trip through canonical schema source"
-    );
-
-    let bytes = artifact
-        .to_binary_bytes()
-        .expect("schema source artifact archives");
-    let recovered =
-        SchemaSourceArtifact::from_binary_bytes(&bytes).expect("schema source artifact restores");
-    assert_eq!(artifact, recovered);
-
-    let schema = artifact
-        .source()
-        .lower(
-            &SchemaEngine::default(),
-            SchemaIdentity::new("example:domain", "0.1.0"),
-        )
-        .expect("schema source lowers");
-
-    let relations = schema.relations();
-    assert_eq!(relations.len(), 2);
-    let RelationDeclaration::Equivalence(values) = &relations[0];
-    let paths = values
-        .iter()
-        .map(|value| {
-            value
-                .path()
-                .iter()
-                .map(schema_language::Name::as_str)
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        paths,
-        vec![
-            vec!["Technology", "Hardware", "Networking"],
-            vec!["Technology", "Software", "Distributed", "Networking"]
-        ],
-        "equivalence values lower as schema-name paths"
-    );
-}
-
-#[test]
-fn schema_source_lowers_stream_declarations_and_variant_relations() {
-    let source = source_codec_fixture("stream-relations");
-    let artifact = SchemaSourceArtifact::from_schema_text(&source).expect("schema source decodes");
-
-    assert_eq!(
-        artifact.to_schema_text(),
-        source,
-        "stream declarations and stream variant relations encode as schema source"
-    );
-
-    let schema = artifact
-        .source()
-        .lower(
-            &SchemaEngine::default(),
-            SchemaIdentity::new("example:lib", "0.1.0"),
-        )
-        .expect("schema source lowers");
-
-    assert_eq!(schema.streams().len(), 1);
-    let stream = &schema.streams()[0];
-    assert_eq!(stream.name.as_str(), "RecordStream");
-    assert_eq!(
-        stream.token.plain_name().map(schema_language::Name::as_str),
-        Some("SubscriptionToken")
-    );
-    assert_eq!(
-        stream
-            .opened
-            .plain_name()
-            .map(schema_language::Name::as_str),
-        Some("SubscriptionReceipt")
-    );
-    assert_eq!(
-        stream.event.plain_name().map(schema_language::Name::as_str),
-        Some("RuntimeEvent")
-    );
-    assert_eq!(
-        stream.close.plain_name().map(schema_language::Name::as_str),
-        Some("SubscriptionToken")
-    );
-    assert!(
-        schema.type_named("RecordStream").is_none(),
-        "stream declarations are schema metadata, not namespace data types"
-    );
-
-    let semantic_source = schema.to_schema_text();
-    assert!(
-        semantic_source.contains(
-            "RecordStream Stream.(SubscriptionToken SubscriptionReceipt RuntimeEvent SubscriptionToken)"
-        ),
-        "semantic schema re-emission should use the positional dotted Stream form"
-    );
-    assert!(
-        !semantic_source.contains("(Stream {"),
-        "semantic schema re-emission must not reintroduce named-brace Stream application"
-    );
-
-    let input_root = schema.input();
-    let watch_relation = input_root
-        .as_enum()
-        .expect("input is the enum-body form")
-        .variants[0]
-        .stream_relation
-        .as_ref()
-        .expect("Watch opens a stream");
-    assert!(matches!(
-        watch_relation,
-        schema_language::StreamRelation::Opens(name) if name.as_str() == "RecordStream"
-    ));
-
-    let Some(TypeDeclaration::Enum(runtime_event)) = schema.type_named("RuntimeEvent") else {
-        panic!("RuntimeEvent should lower to an enum");
-    };
-    let event_relation = runtime_event.variants[0]
-        .stream_relation
-        .as_ref()
-        .expect("RecordChanged belongs to a stream");
-    assert!(matches!(
-        event_relation,
-        schema_language::StreamRelation::Belongs(name) if name.as_str() == "RecordStream"
-    ));
 }
 
 #[test]

@@ -5,17 +5,16 @@ use std::{
 
 use nota::{
     Block, CaptureName, Delimiter, Document, DottedExpectation, MacroCandidate, NotaBody,
-    NotaDecode, NotaDecodeError, NotaEncode, NotaString, StructuralMacroError, StructuralMacroNode,
+    NotaDecodeError, NotaEncode, NotaString, StructuralMacroError, StructuralMacroNode,
     StructuralVariant,
 };
 
 use crate::{
-    Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey,
-    FieldDeclaration, ImplBlock, ImplCatalog, ImplReference, ImportDeclaration, MethodParameter,
-    MethodSignature, MultiTypeReferenceProjection, Name, NewtypeDeclaration, RelationDeclaration,
-    RelationValue, ResolvedImport, Root, RootApplication, SchemaEngine, SchemaError,
-    SchemaIdentity, SingleTypeReferenceProjection, StreamDeclaration, StreamRelation,
-    StructDeclaration, TableName, TypeDeclaration, TypeReference, ValueReferenceProjection,
+    Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FieldDeclaration, ImplBlock,
+    ImplCatalog, ImplReference, ImportDeclaration, MethodParameter, MethodSignature,
+    MultiTypeReferenceProjection, Name, NewtypeDeclaration, ResolvedImport, Root, RootApplication,
+    SchemaEngine, SchemaError, SchemaIdentity, SingleTypeReferenceProjection, StructDeclaration,
+    TypeDeclaration, TypeReference, ValueReferenceProjection,
     macros::{BlockDebug, SchemaBlockExt},
     schema::SchemaTree,
 };
@@ -26,7 +25,6 @@ pub struct SchemaSource {
     input: SourceRootEnum,
     output: SourceRootEnum,
     namespace: SourceNamespace,
-    relations: SourceRelations,
 }
 
 impl SchemaSource {
@@ -49,7 +47,6 @@ impl SchemaSource {
                 layout.output().blocks(document),
             )?,
             namespace: SourceNamespace::from_block(layout.namespace().block(document))?,
-            relations: SourceRelations::from_block(layout.relations().block(document))?,
         })
     }
 
@@ -69,25 +66,12 @@ impl SchemaSource {
         &self.namespace
     }
 
-    pub fn relations(&self) -> &SourceRelations {
-        &self.relations
-    }
-
-    pub fn stream_declarations(&self) -> Result<Vec<StreamDeclaration>, SchemaError> {
-        self.namespace.stream_declarations()
-    }
-
-    pub fn family_declarations(&self) -> Result<Vec<FamilyDeclaration>, SchemaError> {
-        self.namespace.family_declarations()
-    }
-
     pub fn to_schema_text(&self) -> String {
         [
             self.imports.to_schema_text(),
             self.input.body().to_schema_text(),
             self.output.body().to_schema_text(),
             self.namespace.to_schema_text(),
-            self.relations.to_schema_text(),
         ]
         .join("\n")
     }
@@ -120,8 +104,6 @@ impl SchemaSource {
         let mut namespace = SourceLoweredNamespace::from_source(&self.namespace, &resolver)?;
         namespace.push_public_declarations(self.input.public_inline_declarations(&resolver)?)?;
         namespace.push_public_declarations(self.output.public_inline_declarations(&resolver)?)?;
-        let streams = self.namespace.stream_declarations()?;
-        let families = self.namespace.family_declarations()?;
         let input = self.input.to_root(&namespace)?;
         let output = self.output.to_root(&namespace)?;
         let impl_blocks = namespace.impl_blocks().to_vec();
@@ -135,13 +117,9 @@ impl SchemaSource {
             input,
             output,
             namespace.into_declarations(),
-            streams,
-            families,
-            self.relations.to_schema_relations(),
         )
         .with_impl_blocks(impl_blocks)
-        .families_verified()
-        .and_then(SchemaTree::product_components_verified)
+        .product_components_verified()
         .and_then(SchemaTree::arities_verified)
         .and_then(SchemaTree::impls_verified)?;
         crate::TrueSchema::from_tree(&tree, &crate::NameTable::empty())
@@ -154,7 +132,6 @@ pub(crate) struct SchemaDocumentLayout {
     input: SchemaDocumentSlot,
     output: SchemaDocumentSlot,
     namespace: SchemaDocumentSlot,
-    relations: SchemaDocumentSlot,
 }
 
 impl SchemaDocumentLayout {
@@ -175,15 +152,9 @@ impl SchemaDocumentLayout {
             Delimiter::Brace,
             "namespace",
         )?;
-        let relations = SchemaDocumentSlot::consume_delimited(
-            objects,
-            &mut cursor,
-            Delimiter::SquareBracket,
-            "relations",
-        )?;
         if cursor != objects.len() {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "5 root slots (imports input output namespace relations; grouped dotted applications count as one slot)",
+                expected: "4 root slots (imports input output namespace)",
                 found: document.holds_root_objects(),
             });
         }
@@ -192,7 +163,6 @@ impl SchemaDocumentLayout {
             input,
             output,
             namespace,
-            relations,
         })
     }
 
@@ -210,10 +180,6 @@ impl SchemaDocumentLayout {
 
     pub(crate) fn namespace(&self) -> SchemaDocumentSlot {
         self.namespace
-    }
-
-    pub(crate) fn relations(&self) -> SchemaDocumentSlot {
-        self.relations
     }
 }
 
@@ -237,7 +203,7 @@ impl SchemaDocumentSlot {
         let start = *cursor;
         let Some(block) = objects.get(start) else {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "5 root slots (imports input output namespace relations)",
+                expected: "4 root slots (imports input output namespace)",
                 found: objects.len(),
             });
         };
@@ -262,7 +228,7 @@ impl SchemaDocumentSlot {
         let start = *cursor;
         if objects.get(start).is_none() {
             return Err(SchemaError::ExpectedRootObjectCount {
-                expected: "5 root slots (imports input output namespace relations)",
+                expected: "4 root slots (imports input output namespace)",
                 found: objects.len(),
             });
         }
@@ -761,63 +727,6 @@ impl SourceNamespace {
         format!("{{\n{}\n}}", entries.join("\n"))
     }
 
-    fn stream_declarations(&self) -> Result<Vec<StreamDeclaration>, SchemaError> {
-        self.stream_declarations_in_namespace(None)
-    }
-
-    fn stream_declarations_in_namespace(
-        &self,
-        namespace: Option<&Name>,
-    ) -> Result<Vec<StreamDeclaration>, SchemaError> {
-        let mut streams = Vec::new();
-        for entry in &self.entries {
-            let entry_streams = entry.stream_declarations(namespace)?;
-            for stream in &entry_streams {
-                if streams
-                    .iter()
-                    .any(|existing: &StreamDeclaration| existing.name == stream.name)
-                {
-                    return Err(SchemaError::DuplicateSourceDeclaration {
-                        name: stream.name.as_str().to_owned(),
-                    });
-                }
-            }
-            streams.extend(entry_streams);
-        }
-        Ok(streams)
-    }
-
-    fn family_declarations(&self) -> Result<Vec<FamilyDeclaration>, SchemaError> {
-        self.family_declarations_in_namespace(None)
-    }
-
-    fn family_declarations_in_namespace(
-        &self,
-        namespace: Option<&Name>,
-    ) -> Result<Vec<FamilyDeclaration>, SchemaError> {
-        let mut families: Vec<FamilyDeclaration> = Vec::new();
-        for entry in &self.entries {
-            let entry_families = entry.family_declarations(namespace)?;
-            for family in &entry_families {
-                if families.iter().any(|existing| existing.name == family.name) {
-                    return Err(SchemaError::DuplicateFamilyName {
-                        name: family.name.as_str().to_owned(),
-                    });
-                }
-                if families
-                    .iter()
-                    .any(|existing| existing.table == family.table)
-                {
-                    return Err(SchemaError::DuplicateFamilyTable {
-                        table: family.table.as_str().to_owned(),
-                    });
-                }
-            }
-            families.extend(entry_families);
-        }
-        Ok(families)
-    }
-
     fn type_declaration_names(&self) -> Vec<Name> {
         self.type_declaration_names_in_namespace(None)
     }
@@ -1064,20 +973,6 @@ impl SourceNamespaceEntry {
         ))
     }
 
-    fn stream_declarations(
-        &self,
-        namespace: Option<&Name>,
-    ) -> Result<Vec<StreamDeclaration>, SchemaError> {
-        self.value.stream_declarations(self, namespace)
-    }
-
-    fn family_declarations(
-        &self,
-        namespace: Option<&Name>,
-    ) -> Result<Vec<FamilyDeclaration>, SchemaError> {
-        self.value.family_declarations(self, namespace)
-    }
-
     fn type_declaration_names(&self, namespace: Option<&Name>) -> Vec<Name> {
         self.value.type_declaration_names(self, namespace)
     }
@@ -1141,52 +1036,14 @@ impl SourceNamespaceEntryValue {
         }
     }
 
-    fn stream_declarations(
-        &self,
-        entry: &SourceNamespaceEntry,
-        namespace: Option<&Name>,
-    ) -> Result<Vec<StreamDeclaration>, SchemaError> {
-        match self {
-            Self::Declaration(value) => Ok(value
-                .to_stream_declaration(entry.declaration_name(namespace))
-                .into_iter()
-                .collect()),
-            Self::Namespace(nested) => {
-                let nested_namespace = entry.namespace_name(namespace);
-                nested.stream_declarations_in_namespace(Some(&nested_namespace))
-            }
-            Self::ImplsOnly => Ok(Vec::new()),
-        }
-    }
-
-    fn family_declarations(
-        &self,
-        entry: &SourceNamespaceEntry,
-        namespace: Option<&Name>,
-    ) -> Result<Vec<FamilyDeclaration>, SchemaError> {
-        match self {
-            Self::Declaration(value) => Ok(value
-                .to_family_declaration(entry.declaration_name(namespace))
-                .into_iter()
-                .collect()),
-            Self::Namespace(nested) => {
-                let nested_namespace = entry.namespace_name(namespace);
-                nested.family_declarations_in_namespace(Some(&nested_namespace))
-            }
-            Self::ImplsOnly => Ok(Vec::new()),
-        }
-    }
-
     fn type_declaration_names(
         &self,
         entry: &SourceNamespaceEntry,
         namespace: Option<&Name>,
     ) -> Vec<Name> {
         match self {
-            Self::Declaration(value) if value.is_type_declaration() => {
-                vec![entry.declaration_name(namespace)]
-            }
-            Self::Declaration(_) | Self::ImplsOnly => Vec::new(),
+            Self::Declaration(_) => vec![entry.declaration_name(namespace)],
+            Self::ImplsOnly => Vec::new(),
             Self::Namespace(nested) => {
                 let nested_namespace = entry.namespace_name(namespace);
                 nested.type_declaration_names_in_namespace(Some(&nested_namespace))
@@ -1581,167 +1438,6 @@ impl SourceMethodParameter {
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct SourceRelations {
-    entries: Vec<SourceRelation>,
-}
-
-impl SourceRelations {
-    pub fn empty() -> Self {
-        Self {
-            entries: Vec::new(),
-        }
-    }
-
-    pub fn entries(&self) -> &[SourceRelation] {
-        &self.entries
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::SquareBracket, "source relations")?;
-        let mut entries = Vec::new();
-        for object in body.root_objects() {
-            entries.push(SourceRelation::from_block(object)?);
-        }
-        Ok(Self { entries })
-    }
-
-    fn to_schema_text(&self) -> String {
-        Delimiter::SquareBracket.wrap(self.entries.iter().map(SourceRelation::to_schema_text))
-    }
-
-    fn to_schema_relations(&self) -> Vec<RelationDeclaration> {
-        self.entries
-            .iter()
-            .map(SourceRelation::to_schema_relation)
-            .collect()
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub enum SourceRelation {
-    Equivalence(SourceEquivalenceRelation),
-}
-
-impl SourceRelation {
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Parenthesis, "source relation")?;
-        let objects = body.root_objects();
-        if objects.len() != 2 {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                form: "relation declaration",
-                expected: "relation name plus value vector",
-                found: objects.len(),
-            });
-        }
-        let head = SourceAtom::from_block(&objects[0])?;
-        match head.0 {
-            "Equivalence" => Ok(Self::Equivalence(SourceEquivalenceRelation::from_block(
-                &objects[1],
-            )?)),
-            other => Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!("relation {other}"),
-            }),
-        }
-    }
-
-    fn to_schema_text(&self) -> String {
-        match self {
-            Self::Equivalence(relation) => {
-                Delimiter::Parenthesis.wrap(["Equivalence".to_owned(), relation.to_schema_text()])
-            }
-        }
-    }
-
-    fn to_schema_relation(&self) -> RelationDeclaration {
-        match self {
-            Self::Equivalence(relation) => {
-                RelationDeclaration::Equivalence(relation.to_relation_values())
-            }
-        }
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct SourceEquivalenceRelation {
-    values: Vec<SourceRelationValue>,
-}
-
-impl SourceEquivalenceRelation {
-    pub fn values(&self) -> &[SourceRelationValue] {
-        &self.values
-    }
-
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::SquareBracket, "equivalence values")?;
-        let mut values = Vec::new();
-        for object in body.root_objects() {
-            values.push(SourceRelationValue::from_block(object)?);
-        }
-        Ok(Self { values })
-    }
-
-    fn to_schema_text(&self) -> String {
-        Delimiter::SquareBracket.wrap(self.values.iter().map(SourceRelationValue::to_schema_text))
-    }
-
-    fn to_relation_values(&self) -> Vec<RelationValue> {
-        self.values
-            .iter()
-            .map(SourceRelationValue::to_relation_value)
-            .collect()
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct SourceRelationValue {
-    path: Vec<Name>,
-}
-
-impl SourceRelationValue {
-    pub fn path(&self) -> &[Name] {
-        &self.path
-    }
-
-    fn from_block(block: &Block) -> Result<Self, SchemaError> {
-        match block {
-            Block::Atom(_) => Ok(Self {
-                path: vec![block.schema_name()?],
-            }),
-            Block::Delimited {
-                delimiter: Delimiter::Parenthesis,
-                root_objects,
-                ..
-            } => {
-                let mut path = Vec::new();
-                for object in root_objects {
-                    path.extend(Self::from_block(object)?.path);
-                }
-                Ok(Self { path })
-            }
-            Block::Delimited { .. } | Block::PipeText(_) => Err(SchemaError::ExpectedSymbol {
-                found: block.reemit_fallback(),
-            }),
-        }
-    }
-
-    fn to_schema_text(&self) -> String {
-        match self.path.as_slice() {
-            [] => Delimiter::Parenthesis.wrap(Vec::<String>::new()),
-            [name] => name.to_nota(),
-            names => Delimiter::Parenthesis.wrap(names.iter().map(Name::to_nota)),
-        }
-    }
-
-    fn to_relation_value(&self) -> RelationValue {
-        RelationValue::new(self.path.clone())
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
 #[rkyv(
     bytecheck(bounds(
         __C: rkyv::validation::ArchiveContext,
@@ -1758,63 +1454,6 @@ pub enum SourceDeclarationValue {
     Text(String),
     Struct(#[rkyv(omit_bounds)] SourceStructBody),
     Enum(#[rkyv(omit_bounds)] SourceEnumBody),
-    Stream(#[rkyv(omit_bounds)] SourceStreamBody),
-    Family(#[rkyv(omit_bounds)] SourceFamilyBody),
-}
-
-/// The closed vocabulary of schema-metadata heads — the dotted heads a
-/// namespace entry uses to declare metadata rather than a type. Every site
-/// that recognizes, rejects, or re-emits a metadata head reads this one enum
-/// through [`from_head_name`](MetadataHead::from_head_name) and
-/// [`canonical_name`](MetadataHead::canonical_name), so the `Stream`/`Family`
-/// spelling lives in exactly one place and dispatch happens on the kind, not
-/// on a re-matched string.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum MetadataHead {
-    Stream,
-    Family,
-}
-
-impl MetadataHead {
-    const ALL: [MetadataHead; 2] = [Self::Stream, Self::Family];
-
-    /// The metadata head a dotted head name denotes, or `None` for any head
-    /// outside the metadata vocabulary.
-    pub(crate) fn from_head_name(name: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|head| head.canonical_name() == name)
-    }
-
-    fn canonical_name(self) -> &'static str {
-        match self {
-            Self::Stream => "Stream",
-            Self::Family => "Family",
-        }
-    }
-
-    fn head_name(self) -> Name {
-        Name::new(self.canonical_name())
-    }
-
-    /// The positional application form this head expects, shown when a use
-    /// site reaches for the rejected named-brace form instead.
-    fn expected_positional_form(self) -> &'static str {
-        match self {
-            Self::Stream => "Stream.(Token Opened Event Close)",
-            Self::Family => "Family.(Record table Domain)",
-        }
-    }
-
-    fn named_brace_application_error(self) -> SchemaError {
-        SchemaError::ExpectedSyntaxDeclaration {
-            found: format!(
-                "named-brace {head} application is invalid; use positional dotted application {expected}; parameter names belong in the definition, not at the use site",
-                head = self.canonical_name(),
-                expected = self.expected_positional_form(),
-            ),
-        }
-    }
 }
 
 impl SourceDeclarationValue {
@@ -1824,9 +1463,6 @@ impl SourceDeclarationValue {
     }
 
     fn from_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
-        if let Some(value) = Self::from_positional_metadata_blocks(blocks)? {
-            return Ok(value);
-        }
         if let [block] = blocks {
             return Self::from_block(block);
         }
@@ -1856,10 +1492,7 @@ impl SourceDeclarationValue {
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 ..
-            } => {
-                Self::reject_parenthesized_metadata_block(block)?;
-                Self::from_reference(SourceReference::from_block(block)?)
-            }
+            } => Self::from_reference(SourceReference::from_block(block)?),
             Block::PipeText(text) => Ok(Self::Text(text.text.clone())),
             Block::Delimited {
                 delimiter: Delimiter::Brace,
@@ -1893,59 +1526,8 @@ impl SourceDeclarationValue {
         }
     }
 
-    fn from_positional_metadata_blocks(blocks: &[Block]) -> Result<Option<Self>, SchemaError> {
-        let [head, payload] = blocks else {
-            return Ok(None);
-        };
-        let Block::Atom(atom) = head else {
-            return Ok(None);
-        };
-        let Some(head) = atom.text().strip_suffix('.') else {
-            return Ok(None);
-        };
-        match MetadataHead::from_head_name(head) {
-            Some(MetadataHead::Stream) => SourceStreamBody::from_positional_payload(payload)
-                .map(Self::Stream)
-                .map(Some),
-            Some(MetadataHead::Family) => SourceFamilyBody::from_positional_payload(payload)
-                .map(Self::Family)
-                .map(Some),
-            None => Ok(None),
-        }
-    }
-
-    fn reject_parenthesized_metadata_block(block: &Block) -> Result<(), SchemaError> {
-        let body = NotaBody::from_delimited(block, Delimiter::Parenthesis, "source metadata body")?;
-        let objects = body.root_objects();
-        let Some(head) = objects.first().and_then(Block::demote_to_string) else {
-            return Ok(());
-        };
-        match MetadataHead::from_head_name(head) {
-            Some(metadata_head) if objects.get(1).is_some_and(|block| block.is_brace()) => {
-                Err(metadata_head.named_brace_application_error())
-            }
-            _ => Ok(()),
-        }
-    }
-
     fn from_reference(reference: SourceReference) -> Result<Self, SchemaError> {
-        match reference {
-            SourceReference::Application { head, arguments } => {
-                match MetadataHead::from_head_name(head.as_str()) {
-                    Some(MetadataHead::Stream) => {
-                        SourceStreamBody::from_positional_arguments(arguments).map(Self::Stream)
-                    }
-                    Some(MetadataHead::Family) => {
-                        SourceFamilyBody::from_positional_arguments(arguments).map(Self::Family)
-                    }
-                    None => Ok(Self::Reference(SourceReference::Application {
-                        head,
-                        arguments,
-                    })),
-                }
-            }
-            reference => Ok(Self::Reference(reference)),
-        }
+        Ok(Self::Reference(reference))
     }
 
     pub fn to_schema_text(&self) -> String {
@@ -1954,8 +1536,6 @@ impl SourceDeclarationValue {
             Self::Text(text) => NotaString::new(text).format(),
             Self::Struct(body) => body.to_schema_text(),
             Self::Enum(body) => body.to_schema_text(),
-            Self::Stream(body) => body.to_schema_text(),
-            Self::Family(body) => body.to_schema_text(),
         }
     }
 
@@ -1976,7 +1556,6 @@ impl SourceDeclarationValue {
             }),
             Self::Struct(body) => body.to_declaration_group(name, resolver, namespace),
             Self::Enum(body) => body.to_declaration_group(name, resolver, namespace),
-            Self::Stream(_) | Self::Family(_) => Ok(SourceDeclarationGroup::empty()),
         }
     }
 
@@ -1988,262 +1567,10 @@ impl SourceDeclarationValue {
     ) -> Result<SourceDeclarationGroup, SchemaError> {
         match self {
             Self::Enum(body) => body.to_public_declaration_group(name, resolver, namespace),
-            Self::Reference(_)
-            | Self::Text(_)
-            | Self::Struct(_)
-            | Self::Stream(_)
-            | Self::Family(_) => self.to_declaration_group(name, resolver, namespace),
+            Self::Reference(_) | Self::Text(_) | Self::Struct(_) => {
+                self.to_declaration_group(name, resolver, namespace)
+            }
         }
-    }
-
-    fn to_stream_declaration(&self, name: Name) -> Option<StreamDeclaration> {
-        match self {
-            Self::Stream(body) => Some(body.to_stream_declaration(name)),
-            Self::Reference(_)
-            | Self::Text(_)
-            | Self::Struct(_)
-            | Self::Enum(_)
-            | Self::Family(_) => None,
-        }
-    }
-
-    fn to_family_declaration(&self, name: Name) -> Option<FamilyDeclaration> {
-        match self {
-            Self::Family(body) => Some(body.to_family_declaration(name)),
-            Self::Reference(_)
-            | Self::Text(_)
-            | Self::Struct(_)
-            | Self::Enum(_)
-            | Self::Stream(_) => None,
-        }
-    }
-
-    fn is_type_declaration(&self) -> bool {
-        !matches!(self, Self::Stream(_) | Self::Family(_))
-    }
-}
-
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct SourceStreamBody {
-    token: SourceReference,
-    opened: SourceReference,
-    event: SourceReference,
-    close: SourceReference,
-}
-
-impl SourceStreamBody {
-    pub fn new(
-        token: SourceReference,
-        opened: SourceReference,
-        event: SourceReference,
-        close: SourceReference,
-    ) -> Self {
-        Self {
-            token,
-            opened,
-            event,
-            close,
-        }
-    }
-
-    pub fn token(&self) -> &SourceReference {
-        &self.token
-    }
-
-    pub fn opened(&self) -> &SourceReference {
-        &self.opened
-    }
-
-    pub fn event(&self) -> &SourceReference {
-        &self.event
-    }
-
-    pub fn close(&self) -> &SourceReference {
-        &self.close
-    }
-
-    fn from_positional_payload(block: &Block) -> Result<Self, SchemaError> {
-        if block.is_brace() {
-            return Err(MetadataHead::Stream.named_brace_application_error());
-        }
-        let body = NotaBody::from_delimited(
-            block,
-            Delimiter::Parenthesis,
-            "stream declaration positional payload",
-        )?;
-        Self::from_positional_blocks(body.root_objects())
-    }
-
-    fn from_positional_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
-        let mut arguments = Vec::new();
-        let mut cursor = 0;
-        while cursor < blocks.len() {
-            arguments.push(SourceReference::from_blocks_at(blocks, &mut cursor)?);
-        }
-        Self::from_positional_arguments(arguments)
-    }
-
-    fn from_positional_arguments(arguments: Vec<SourceReference>) -> Result<Self, SchemaError> {
-        let found = arguments.len();
-        let [token, opened, event, close]: [SourceReference; 4] =
-            arguments
-                .try_into()
-                .map_err(|_| SchemaError::ExpectedSyntaxReferenceArity {
-                    form: "stream declaration",
-                    expected: "four positional arguments: token opened event close",
-                    found,
-                })?;
-        Ok(Self::new(token, opened, event, close))
-    }
-
-    fn to_schema_text(&self) -> String {
-        SourceGenericDefinition::application_text_for_head(
-            &MetadataHead::Stream.head_name(),
-            [
-                self.token.to_schema_text(),
-                self.opened.to_schema_text(),
-                self.event.to_schema_text(),
-                self.close.to_schema_text(),
-            ],
-        )
-    }
-
-    fn to_stream_declaration(&self, name: Name) -> StreamDeclaration {
-        StreamDeclaration::new(
-            name,
-            self.token.to_type_reference(),
-            self.opened.to_type_reference(),
-            self.event.to_type_reference(),
-            self.close.to_type_reference(),
-        )
-    }
-}
-
-/// The authored body of a family declaration: `Family.(<TypeName>
-/// <table-name> <Domain|Identified>)` inside the namespace map, on the
-/// stream-declaration precedent. The record name must resolve to a declared
-/// or imported type when the source lowers.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct SourceFamilyBody {
-    record: Name,
-    table: TableName,
-    key: FamilyKey,
-}
-
-impl SourceFamilyBody {
-    pub fn new(record: Name, table: TableName, key: FamilyKey) -> Self {
-        Self { record, table, key }
-    }
-
-    pub fn record(&self) -> &Name {
-        &self.record
-    }
-
-    pub fn table(&self) -> &TableName {
-        &self.table
-    }
-
-    pub fn key(&self) -> FamilyKey {
-        self.key
-    }
-
-    fn from_positional_payload(block: &Block) -> Result<Self, SchemaError> {
-        if block.is_brace() {
-            return Err(MetadataHead::Family.named_brace_application_error());
-        }
-        let body = NotaBody::from_delimited(
-            block,
-            Delimiter::Parenthesis,
-            "family declaration positional payload",
-        )?;
-        Self::from_positional_blocks(body.root_objects())
-    }
-
-    fn from_positional_blocks(blocks: &[Block]) -> Result<Self, SchemaError> {
-        let [record, table, key] = blocks else {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                form: "family declaration",
-                expected: "three positional arguments: record table key",
-                found: blocks.len(),
-            });
-        };
-        Ok(Self::new(
-            SourceAtom::from_block(record)?.into_name()?,
-            TableName::from_nota_block(table)?,
-            Self::key_from_block(key)?,
-        ))
-    }
-
-    fn from_positional_arguments(arguments: Vec<SourceReference>) -> Result<Self, SchemaError> {
-        let found = arguments.len();
-        let [record, table, key]: [SourceReference; 3] =
-            arguments
-                .try_into()
-                .map_err(|_| SchemaError::ExpectedSyntaxReferenceArity {
-                    form: "family declaration",
-                    expected: "three positional arguments: record table key",
-                    found,
-                })?;
-        Ok(Self::new(
-            Self::name_from_reference(record, "record")?,
-            TableName::new(
-                Self::name_from_reference(table, "table")?
-                    .as_str()
-                    .to_owned(),
-            ),
-            Self::key_from_reference(key)?,
-        ))
-    }
-
-    fn name_from_reference(
-        reference: SourceReference,
-        argument_name: &'static str,
-    ) -> Result<Name, SchemaError> {
-        match reference {
-            SourceReference::Plain(name) => Ok(name),
-            reference => Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!(
-                    "family {argument_name} argument {}; expected a positional atom",
-                    reference.to_schema_text()
-                ),
-            }),
-        }
-    }
-
-    fn key_from_block(block: &Block) -> Result<FamilyKey, SchemaError> {
-        match SourceAtom::from_block(block)?.0 {
-            "Domain" => Ok(FamilyKey::Domain),
-            "Identified" => Ok(FamilyKey::Identified),
-            other => Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!("family key {other}"),
-            }),
-        }
-    }
-
-    fn key_from_reference(reference: SourceReference) -> Result<FamilyKey, SchemaError> {
-        let key = Self::name_from_reference(reference, "key")?;
-        match key.as_str() {
-            "Domain" => Ok(FamilyKey::Domain),
-            "Identified" => Ok(FamilyKey::Identified),
-            other => Err(SchemaError::ExpectedSyntaxDeclaration {
-                found: format!("family key {other}"),
-            }),
-        }
-    }
-
-    fn to_schema_text(&self) -> String {
-        SourceGenericDefinition::application_text_for_head(
-            &MetadataHead::Family.head_name(),
-            [
-                self.record.to_nota(),
-                self.table.to_nota(),
-                self.key.to_nota(),
-            ],
-        )
-    }
-
-    fn to_family_declaration(&self, name: Name) -> FamilyDeclaration {
-        FamilyDeclaration::new(name, self.record.clone(), self.table.clone(), self.key)
     }
 }
 
@@ -2900,12 +2227,6 @@ impl SourceEnumBody {
 pub enum SourceVariantSignature {
     Unit(SourceVariantName),
     Data(SourceVariantName, #[rkyv(omit_bounds)] SourceVariantPayload),
-    Streaming(
-        SourceVariantName,
-        #[rkyv(omit_bounds)] SourceVariantPayload,
-        StreamRelationKeyword,
-        SourceVariantName,
-    ),
 }
 
 impl SourceVariantSignature {
@@ -2917,26 +2238,9 @@ impl SourceVariantSignature {
         Self::Data(SourceVariantName::new(name), payload)
     }
 
-    pub fn from_projected(
-        name: Name,
-        payload: Option<SourceVariantPayload>,
-        stream_relation: Option<&StreamRelation>,
-    ) -> Self {
-        match (payload, stream_relation) {
-            (Some(payload), Some(relation)) => Self::Streaming(
-                SourceVariantName::new(name),
-                payload,
-                StreamRelationKeyword::from(relation),
-                SourceVariantName::new(relation.stream_name().clone()),
-            ),
-            (Some(payload), None) => Self::from_payload(name, payload),
-            (None, Some(_)) | (None, None) => Self::from_name(name),
-        }
-    }
-
     pub fn name(&self) -> &Name {
         match self {
-            Self::Unit(name) | Self::Data(name, _) | Self::Streaming(name, ..) => name.name(),
+            Self::Unit(name) | Self::Data(name, _) => name.name(),
         }
     }
 
@@ -2951,18 +2255,9 @@ impl SourceVariantSignature {
         self.payload_value()
     }
 
-    pub fn stream_relation(&self) -> Option<StreamRelation> {
-        match self {
-            Self::Streaming(_, _, keyword, stream_name) => {
-                Some(keyword.into_stream_relation(stream_name.name().clone()))
-            }
-            Self::Unit(_) | Self::Data(_, _) => None,
-        }
-    }
-
     fn payload_value(&self) -> Option<&SourceVariantPayload> {
         match self {
-            Self::Data(_, payload) | Self::Streaming(_, payload, _, _) => Some(payload),
+            Self::Data(_, payload) => Some(payload),
             Self::Unit(_) => None,
         }
     }
@@ -2974,12 +2269,10 @@ impl SourceVariantSignature {
     ) -> Result<EnumVariant, SchemaError> {
         let name = self.name().clone();
         let payload = match self {
-            Self::Data(_, SourceVariantPayload::Reference(reference))
-            | Self::Streaming(_, SourceVariantPayload::Reference(reference), _, _) => {
+            Self::Data(_, SourceVariantPayload::Reference(reference)) => {
                 Some(resolver.resolve_reference(namespace, reference))
             }
-            Self::Data(_, SourceVariantPayload::Declaration(_))
-            | Self::Streaming(_, SourceVariantPayload::Declaration(_), _, _) => {
+            Self::Data(_, SourceVariantPayload::Declaration(_)) => {
                 Some(resolver.resolve_name(namespace, &name))
             }
             Self::Unit(_) if resolver.resolves_variant_payload(&name) => {
@@ -2987,11 +2280,7 @@ impl SourceVariantSignature {
             }
             Self::Unit(_) => None,
         };
-        let variant = EnumVariant::new(name, payload);
-        Ok(match self.stream_relation() {
-            Some(relation) => variant.with_stream_relation(relation),
-            None => variant,
-        })
+        Ok(EnumVariant::new(name, payload))
     }
 
     fn public_inline_declaration(
@@ -3106,12 +2395,6 @@ impl StructuralMacroNode for SourceVariantSignature {
             Self::Data(name, SourceVariantPayload::Declaration(payload)) => {
                 Delimiter::Parenthesis.wrap([name.to_structural_nota(), payload.to_schema_text()])
             }
-            Self::Streaming(name, payload, keyword, stream_name) => Delimiter::Parenthesis.wrap([
-                name.to_structural_nota(),
-                payload.to_schema_text(),
-                keyword.to_structural_nota(),
-                stream_name.to_structural_nota(),
-            ]),
         }
     }
 }
@@ -3143,13 +2426,6 @@ impl SourceVariantSignature {
             [name, payload] => Ok(Self::Data(
                 SourceVariantName::from_structural_block(name).map_err(SchemaError::from)?,
                 SourceVariantPayload::from_structural_block(payload).map_err(SchemaError::from)?,
-            )),
-            [name, payload, relation, stream_name] => Ok(Self::Streaming(
-                SourceVariantName::from_structural_block(name).map_err(SchemaError::from)?,
-                SourceVariantPayload::from_structural_block(payload).map_err(SchemaError::from)?,
-                StreamRelationKeyword::from_structural_block(relation)
-                    .map_err(SchemaError::from)?,
-                SourceVariantName::from_structural_block(stream_name).map_err(SchemaError::from)?,
             )),
             _ => Err(SchemaError::ExpectedSyntaxEnumVariant {
                 found: format!("parenthesized variant with {} objects", objects.len()),
@@ -3300,46 +2576,6 @@ impl StructuralMacroNode for SourceVariantPayload {
 
     fn to_structural_nota(&self) -> String {
         self.to_schema_text()
-    }
-}
-
-/// The `opens` / `belongs` discriminator that precedes a stream name in a
-/// streaming variant signature. It is a keyword structural macro node so the
-/// `SourceVariantSignature` derive decodes the marker recursively rather than
-/// matching a literal string by hand.
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::StructuralMacroNode,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub enum StreamRelationKeyword {
-    #[shape(keyword = "opens")]
-    Opens,
-    #[shape(keyword = "belongs")]
-    Belongs,
-}
-
-impl StreamRelationKeyword {
-    fn into_stream_relation(self, stream_name: Name) -> StreamRelation {
-        match self {
-            Self::Opens => StreamRelation::Opens(stream_name),
-            Self::Belongs => StreamRelation::Belongs(stream_name),
-        }
-    }
-}
-
-impl From<&StreamRelation> for StreamRelationKeyword {
-    fn from(relation: &StreamRelation) -> Self {
-        match relation {
-            StreamRelation::Opens(_) => Self::Opens,
-            StreamRelation::Belongs(_) => Self::Belongs,
-        }
     }
 }
 
@@ -4695,39 +3931,6 @@ mod source_reference_tests {
             reference.to_type_reference(),
             TypeReference::optional(TypeReference::new("Event")),
         );
-    }
-}
-
-/// Drift guard for the schema-metadata head vocabulary. The `Stream`/`Family`
-/// set lives in exactly one place — [`MetadataHead`] — and every recognizing,
-/// rejecting, and re-emitting site reads it through
-/// [`MetadataHead::from_head_name`]. These tests fail if a head is added to
-/// [`MetadataHead::ALL`] without a matching `canonical_name`, or if the
-/// name/kind mapping stops round-tripping.
-#[cfg(test)]
-mod metadata_head_vocabulary_guard {
-    use super::*;
-
-    #[test]
-    fn every_metadata_head_resolves_through_one_vocabulary() {
-        for head in MetadataHead::ALL {
-            assert_eq!(
-                MetadataHead::from_head_name(head.canonical_name()),
-                Some(head),
-                "a metadata head name must resolve back to its own kind",
-            );
-            assert!(
-                head.expected_positional_form()
-                    .starts_with(head.canonical_name()),
-                "each metadata head's positional-form example leads with its own name",
-            );
-        }
-    }
-
-    #[test]
-    fn non_metadata_head_is_unrecognized() {
-        assert_eq!(MetadataHead::from_head_name("Widget"), None);
-        assert_eq!(MetadataHead::from_head_name("Stream."), None);
     }
 }
 

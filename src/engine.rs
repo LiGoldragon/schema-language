@@ -12,7 +12,6 @@ use crate::{
         Declaration, DeclarationHead, EnumDeclaration, EnumVariant, ImportDeclaration, Name,
         NewtypeDeclaration, RootApplication, TypeDeclaration, TypeReference,
     },
-    source::MetadataHead,
 };
 
 #[derive(
@@ -153,8 +152,6 @@ pub enum SchemaError {
         module: String,
         type_name: String,
     },
-    #[error("relation-path segment {segment} resolves to no declaration in the loaded schema")]
-    RelationSegmentUnresolved { segment: String },
     #[error("expected a raw declaration name, found {found}")]
     ExpectedRawDeclarationName { found: String },
     #[error("raw declaration name mismatch: key {key} declared {declared}")]
@@ -203,16 +200,6 @@ pub enum SchemaError {
     },
     #[error("schema edit identity mismatch: expected {expected}, found {found}")]
     SchemaEditIdentityMismatch { expected: String, found: String },
-    #[error("family root {name} not found")]
-    FamilyRootNotFound { name: String },
-    #[error("family reference {name} not found in family {family}")]
-    FamilyReferenceNotFound { family: String, name: String },
-    #[error("family record {record} not found in family {family}")]
-    FamilyRecordNotFound { family: String, record: String },
-    #[error("duplicate family name {name}")]
-    DuplicateFamilyName { name: String },
-    #[error("duplicate family table {table}")]
-    DuplicateFamilyTable { table: String },
     #[error("duplicate type parameter {parameter} on {declaration}")]
     DuplicateTypeParameter {
         declaration: String,
@@ -936,12 +923,6 @@ impl<'schema> NamespaceBlock<'schema> {
         context: &mut MacroContext,
         declarations: &mut Vec<Declaration>,
     ) -> Result<(), SchemaError> {
-        if object
-            .pair()
-            .is_some_and(|pair| MetadataDefinitionProbe::new(pair.definition).matches())
-        {
-            return Ok(());
-        }
         let inline_start = context.inline_declaration_count();
         match registry.lower(object, MacroPosition::NamespaceDeclaration, context)? {
             MacroOutput::Declaration(declaration) => {
@@ -1045,39 +1026,6 @@ impl<'schema> NamespaceEntryWalk<'schema> {
             2
         } else {
             1
-        }
-    }
-}
-
-/// Whether a namespace entry's value is a schema-metadata definition —
-/// a stream or family declaration — rather than a type declaration.
-/// Metadata entries are excluded from namespace type lowering and are
-/// collected through the typed `SchemaSource` reading instead.
-#[derive(Clone, Copy, Debug)]
-struct MetadataDefinitionProbe<'schema> {
-    definition: &'schema Block,
-}
-
-impl<'schema> MetadataDefinitionProbe<'schema> {
-    fn new(definition: &'schema Block) -> Self {
-        Self { definition }
-    }
-
-    fn matches(&self) -> bool {
-        match self.definition {
-            Block::Atom(atom) => atom
-                .text()
-                .strip_suffix('.')
-                .is_some_and(|head| MetadataHead::from_head_name(head).is_some()),
-            Block::Delimited {
-                delimiter: Delimiter::Parenthesis,
-                root_objects,
-                ..
-            } => root_objects
-                .first()
-                .and_then(Block::demote_to_string)
-                .is_some_and(|head| MetadataHead::from_head_name(head).is_some()),
-            _ => false,
         }
     }
 }

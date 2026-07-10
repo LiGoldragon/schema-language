@@ -552,10 +552,9 @@ impl<'prior> NameHarvest<'prior> {
     }
 
     /// Answer a local reference's identifier WITHOUT recording a table row.
-    /// Local references — plain type references, application heads, stream
-    /// relations, family records, impl targets, and relation-path segments —
-    /// point AT a declaration that owns its own row, so re-minting here reuses
-    /// that declaration's identifier without duplicating its row.
+    /// Local references — plain type references, application heads, and impl
+    /// targets — point AT a declaration that owns its own row, so re-minting
+    /// here reuses that declaration's identifier without duplicating its row.
     pub fn associate(&self, kind: DeclarationKind, name: &Name) -> NominalIdentifier {
         self.prior.associate(kind, None, name)
     }

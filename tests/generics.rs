@@ -24,13 +24,10 @@
 //! parameterized head is arity-checked at lowering, and the declared head
 //! is consulted before the broad application form.
 
-use std::path::PathBuf;
-
 use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{
-    ApplicationHead, ImportResolver, MacroContext, Name, Root, SchemaEngine, SchemaError,
-    SchemaIdentity, SchemaSourceArtifact, SingleTypeReferenceProjection, TypeDeclaration,
-    TypeReference,
+    ApplicationHead, Name, Root, SchemaEngine, SchemaError, SchemaIdentity, SchemaSourceArtifact,
+    SingleTypeReferenceProjection, TypeDeclaration, TypeReference,
 };
 
 fn lower(namespace: &str) -> schema_language::TrueSchema {
@@ -169,44 +166,6 @@ fn dropped_vec_alias_no_longer_lowers_to_vector() {
     );
 }
 
-// (d) the closure walk over an imported generic head records the import.
-
-#[test]
-fn closure_over_imported_generic_head_records_the_import() {
-    let resolver = ImportResolver::new().with_dependency(
-        "marker-core",
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/marker-core/schema"),
-        "0.1.0",
-    );
-    let consumer_source = std::fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/import-generic-consumer/schema/lib.schema"),
-    )
-    .expect("read generic-head consumer schema");
-    let schema = SchemaEngine::default()
-        .lower_source_with_resolver(
-            &consumer_source,
-            SchemaIdentity::new("import-generic-consumer", "0.1.0"),
-            &mut MacroContext::default(),
-            &resolver,
-        )
-        .expect("consumer schema lowers");
-
-    // The `Output` root reaches `Marked.DatabaseMarker.Topic` — the imported
-    // `DatabaseMarker` is the application head, so its import must be pulled
-    // into the closure.
-    let closure = schema.family_closure("Output").expect("output closure");
-    let imports = closure
-        .imports()
-        .iter()
-        .map(|import| import.local_name.as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert!(
-        imports.contains(&"DatabaseMarker".to_owned()),
-        "the imported generic head is recorded in the closure, got {imports:?}",
-    );
-}
-
 // ----------------------------------------------------------------------
 // Parameterized DECLARATION heads `(| Name Param … |)` — the head analogue of
 // the application form. A declaration's type-name position becomes a
@@ -239,20 +198,6 @@ fn parameterized_declaration_resolves_its_parameters_as_binders() {
         declaration_parameters(&schema, "Plane"),
         &[Name::new("Input"), Name::new("Output")],
     );
-
-    // The closure walk reaches `Input` and `Output` as Plain field
-    // references. Without binder scope this is a FamilyReferenceNotFound;
-    // with it, the walk succeeds and pulls in no extra declarations — a
-    // binder is a type-parameter, not a declared type.
-    let closure = schema
-        .family_closure("Plane")
-        .expect("parameterized declaration closes over its binders, not undeclared names");
-    let names = closure
-        .declarations()
-        .iter()
-        .map(|declaration| declaration.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(names, ["Plane"]);
 }
 
 // (b) An Application supplying the WRONG argument count to a resolved
@@ -510,39 +455,12 @@ fn root_position_application_lowers_to_root_application() {
         },
     );
 
-    // `root_named` and the closure entry return the application root without
-    // panicking; the closure builds and carries the applied reference.
+    // `root_named` returns the application root without panicking.
     let root = schema.root_named("Input").expect("Input root present");
     assert!(
         root.as_application().is_some(),
         "root_named yields the application root"
     );
-    let closure = schema
-        .family_closure("Input")
-        .expect("application-root family closure builds");
-    assert_eq!(closure.root().as_str(), "Input");
-    assert!(
-        closure.root_application().is_some(),
-        "the closure carries the applied reference for an application root",
-    );
-    // The walk reached the head declaration and every argument declaration.
-    let names = closure
-        .declarations()
-        .iter()
-        .map(|declaration| declaration.name().as_str().to_owned())
-        .collect::<Vec<_>>();
-    for reached in [
-        "Work",
-        "SignalInput",
-        "SemaWriteOutput",
-        "SemaReadOutput",
-        "EffectOutcome",
-    ] {
-        assert!(
-            names.contains(&reached.to_owned()),
-            "closure reaches {reached}, got {names:?}"
-        );
-    }
 }
 
 // (b) The existing enum-body root form `[Variant.Payload …]` STILL lowers to a
@@ -568,51 +486,5 @@ fn enum_body_root_still_lowers_to_root_enum() {
     assert!(
         matches!(schema.output(), Root::Enum(_)),
         "the Output root is also the enum-body form",
-    );
-    // No application reference for an enum root.
-    let closure = schema
-        .family_closure("Input")
-        .expect("enum-root closure builds");
-    assert!(
-        closure.root_application().is_none(),
-        "an enum root carries no application reference in its closure",
-    );
-}
-
-// (c) The O4 proof: the application-root family's content-address is STABLE
-//     across re-lowering the same source, AND CHANGES when one argument type
-//     is changed — proving the arguments are incorporated into the closure.
-
-#[test]
-fn application_root_closure_hash_is_stable_and_argument_sensitive() {
-    let first = lower_application_root("SemaReadOutput");
-    let again = lower_application_root("SemaReadOutput");
-
-    let first_hash = first
-        .family_closure("Input")
-        .expect("first closure")
-        .content_hash()
-        .expect("first closure hashes");
-    let again_hash = again
-        .family_closure("Input")
-        .expect("re-lowered closure")
-        .content_hash()
-        .expect("re-lowered closure hashes");
-    assert_eq!(
-        first_hash, again_hash,
-        "the application-root closure hash is stable across re-lowering the same source",
-    );
-
-    // Swap the third argument `SemaReadOutput` -> `AltReadOutput`; the
-    // applied reference changes, so the closure address must move.
-    let changed = lower_application_root("AltReadOutput");
-    let changed_hash = changed
-        .family_closure("Input")
-        .expect("changed closure")
-        .content_hash()
-        .expect("changed closure hashes");
-    assert_ne!(
-        first_hash, changed_hash,
-        "changing one application argument moves the closure address",
     );
 }

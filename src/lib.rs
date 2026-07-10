@@ -19,9 +19,9 @@ mod view;
 pub use instance::InstanceSchemaText;
 
 pub use crate::core::{
-    CoreApplicationHead, CoreDeclaration, CoreEnum, CoreFamily, CoreField, CoreImplBlock,
-    CoreNewtype, CoreReference, CoreResolvedImport, CoreRoot, CoreRootApplication, CoreSchema,
-    CoreStream, CoreStreamRelation, CoreStruct, CoreType, CoreVariant,
+    CoreApplicationHead, CoreDeclaration, CoreEnum, CoreField, CoreImplBlock, CoreNewtype,
+    CoreReference, CoreResolvedImport, CoreRoot, CoreRootApplication, CoreSchema, CoreStruct,
+    CoreType, CoreVariant,
 };
 pub use declarative::{
     MacroDelimiter, MacroLibrary, MacroLibraryArtifact, MacroLibrarySourceEntry, MacroPattern,
@@ -37,7 +37,7 @@ pub use environment::{
 pub use identifier::{
     DeclarationKind, NameDeclaration, NameEntry, NameHarvest, NameTable, NominalIdentifier,
 };
-pub use identity::{ContentHash, FamilyClosure};
+pub use identity::ContentHash;
 pub use lineage::LineageGraph;
 pub use macros::{
     MacroContext, MacroDispatch, MacroNodeDefinition, MacroObject, MacroOutput, MacroPair,
@@ -52,24 +52,21 @@ pub use nota::{
 pub use raw::{RawDatatypeEntry, RawDatatypeMap, RawNotaDatatype, RawNotaSequence, RawSchemaFile};
 pub use resolution::{ImportResolver, ImportSource, ResolvedImport};
 pub use schema::{
-    ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FamilyDeclaration,
-    FamilyKey, FieldDeclaration, ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact,
-    ImplReference, ImportDeclaration, MethodParameter, MethodSignature,
-    MultiTypeReferenceProjection, Name, NewtypeDeclaration, RelationDeclaration, RelationValue,
-    Root, RootApplication, RustSurface, SchemaNode, SchemaNodeData, SchemaNodePair,
-    SchemaNodeValue, SingleTypeReferenceProjection, StreamDeclaration, StreamRelation,
-    StructDeclaration, StructFieldMap, SymbolPath, SymbolPathPosition, TableName, TypeDeclaration,
-    TypeReference, ValueReferenceProjection, Visibility,
+    ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FieldDeclaration,
+    ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact, ImplReference, ImportDeclaration,
+    MethodParameter, MethodSignature, MultiTypeReferenceProjection, Name, NewtypeDeclaration, Root,
+    RootApplication, RustSurface, SchemaNode, SchemaNodeData, SchemaNodePair, SchemaNodeValue,
+    SingleTypeReferenceProjection, StructDeclaration, StructFieldMap, SymbolPath,
+    SymbolPathPosition, TypeDeclaration, TypeReference, ValueReferenceProjection, Visibility,
 };
 pub use source::{
     FactoredEncoding, HelpRendering, IndirectionLink, IndirectionProjection,
     LinkedStructureExpansion, MainStructureDepthCap, SchemaSource, SchemaSourceArtifact,
-    SourceDeclaration, SourceDeclarationValue, SourceDeclarations, SourceEnumBody,
-    SourceFamilyBody, SourceField, SourceFieldIdentity, SourceFieldValue, SourceImplCatalog,
-    SourceImplEntry, SourceImport, SourceImports, SourceMethodParameter, SourceMethodSignature,
-    SourceNamespace, SourceNamespaceEntry, SourceReference, SourceRelation, SourceRelationValue,
-    SourceRelations, SourceRootBody, SourceRootEnum, SourceStreamBody, SourceStructBody,
-    SourceVariantName, SourceVariantPayload, SourceVariantSignature, StreamRelationKeyword,
+    SourceDeclaration, SourceDeclarationValue, SourceDeclarations, SourceEnumBody, SourceField,
+    SourceFieldIdentity, SourceFieldValue, SourceImplCatalog, SourceImplEntry, SourceImport,
+    SourceImports, SourceMethodParameter, SourceMethodSignature, SourceNamespace,
+    SourceNamespaceEntry, SourceReference, SourceRootBody, SourceRootEnum, SourceStructBody,
+    SourceVariantName, SourceVariantPayload, SourceVariantSignature,
 };
 pub use upgrade::{
     AddField, AddVariant, ChangeFieldType, DefaultValue, EditEffect, FieldMigration, MigrationSpec,
@@ -77,7 +74,7 @@ pub use upgrade::{
     UpgradeReceipt,
 };
 pub use view::{
-    DeclarationView, EnumView, FamilyView, FieldView, ImplBlockView, NewtypeView,
-    ReferencedImplView, RootApplicationView, RootView, SchemaDeclaredType, StreamView, StructView,
-    TrueSchema, TypeDeclarationView, VariantView,
+    DeclarationView, EnumView, FieldView, ImplBlockView, NewtypeView, ReferencedImplView,
+    RootApplicationView, RootView, SchemaDeclaredType, StructView, TrueSchema, TypeDeclarationView,
+    VariantView,
 };

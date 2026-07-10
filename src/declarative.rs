@@ -11,7 +11,7 @@ use nota::{
 use crate::{
     EnumDeclaration, EnumVariant, FieldDeclaration, MacroContext, MacroObject, MacroOutput,
     MacroPair, MacroPosition, MacroRegistry, Name, NewtypeDeclaration, SchemaError,
-    SchemaMacroHandler, StreamRelation, StructDeclaration, TypeDeclaration, TypeReference,
+    SchemaMacroHandler, StructDeclaration, TypeDeclaration, TypeReference,
     macros::SchemaBlockExt,
 };
 
@@ -1959,52 +1959,6 @@ impl<'template> MacroExpansionVariant<'template> {
                         .type_reference(registry, context)?,
                 ),
             )),
-            4 => {
-                let variant = EnumVariant::new(
-                    self.object
-                        .root_object_at(0)
-                        .expect("count checked")
-                        .schema_name()?,
-                    Some(
-                        self.object
-                            .root_object_at(1)
-                            .expect("count checked")
-                            .type_reference(registry, context)?,
-                    ),
-                );
-                let relation = StreamRelationObject::new(self.object).relation()?;
-                Ok(variant.with_stream_relation(relation))
-            }
-            _ => Err(SchemaError::ExpectedEnumVariant),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct StreamRelationObject<'template> {
-    object: ObjectView<'template>,
-}
-
-impl<'template> StreamRelationObject<'template> {
-    fn new(object: ObjectView<'template>) -> Self {
-        Self { object }
-    }
-
-    fn relation(&self) -> Result<StreamRelation, SchemaError> {
-        let keyword = self
-            .object
-            .root_object_at(2)
-            .expect("count checked")
-            .demote_to_string()
-            .ok_or(SchemaError::ExpectedEnumVariant)?;
-        let stream_name = self
-            .object
-            .root_object_at(3)
-            .expect("count checked")
-            .schema_name()?;
-        match keyword {
-            "opens" => Ok(StreamRelation::Opens(stream_name)),
-            "belongs" => Ok(StreamRelation::Belongs(stream_name)),
             _ => Err(SchemaError::ExpectedEnumVariant),
         }
     }

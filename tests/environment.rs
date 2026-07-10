@@ -83,7 +83,6 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             SchemaRootBlockKind::Input,
             SchemaRootBlockKind::Output,
             SchemaRootBlockKind::Namespace,
-            SchemaRootBlockKind::Relations,
         ]
     );
     assert_eq!(module.summary().file_range().start().line(), 1);
@@ -112,7 +111,6 @@ fn environment_loads_manifest_selected_modules_and_source_summaries() {
             SchemaNodeType::InputRoot,
             SchemaNodeType::OutputRoot,
             SchemaNodeType::Namespace,
-            SchemaNodeType::Relations,
         ]
     );
 }
@@ -174,7 +172,6 @@ fn grouped_root_application_counts_as_one_summary_slot_and_round_trips_help() {
             SchemaRootBlockKind::Input,
             SchemaRootBlockKind::Output,
             SchemaRootBlockKind::Namespace,
-            SchemaRootBlockKind::Relations,
         ],
         "the grouped application root is one typed Input slot"
     );

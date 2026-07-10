@@ -504,8 +504,6 @@ struct SchemaEditor {
     input: crate::Root,
     output: crate::Root,
     namespace: Vec<Declaration>,
-    streams: Vec<crate::StreamDeclaration>,
-    families: Vec<crate::FamilyDeclaration>,
     // The pre-edit name table, carried as the re-association prior when the
     // edited tree is decomposed back into the split model. Without it the
     // rebuild re-mints every identifier from the CURRENT name against an empty
@@ -528,8 +526,6 @@ impl SchemaEditor {
             input: tree.input().clone(),
             output: tree.output().clone(),
             namespace: tree.namespace().to_vec(),
-            streams: tree.streams().to_vec(),
-            families: tree.families().to_vec(),
             prior,
         }
     }
@@ -602,9 +598,6 @@ impl SchemaEditor {
             self.input,
             self.output,
             self.namespace,
-            self.streams,
-            self.families,
-            Vec::new(),
         );
         TrueSchema::from_tree(&tree, &self.prior)
     }

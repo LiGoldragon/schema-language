@@ -225,11 +225,6 @@ impl SchemaRootBlockSummarySet {
                     layout.namespace(),
                     SchemaRootBlockKind::Namespace,
                 ),
-                SchemaRootBlockSummary::from_document_slot(
-                    document,
-                    layout.relations(),
-                    SchemaRootBlockKind::Relations,
-                ),
             ],
         }
     }
@@ -285,7 +280,6 @@ pub enum SchemaRootBlockKind {
     Input,
     Output,
     Namespace,
-    Relations,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -295,7 +289,6 @@ pub enum SchemaNodeType {
     InputRoot,
     OutputRoot,
     Namespace,
-    Relations,
 }
 
 impl SchemaNodeType {
@@ -305,7 +298,6 @@ impl SchemaNodeType {
             SchemaRootBlockKind::Input => Self::InputRoot,
             SchemaRootBlockKind::Output => Self::OutputRoot,
             SchemaRootBlockKind::Namespace => Self::Namespace,
-            SchemaRootBlockKind::Relations => Self::Relations,
         }
     }
 }

@@ -439,7 +439,6 @@ impl RootApplication {
                     .payload
                     .as_ref()
                     .map(|payload| self.substitute_binder(frame_parameters, payload)),
-                stream_relation: variant.stream_relation.clone(),
             })
             .collect()
     }
@@ -496,9 +495,6 @@ pub struct SchemaTree {
     input: Root,
     output: Root,
     namespace: Vec<Declaration>,
-    streams: Vec<StreamDeclaration>,
-    families: Vec<FamilyDeclaration>,
-    relations: Vec<RelationDeclaration>,
     impl_blocks: Vec<ImplBlock>,
 }
 
@@ -515,9 +511,6 @@ impl SchemaTree {
         input: Root,
         output: Root,
         namespace: Vec<Declaration>,
-        streams: Vec<StreamDeclaration>,
-        families: Vec<FamilyDeclaration>,
-        relations: Vec<RelationDeclaration>,
     ) -> Self {
         Self {
             identity,
@@ -526,9 +519,6 @@ impl SchemaTree {
             input,
             output,
             namespace,
-            streams,
-            families,
-            relations,
             impl_blocks: Vec::new(),
         }
     }
@@ -625,34 +615,6 @@ impl SchemaTree {
         references
     }
 
-    pub fn streams(&self) -> &[StreamDeclaration] {
-        &self.streams
-    }
-
-    pub fn families(&self) -> &[FamilyDeclaration] {
-        &self.families
-    }
-
-    pub fn relations(&self) -> &[RelationDeclaration] {
-        &self.relations
-    }
-
-    /// Confirm every declared family's record type resolves to a
-    /// namespace declaration, a root enum, or a declared import. Both
-    /// lowering paths call this after assembly, so an unresolvable
-    /// record name is a typed error rather than a silent dead family.
-    pub(crate) fn families_verified(self) -> Result<Self, SchemaError> {
-        for family in &self.families {
-            if !self.family_record_resolves(&family.record) {
-                return Err(SchemaError::FamilyRecordNotFound {
-                    family: family.name.as_str().to_owned(),
-                    record: family.record.as_str().to_owned(),
-                });
-            }
-        }
-        Ok(self)
-    }
-
     pub(crate) fn product_components_verified(self) -> Result<Self, SchemaError> {
         for declaration in &self.namespace {
             if let TypeDeclaration::Struct(declaration) = declaration.value() {
@@ -660,15 +622,6 @@ impl SchemaTree {
             }
         }
         Ok(self)
-    }
-
-    fn family_record_resolves(&self, record: &Name) -> bool {
-        self.type_named(record.as_str()).is_some()
-            || self.root_enum_named(record.as_str()).is_some()
-            || self
-                .imports
-                .iter()
-                .any(|import| &import.local_name == record)
     }
 
     pub fn type_named(&self, name: &str) -> Option<&TypeDeclaration> {
@@ -775,7 +728,6 @@ impl SchemaTree {
                 payload: variant
                     .payload
                     .map(|payload| self.reaim_sibling_application(&payload)),
-                stream_relation: variant.stream_relation,
             })
             .collect();
         Some(EnumDeclaration::new(application.name().clone(), expanded))
@@ -1057,11 +1009,6 @@ impl SchemaTree {
             self.input.to_root_schema_text(),
             self.output.to_root_schema_text(),
             self.namespace_schema_text(),
-            Delimiter::SquareBracket.wrap(
-                self.relations
-                    .iter()
-                    .map(RelationDeclaration::to_schema_text),
-            ),
         ];
         roots.join("\n")
     }
@@ -1087,8 +1034,6 @@ impl SchemaTree {
     fn namespace_schema_text(&self) -> String {
         let mut entries = Vec::new();
         entries.extend(self.namespace.iter().map(Declaration::to_schema_text));
-        entries.extend(self.streams.iter().map(StreamDeclaration::to_schema_text));
-        entries.extend(self.families.iter().map(FamilyDeclaration::to_schema_text));
         entries.extend(self.impl_blocks.iter().map(ImplBlock::to_schema_text));
         if entries.is_empty() {
             return "{}".to_owned();
@@ -1227,53 +1172,12 @@ impl EnumDeclaration {
 
 impl EnumVariant {
     fn to_schema_text(&self) -> String {
-        match (&self.payload, &self.stream_relation) {
-            (None, None) => self.name.to_nota(),
-            (Some(payload), None) => {
+        match &self.payload {
+            None => self.name.to_nota(),
+            Some(payload) => {
                 Delimiter::Parenthesis.wrap([self.name.to_nota(), payload.to_structural_nota()])
             }
-            (Some(payload), Some(relation)) => Delimiter::Parenthesis.wrap([
-                self.name.to_nota(),
-                payload.to_structural_nota(),
-                relation.keyword_text().to_owned(),
-                relation.stream_name().to_nota(),
-            ]),
-            (None, Some(_)) => self.name.to_nota(),
         }
-    }
-}
-
-impl StreamRelation {
-    fn keyword_text(&self) -> &'static str {
-        match self {
-            Self::Opens(_) => "opens",
-            Self::Belongs(_) => "belongs",
-        }
-    }
-}
-
-impl StreamDeclaration {
-    fn to_schema_text(&self) -> String {
-        format!(
-            "{} Stream.({} {} {} {})",
-            self.name.to_nota(),
-            self.token.to_structural_nota(),
-            self.opened.to_structural_nota(),
-            self.event.to_structural_nota(),
-            self.close.to_structural_nota(),
-        )
-    }
-}
-
-impl FamilyDeclaration {
-    fn to_schema_text(&self) -> String {
-        format!(
-            "{} Family.({} {} {})",
-            self.name.to_nota(),
-            self.record.to_nota(),
-            self.table.to_nota(),
-            self.key.to_nota(),
-        )
     }
 }
 
@@ -1326,75 +1230,6 @@ impl MethodParameter {
             self.name.to_nota(),
             self.reference.to_structural_nota()
         )
-    }
-}
-
-impl RelationDeclaration {
-    fn to_schema_text(&self) -> String {
-        match self {
-            Self::Equivalence(values) => Delimiter::Parenthesis.wrap([
-                "Equivalence".to_owned(),
-                Delimiter::SquareBracket.wrap(values.iter().map(RelationValue::to_schema_text)),
-            ]),
-        }
-    }
-}
-
-impl RelationValue {
-    fn to_schema_text(&self) -> String {
-        match self.path.as_slice() {
-            [] => Delimiter::Parenthesis.wrap(Vec::<String>::new()),
-            [name] => name.to_nota(),
-            names => Delimiter::Parenthesis.wrap(names.iter().map(Name::to_nota)),
-        }
-    }
-}
-
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::NotaDecode,
-    nota::NotaEncode,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub enum RelationDeclaration {
-    Equivalence(Vec<RelationValue>),
-}
-
-impl RelationDeclaration {
-    pub fn values(&self) -> &[RelationValue] {
-        match self {
-            Self::Equivalence(values) => values,
-        }
-    }
-}
-
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::NotaDecode,
-    nota::NotaEncode,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub struct RelationValue {
-    path: Vec<Name>,
-}
-
-impl RelationValue {
-    pub fn new(path: Vec<Name>) -> Self {
-        Self { path }
-    }
-
-    pub fn path(&self) -> &[Name] {
-        &self.path
     }
 }
 
@@ -2155,21 +1990,11 @@ impl EnumDeclaration {
 pub struct EnumVariant {
     pub name: Name,
     pub payload: Option<TypeReference>,
-    pub stream_relation: Option<StreamRelation>,
 }
 
 impl EnumVariant {
     pub fn new(name: Name, payload: Option<TypeReference>) -> Self {
-        Self {
-            name,
-            payload,
-            stream_relation: None,
-        }
-    }
-
-    pub fn with_stream_relation(mut self, stream_relation: StreamRelation) -> Self {
-        self.stream_relation = Some(stream_relation);
-        self
+        Self { name, payload }
     }
 
     pub(crate) fn same_named_direct_payload_type(&self) -> Option<&str> {
@@ -2178,164 +2003,6 @@ impl EnumVariant {
             Some(payload_name.local_part())
         } else {
             None
-        }
-    }
-}
-
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::NotaDecode,
-    nota::NotaEncode,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub enum StreamRelation {
-    Opens(Name),
-    Belongs(Name),
-}
-
-impl StreamRelation {
-    pub fn stream_name(&self) -> &Name {
-        match self {
-            Self::Opens(name) | Self::Belongs(name) => name,
-        }
-    }
-}
-
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::NotaDecode,
-    nota::NotaEncode,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub struct StreamDeclaration {
-    pub name: Name,
-    pub token: TypeReference,
-    pub opened: TypeReference,
-    pub event: TypeReference,
-    pub close: TypeReference,
-}
-
-impl StreamDeclaration {
-    pub fn new(
-        name: Name,
-        token: TypeReference,
-        opened: TypeReference,
-        event: TypeReference,
-        close: TypeReference,
-    ) -> Self {
-        Self {
-            name,
-            token,
-            opened,
-            event,
-            close,
-        }
-    }
-}
-
-/// The current storage coordinate of a record family. A table name is
-/// not a schema symbol: renaming the table moves only this coordinate,
-/// never the family's semantic identity.
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Debug, Eq, PartialEq)]
-pub struct TableName(String);
-
-impl TableName {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl NotaDecode for TableName {
-    fn from_nota_block(block: &Block) -> Result<Self, NotaDecodeError> {
-        NotaBlock::new(block).parse_string().map(Self::new)
-    }
-}
-
-impl NotaEncode for TableName {
-    fn to_nota(&self) -> String {
-        if Name::new(self.as_str()).qualifies_as_symbol_name() {
-            self.as_str().to_owned()
-        } else {
-            NotaString::new(self.as_str()).format()
-        }
-    }
-}
-
-impl fmt::Display for TableName {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-/// How a stored record family is keyed: by a domain-supplied record
-/// key, or by an engine-assigned record identifier. The two variants
-/// mirror the two registration shapes a SEMA engine offers (a keyed
-/// table descriptor versus an identified table descriptor).
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::NotaDecode,
-    nota::NotaEncode,
-    nota::StructuralMacroNode,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub enum FamilyKey {
-    #[shape(keyword = "Domain")]
-    Domain,
-    #[shape(keyword = "Identified")]
-    Identified,
-}
-
-/// A stored record family: schema metadata in the namespace map, on
-/// the stream-declaration precedent. The family name is the stable
-/// identity; the record type names the declaration whose closure is
-/// the family's content identity; the table name is only the current
-/// storage coordinate; the key kind selects the engine registration
-/// shape.
-#[derive(
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    nota::NotaDecode,
-    nota::NotaEncode,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-)]
-pub struct FamilyDeclaration {
-    pub name: Name,
-    pub record: Name,
-    pub table: TableName,
-    pub key: FamilyKey,
-}
-
-impl FamilyDeclaration {
-    pub fn new(name: Name, record: Name, table: TableName, key: FamilyKey) -> Self {
-        Self {
-            name,
-            record,
-            table,
-            key,
         }
     }
 }

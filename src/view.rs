@@ -29,16 +29,15 @@ use nota::{Block, NotaDecode, NotaDecodeError, NotaEncode};
 use crate::{
     SchemaError, SchemaIdentity,
     core::{
-        CoreDeclaration, CoreEnum, CoreFamily, CoreField, CoreImplBlock, CoreNewtype, CoreRoot,
-        CoreRootApplication, CoreSchema, CoreStream, CoreStruct, CoreType, CoreVariant,
+        CoreDeclaration, CoreEnum, CoreField, CoreImplBlock, CoreNewtype, CoreRoot,
+        CoreRootApplication, CoreSchema, CoreStruct, CoreType, CoreVariant,
     },
     identifier::{DeclarationKind, NameTable, NominalIdentifier},
     resolution::ResolvedImport,
     schema::{
-        Declaration, EnumDeclaration, EnumVariant, FamilyDeclaration, FamilyKey, FieldDeclaration,
-        ImplBlock, ImplCatalog, ImplReference, ImportDeclaration, Name, NewtypeDeclaration,
-        RelationDeclaration, Root, RootApplication, SchemaTree, StreamDeclaration,
-        StructDeclaration, SymbolPath, SymbolPathPosition, TableName, TypeDeclaration,
+        Declaration, EnumDeclaration, EnumVariant, FieldDeclaration, ImplBlock, ImplCatalog,
+        ImplReference, ImportDeclaration, Name, NewtypeDeclaration, Root, RootApplication,
+        SchemaTree, StructDeclaration, SymbolPath, SymbolPathPosition, TypeDeclaration,
         TypeReference, Visibility,
     },
 };
@@ -148,21 +147,6 @@ impl TrueSchema {
         self.tree().resolved_imports().to_vec()
     }
 
-    /// The relation declarations, projected. Each relation-path segment that
-    /// names a local declaration resolves its current name through the table,
-    /// so a rename of a relation's target follows into the relation.
-    pub fn relations(&self) -> Vec<RelationDeclaration> {
-        self.core
-            .relations
-            .iter()
-            .map(|relation| {
-                relation
-                    .project(&self.names)
-                    .expect(VIEW_RESOLUTION_INVARIANT)
-            })
-            .collect()
-    }
-
     pub fn input_view(&self) -> RootView<'_> {
         RootView {
             core: &self.core.input,
@@ -238,42 +222,6 @@ impl TrueSchema {
     pub fn type_named(&self, name: &str) -> Option<TypeDeclaration> {
         self.type_view_named(name)
             .map(|view| view.to_type_declaration())
-    }
-
-    pub fn stream_views(&self) -> Vec<StreamView<'_>> {
-        self.core
-            .streams
-            .iter()
-            .map(|core| StreamView {
-                core,
-                names: &self.names,
-            })
-            .collect()
-    }
-
-    pub fn streams(&self) -> Vec<StreamDeclaration> {
-        self.stream_views()
-            .iter()
-            .map(StreamView::to_stream)
-            .collect()
-    }
-
-    pub fn family_views(&self) -> Vec<FamilyView<'_>> {
-        self.core
-            .families
-            .iter()
-            .map(|core| FamilyView {
-                core,
-                names: &self.names,
-            })
-            .collect()
-    }
-
-    pub fn families(&self) -> Vec<FamilyDeclaration> {
-        self.family_views()
-            .iter()
-            .map(FamilyView::to_family)
-            .collect()
     }
 
     pub fn impl_block_views(&self) -> Vec<ImplBlockView<'_>> {
@@ -792,67 +740,6 @@ impl NewtypeView<'_> {
     }
 
     pub fn to_newtype(&self) -> NewtypeDeclaration {
-        self.core
-            .project(self.names)
-            .expect(VIEW_RESOLUTION_INVARIANT)
-    }
-}
-
-/// A stream declaration, viewed.
-#[derive(Clone, Copy)]
-pub struct StreamView<'schema> {
-    core: &'schema CoreStream,
-    names: &'schema NameTable,
-}
-
-impl StreamView<'_> {
-    pub fn name(&self) -> Name {
-        self.names
-            .projected_name(&self.core.identifier)
-            .expect(VIEW_RESOLUTION_INVARIANT)
-            .clone()
-    }
-
-    pub fn to_stream(&self) -> StreamDeclaration {
-        self.core
-            .project(self.names)
-            .expect(VIEW_RESOLUTION_INVARIANT)
-    }
-}
-
-/// A family declaration, viewed. The table name is a storage coordinate
-/// borrowed from the substrate; the family and record names resolve through
-/// the table.
-#[derive(Clone, Copy)]
-pub struct FamilyView<'schema> {
-    core: &'schema CoreFamily,
-    names: &'schema NameTable,
-}
-
-impl FamilyView<'_> {
-    pub fn name(&self) -> Name {
-        self.names
-            .projected_name(&self.core.identifier)
-            .expect(VIEW_RESOLUTION_INVARIANT)
-            .clone()
-    }
-
-    pub fn record(&self) -> Name {
-        self.names
-            .projected_name(&self.core.record)
-            .expect(VIEW_RESOLUTION_INVARIANT)
-            .clone()
-    }
-
-    pub fn table(&self) -> &TableName {
-        &self.core.table
-    }
-
-    pub fn key(&self) -> FamilyKey {
-        self.core.key
-    }
-
-    pub fn to_family(&self) -> FamilyDeclaration {
         self.core
             .project(self.names)
             .expect(VIEW_RESOLUTION_INVARIANT)

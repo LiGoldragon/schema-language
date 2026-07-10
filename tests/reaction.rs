@@ -176,30 +176,6 @@ fn reaction_frame_lowers_with_its_two_parameterized_declarations() {
     );
 }
 
-#[test]
-fn frame_declarations_close_over_their_binders() {
-    let reaction = lower_reaction();
-
-    // Each frame family closes: its variant payloads are binder references,
-    // which resolve as type-parameters (not FamilyReferenceNotFound), so the
-    // closure contains only the head declaration itself.
-    for head in ["Work", "Action"] {
-        let closure = reaction
-            .family_closure(head)
-            .unwrap_or_else(|error| panic!("{head} closes over its binders: {error:?}"));
-        let names = closure
-            .declarations()
-            .iter()
-            .map(|declaration| declaration.name().as_str().to_owned())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            [head],
-            "{head} pulls in no extra declarations — binders are parameters"
-        );
-    }
-}
-
 // ----------------------------------------------------------------------
 // (2) The migrated nexus lowers through the import + root-application path:
 //     the imported frame heads resolve, the roots are Root::Application, and
@@ -270,33 +246,6 @@ fn migrated_nexus_lowers_to_application_roots_over_the_imported_frame() {
             import.parameter_count(),
             Some(arity),
             "{local} carries its frame arity across the boundary",
-        );
-    }
-}
-
-#[test]
-fn migrated_application_roots_close_over_the_imported_frame_heads() {
-    let migrated = lower_migrated();
-
-    // The application-root closure walk reaches the imported frame head and
-    // records the import; the argument declarations are pulled in as local
-    // declarations.
-    for (position, head) in [("Input", "Work"), ("Output", "Action")] {
-        let closure = migrated
-            .family_closure(position)
-            .unwrap_or_else(|error| panic!("{position} application root closes: {error:?}"));
-        assert!(
-            closure.root_application().is_some(),
-            "{position} carries its applied frame reference in the closure",
-        );
-        let imports = closure
-            .imports()
-            .iter()
-            .map(|import| import.local_name.as_str().to_owned())
-            .collect::<Vec<_>>();
-        assert!(
-            imports.contains(&head.to_owned()),
-            "{position} closure records the imported frame head {head}, got {imports:?}",
         );
     }
 }
