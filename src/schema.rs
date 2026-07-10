@@ -1,8 +1,8 @@
 use std::fmt;
 
 use nota::{
-    AtomClassification, Block, Delimiter, NotaBlock, NotaBody, NotaDecode, NotaDecodeError,
-    NotaEncode, NotaString, StructuralMacroNode,
+    Block, Delimiter, NotaBlock, NotaBody, NotaDecode, NotaDecodeError, NotaEncode, NotaString,
+    StructuralMacroNode,
 };
 
 use crate::{
@@ -64,7 +64,18 @@ impl Name {
     }
 
     pub fn qualifies_as_symbol_name(&self) -> bool {
-        AtomClassification::classify(self.as_str()) == AtomClassification::SymbolCandidate
+        // The structural symbol predicate retained from the NOTA reader
+        // (`Atom::qualifies_as_symbol`): a non-empty atom whose every character
+        // is bare-safe — no whitespace and none of the delimiter or quote
+        // characters. No numeric meaning is inferred; a numeric-looking atom
+        // qualifies here and narrows to a number only at decode under its
+        // expected type.
+        let text = self.as_str();
+        !text.is_empty()
+            && text.chars().all(|character| {
+                !character.is_whitespace()
+                    && !matches!(character, '"' | '(' | ')' | '[' | ']' | '{' | '}')
+            })
     }
 
     /// Whether this name is a PascalCase symbol — a symbol-shaped atom whose
@@ -2230,7 +2241,7 @@ impl NotaDecode for TableName {
 
 impl NotaEncode for TableName {
     fn to_nota(&self) -> String {
-        if AtomClassification::classify(self.as_str()) == AtomClassification::SymbolCandidate {
+        if Name::new(self.as_str()).qualifies_as_symbol_name() {
             self.as_str().to_owned()
         } else {
             NotaString::new(self.as_str()).format()

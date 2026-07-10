@@ -4,8 +4,9 @@ use std::{
 };
 
 use nota::{
-    Block, CaptureName, Delimiter, Document, MacroCandidate, NotaBody, NotaDecode, NotaEncode,
-    NotaString, StructuralMacroError, StructuralMacroNode, StructuralVariant,
+    Block, CaptureName, Delimiter, Document, DottedExpectation, MacroCandidate, NotaBody,
+    NotaDecode, NotaDecodeError, NotaEncode, NotaString, StructuralMacroError, StructuralMacroNode,
+    StructuralVariant,
 };
 
 use crate::{
@@ -1530,34 +1531,26 @@ impl SourceMethodParameter {
     /// camel name and a plain reference. A composite reference is written as
     /// two sibling objects, `paramName.` followed by the reference object.
     fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
-        if let Some(named) = SourceNamedBlock::from_blocks_if_trailing_dot(blocks, index)? {
-            let name = named.name;
-            Self::validate_name(&name)?;
-            return Ok(Self {
-                name,
-                reference: SourceReference::from_block(named.value)?,
-            });
-        }
-        let block = &blocks[*index];
-        *index += 1;
-        let atom = SourceAtom::from_block(block)?;
-        let Some((param_name, type_name)) = atom.0.split_once('.') else {
-            return Err(SchemaError::ExpectedSyntaxReference {
-                found: format!("method parameter {}", atom.0),
-            });
-        };
-        let name = Name::new(param_name);
+        // A method parameter is the UNCAPITALIZED dotted form `paramName.Type`,
+        // whether the type is an inline atom or the following block. The shared
+        // NOTA reader performs the split; this reader validates the name and
+        // reads the value block as an ordinary reference.
+        let entry = DottedExpectation::Uncapitalized
+            .read_entry(&blocks[*index..])
+            .map_err(|_| SchemaError::ExpectedSyntaxReference {
+                found: format!(
+                    "method parameter {}",
+                    blocks
+                        .get(*index)
+                        .map(Block::reemit_fallback)
+                        .unwrap_or_default()
+                ),
+            })?;
+        *index += entry.consumed();
+        let name = Name::new(SourceReference::dotted_key_text(&entry));
         Self::validate_name(&name)?;
-        let reference = Name::new(type_name);
-        if !SourceIdentifierCase::new(&reference).is_type() {
-            return Err(SchemaError::ExpectedSyntaxReference {
-                found: format!("method parameter type {type_name}"),
-            });
-        }
-        Ok(Self {
-            name,
-            reference: SourceReference::Plain(reference),
-        })
+        let reference = SourceReference::from_block(entry.value())?;
+        Ok(Self { name, reference })
     }
 
     fn validate_name(name: &Name) -> Result<(), SchemaError> {
@@ -2417,43 +2410,6 @@ impl SourceDelimitedText {
             self.children.join(" "),
             self.delimiter.closing_text()
         )
-    }
-}
-
-#[derive(Clone, Debug)]
-struct SourceNamedBlock<'source> {
-    name: Name,
-    value: &'source Block,
-}
-
-impl<'source> SourceNamedBlock<'source> {
-    fn from_blocks_if_trailing_dot(
-        blocks: &'source [Block],
-        index: &mut usize,
-    ) -> Result<Option<Self>, SchemaError> {
-        let Some(Block::Atom(atom)) = blocks.get(*index) else {
-            return Ok(None);
-        };
-        let Some(name_text) = atom.text().strip_suffix('.') else {
-            return Ok(None);
-        };
-        if name_text.is_empty() {
-            return Err(SchemaError::RetiredStructFieldSyntax {
-                found: atom.text().to_owned(),
-            });
-        }
-        let value = blocks
-            .get(*index + 1)
-            .ok_or(SchemaError::ExpectedSyntaxReferenceArity {
-                form: "named schema field",
-                expected: "a trailing-dot field name and a following value",
-                found: 1,
-            })?;
-        *index += 2;
-        Ok(Some(Self {
-            name: Name::new(name_text),
-            value,
-        }))
     }
 }
 
@@ -4084,18 +4040,23 @@ impl SourceReference {
         };
         match block {
             Block::Atom(atom) => {
-                if let Some(head) = atom.text().strip_suffix('.') {
-                    if head.is_empty() {
-                        return Err(SchemaError::ExpectedSyntaxReference {
-                            found: atom.text().to_owned(),
-                        });
+                // A type application carries a CAPITALIZED dotted prefix. The
+                // low-level split is the shared NOTA reader's; this reader only
+                // chooses the expectation and dispatches on the value shape.
+                match DottedExpectation::Capitalized.read_entry(&blocks[*index..]) {
+                    Ok(entry) => {
+                        *index += entry.consumed();
+                        let head = Name::new(Self::dotted_key_text(&entry));
+                        let arguments = Self::arguments_from_dotted_value(entry.value())?;
+                        Self::from_application_parts(head, arguments)
                     }
-                    *index += 1;
-                    let arguments = Self::dotted_payload_arguments(blocks, index)?;
-                    return Self::from_application_parts(Name::new(head), arguments);
+                    // No top-level dot: the atom is a plain leaf reference.
+                    Err(NotaDecodeError::ExpectedDottedEntry { .. }) => {
+                        *index += 1;
+                        Ok(Self::Plain(Name::new(atom.text())))
+                    }
+                    Err(error) => Err(SchemaError::from(error)),
                 }
-                *index += 1;
-                Self::from_atom_text(atom.text())
             }
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
@@ -4155,24 +4116,27 @@ impl SourceReference {
         Ok(2)
     }
 
-    fn dotted_payload_arguments(
-        blocks: &[Block],
-        index: &mut usize,
-    ) -> Result<Vec<Self>, SchemaError> {
-        let Some(block) = blocks.get(*index) else {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
-                form: "dotted reference",
-                expected: "a payload after the dot",
-                found: 1,
-            });
-        };
+    /// The atom text of a dotted entry's key. The shared reader guarantees the
+    /// key is the atom split from the leading prefix.
+    fn dotted_key_text(entry: &nota::DottedEntry) -> &str {
+        entry
+            .key()
+            .atom()
+            .map(|prefix| prefix.text())
+            .expect("a dotted prefix splits to an atom key")
+    }
+
+    /// The applied arguments carried by a dotted application's value. A grouped
+    /// value `(A B …)` is a positional argument list; any other single value —
+    /// an inline remainder atom such as the `A` of `Vector.A`, or a following
+    /// block — is one nested argument read through the same reader.
+    fn arguments_from_dotted_value(value: &Block) -> Result<Vec<Self>, SchemaError> {
         if let Block::Delimited {
             delimiter: Delimiter::Parenthesis,
             root_objects,
             ..
-        } = block
+        } = value
         {
-            *index += 1;
             let mut arguments = Vec::new();
             let mut cursor = 0;
             while cursor < root_objects.len() {
@@ -4180,7 +4144,11 @@ impl SourceReference {
             }
             return Ok(arguments);
         }
-        Ok(vec![Self::from_blocks_at(blocks, index)?])
+        let mut cursor = 0;
+        Ok(vec![Self::from_blocks_at(
+            std::slice::from_ref(value),
+            &mut cursor,
+        )?])
     }
 
     fn from_atom_text(text: &str) -> Result<Self, SchemaError> {

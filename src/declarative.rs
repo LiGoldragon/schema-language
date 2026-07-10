@@ -4,8 +4,8 @@ use std::{
 };
 
 use nota::{
-    AtomClassification, Block, Delimiter, Document, MacroCandidate, NotaEncode, NotaSource,
-    PositionPredicate, StructuralMacroError, StructuralMacroNode, StructuralVariant,
+    Block, Delimiter, Document, MacroCandidate, NotaEncode, NotaSource, PositionPredicate,
+    StructuralMacroError, StructuralMacroNode, StructuralVariant,
 };
 
 use crate::{
@@ -1477,7 +1477,7 @@ impl ExpandedObject {
         match self {
             Self::Captured(block) => block.qualifies_as_pascal_case_symbol(),
             Self::Atom(text) => {
-                AtomClassification::classify(text) == AtomClassification::SymbolCandidate
+                Name::new(text.as_str()).qualifies_as_symbol_name()
                     && text
                         .chars()
                         .next()
