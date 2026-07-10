@@ -422,9 +422,10 @@ becomes the structural lineage address, and renames stop moving it.
   `TypeReference` variants until the per-name semantic variants are collapsed
   to the per-kind model.
 - `schemas/core.schema` is the builtin-macro-library schema. Its namespace
-  declares a type named `CoreSchema` (the macro library), which is unrelated to
-  the target stringless `CoreSchema` substrate. This name collision is a
-  hazard; the builtin-macro-library `CoreSchema` should be renamed so the
+  declares a type named `BuiltinMacroLibrary`, the macro library, which is
+  unrelated to the target stringless `CoreSchema` substrate. The earlier name
+  collision — the macro library was itself once named `CoreSchema` — has been
+  resolved: the macro-library type was renamed to `BuiltinMacroLibrary`, so the
   substrate name is free.
 
 ## Boundaries

@@ -288,6 +288,12 @@ impl NameTable {
             })
             .collect();
         entries.sort_by_key(|entry| entry.identifier);
+        // Collapse identical duplicate rows (same identifier, same name) so
+        // multiplicity never leaks into the canonical bytes. Sorting by
+        // identifier makes equal rows adjacent, and a row is a pure function of
+        // its identifier and name, so `dedup` removes exactly the duplicates
+        // and leaves the mapping construction-order-independent.
+        entries.dedup();
         Self { entries }
     }
 
@@ -300,6 +306,20 @@ impl NameTable {
         identifier: &NominalIdentifier,
         new_name: Name,
     ) -> Result<(), SchemaError> {
+        // The identifier-to-name mapping is injective per kind: the new name
+        // must not already belong to a different identifier of the same kind.
+        // Reassigning the same name to the same identifier is a no-op rename and
+        // stays legal.
+        if let Some(holder) = self.identifier_of(identifier.kind, &new_name) {
+            if &holder != identifier {
+                return Err(SchemaError::NameTableNameConflict {
+                    kind: identifier.kind,
+                    name: new_name.as_str().to_owned(),
+                    holder: holder.to_hex(),
+                    requested: identifier.to_hex(),
+                });
+            }
+        }
         let entry = self
             .entries
             .iter_mut()
@@ -317,5 +337,12 @@ impl NameTable {
         rkyv::to_bytes::<rkyv::rancor::Error>(self)
             .map(|bytes| bytes.to_vec())
             .map_err(|_| SchemaError::ArchiveEncode)
+    }
+
+    /// Read a table back from its canonical rkyv bytes. This is the inverse of
+    /// [`NameTable::canonical_bytes`]: a table encoded and read back is equal to
+    /// the original, so the archive is a faithful durable form of the mapping.
+    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SchemaError> {
+        rkyv::from_bytes::<Self, rkyv::rancor::Error>(bytes).map_err(|_| SchemaError::ArchiveDecode)
     }
 }

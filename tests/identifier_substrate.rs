@@ -2,6 +2,7 @@
 //! order-independent minting; nominal distinctness; rename-through-table
 //! identifier preservation; and fresh minting on a re-association miss.
 
+use nota::{Document, NotaDecode, NotaEncode};
 use schema_language::{DeclarationKind, Name, NameTable, NominalIdentifier};
 
 fn declaration(name: &str) -> (DeclarationKind, Name) {
@@ -111,6 +112,97 @@ fn rename_of_absent_identifier_is_a_typed_error() {
     assert!(
         table.rename(&stray, Name::new("Whatever")).is_err(),
         "renaming an identifier the table does not hold is an error",
+    );
+}
+
+#[test]
+fn build_dedups_identical_duplicate_rows() {
+    // The same declaration supplied twice must not leave two identical rows in
+    // the table; multiplicity would make the canonical bytes depend on how many
+    // times a declaration was listed.
+    let once = NameTable::build(&NameTable::empty(), [declaration("Meters")]);
+    let twice = NameTable::build(
+        &NameTable::empty(),
+        [declaration("Meters"), declaration("Meters")],
+    );
+    assert_eq!(
+        once.entries().len(),
+        1,
+        "a single declaration yields a single row",
+    );
+    assert_eq!(
+        twice.entries().len(),
+        1,
+        "a duplicated declaration is collapsed to one row",
+    );
+    assert_eq!(
+        once.canonical_bytes().expect("once serializes"),
+        twice.canonical_bytes().expect("twice serializes"),
+        "duplicate multiplicity must not change the canonical bytes",
+    );
+}
+
+#[test]
+fn rename_to_a_name_held_by_a_different_identifier_is_rejected() {
+    let mut table = NameTable::build(
+        &NameTable::empty(),
+        [declaration("Meters"), declaration("Seconds")],
+    );
+    let meters = table
+        .identifier_of(DeclarationKind::Type, &Name::new("Meters"))
+        .expect("Meters is minted");
+
+    // Renaming Meters onto the name Seconds already holds must be rejected: the
+    // per-kind name mapping stays injective rather than double-binding Seconds.
+    assert!(
+        table.rename(&meters, Name::new("Seconds")).is_err(),
+        "a name held by a different identifier of the same kind cannot be taken",
+    );
+    // The table is untouched: both names still resolve to their own identifiers.
+    assert_eq!(table.name_of(&meters), Some(&Name::new("Meters")));
+    assert!(
+        table
+            .identifier_of(DeclarationKind::Type, &Name::new("Seconds"))
+            .is_some(),
+        "Seconds is still bound to its original identifier",
+    );
+
+    // Reassigning an identifier its own current name is a legal no-op rename,
+    // not a self-collision.
+    assert!(
+        table.rename(&meters, Name::new("Meters")).is_ok(),
+        "reassigning an identifier its own current name is a legal no-op rename",
+    );
+}
+
+#[test]
+fn nominal_identifier_round_trips_through_nota() {
+    let identifier = NominalIdentifier::mint(DeclarationKind::Field, "Entry.domains");
+    let nota = identifier.to_nota();
+    let document = Document::parse(&nota).expect("identifier NOTA parses");
+    let decoded = NominalIdentifier::from_nota_block(&document.root_objects()[0])
+        .expect("identifier decodes from its (Kind hex-digest) projection");
+    assert_eq!(
+        decoded, identifier,
+        "a nominal identifier survives a NOTA encode/decode round-trip exactly",
+    );
+}
+
+#[test]
+fn name_table_round_trips_through_canonical_bytes() {
+    let table = NameTable::build(
+        &NameTable::empty(),
+        [
+            declaration("Meters"),
+            declaration("Seconds"),
+            declaration("Grams"),
+        ],
+    );
+    let bytes = table.canonical_bytes().expect("table serializes");
+    let recovered = NameTable::from_canonical_bytes(&bytes).expect("table reads back from rkyv");
+    assert_eq!(
+        recovered, table,
+        "a NameTable archived to canonical bytes reads back equal",
     );
 }
 

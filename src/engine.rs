@@ -259,6 +259,19 @@ pub enum SchemaError {
     /// already be bound before it can be renamed.
     #[error("name table has no identifier {identifier} to rename")]
     NameTableIdentifierAbsent { identifier: String },
+    /// A rename through the `NameTable` tried to assign a name already held by a
+    /// different identifier of the same kind. The table's identifier-to-name
+    /// mapping is injective per kind, so a collision is a typed error rather
+    /// than a silent double-binding of one name.
+    #[error(
+        "name {name} is already held by a different {kind:?} identifier {holder}, cannot rename {requested} to it"
+    )]
+    NameTableNameConflict {
+        kind: crate::DeclarationKind,
+        name: String,
+        holder: String,
+        requested: String,
+    },
 }
 
 impl From<nota::MacroError> for SchemaError {
