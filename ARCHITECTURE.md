@@ -67,6 +67,20 @@ string-versus-variant; a bare atom value may be capitalized, and a capitalized
 string needs no delimiter. Structural lowering never reads case to choose a
 value category.
 
+### No aliases anywhere
+
+There are no aliases anywhere in the language, by psyche decision. An alias is a
+second human-chosen name bound to a declaration at a use site — an import alias,
+a namespace alias, a rename-on-import. None exist. Every declaration is known by
+its own name, and a name at a use site is only ever a reference, a path segment,
+a schema-required disambiguator, or an encoder-synthesized indirection linkname
+(see "Indirection names and the round-trip contract"), never a human-authored
+rebinding. Imports therefore never rename (see "Imports entry syntax carries no
+alias"), and the retired nested lowercase type sub-namespace (see "Retired
+constructs") does not come back as an aliasing form. Any surface that binds a
+new human-chosen name to an existing declaration is drift, to be retired rather
+than migrated.
+
 ## Core and True schema
 
 The semantic schema is one model viewed two ways. The split is landed: the
@@ -219,6 +233,23 @@ The dot replaces all name-adjacency-value forms:
   left-associative segment chain of lowercase segments ending in the
   capitalized target.
 
+### Imports entry syntax carries no alias
+
+The imports block is a set of dotted import entries, and an import entry is a
+lowercase dotted path ending in either one capitalized target or a
+square-bracket vector of capitalized targets:
+
+- `path.to.Object` imports the single target `Object`; and
+- `path.to.[X Y Z]` imports the several targets `X`, `Y`, and `Z` from the same
+  path.
+
+There is no alias key. An imported declaration keeps its own name; the language
+has no `Alias.dotted.path.Target` form and no rename-on-import. This is the
+absolute rule, not merely the entry shape: imports never rename, because the
+language has no aliases anywhere (see "No aliases anywhere"). An import entry is
+therefore purely a path plus one-or-many targets, and the imported names that
+enter the loaded whole are the targets' own names.
+
 A map entry splits on the first top-level dot. The key is one dotless block;
 keys are atoms only, with no non-atom or structured keys. The value may be
 dotted.
@@ -252,18 +283,26 @@ A leading lowercase name (`name.Value`) is legitimate in exactly three places:
 
 - struct-field disambiguation, required only when the field type is duplicated
   within the struct;
-- dotted import paths; and
-- namespace indirection names — the lowercase alias a human writes to name a
-  hoisted subtree (see below).
+- dotted import path segments; and
+- encoder-synthesized indirection names — the lowercase linkname the encoder
+  synthesizes when it decomposes a deep structure (see below). A human never
+  authors one.
+
+A human never writes a lowercase name to introduce, alias, or rename a
+declaration. There is no human-authored namespace alias, no import alias, and no
+nested lowercase sub-namespace; those forms are drift, not language.
 
 ### Indirection names and the round-trip contract
 
-An indirection name is one construct with two authors. The lowercase alias a
-human writes in the namespace section to avoid writing a deeply nested datatype,
-and the linkname the encoder synthesizes when it decomposes a deep structure,
-are the same mechanism. Both name a hoisted subtree, both stay in the lowercase
-"name" register of the capitalization semantics, and both inline at lowering:
-they have no `CoreSchema` or `TrueSchema` representation.
+An indirection name is exclusively encoder-synthesized. It is the linkname the
+encoder synthesizes when it decomposes a deep structure — machine-derived
+factoring, never a human-authored alias. It names a hoisted subtree, stays in
+the lowercase "name" register of the capitalization semantics, and inlines at
+lowering: it has no `CoreSchema` or `TrueSchema` representation. The earlier
+two-author framing — that a human could write the same lowercase name in source
+to hoist a subtree — is rescinded: there are no aliases anywhere in the language
+(see "No aliases anywhere"), so a human never authors an indirection name, and
+the only author is the encoder.
 
 The encoder synthesizes indirection names under a decoding configuration that
 caps how deeply nested a type may be before it is decomposed behind a lowercase
@@ -335,6 +374,15 @@ carry them; this is current-versus-target divergence, not settled shape.
   was the narrow, mis-shaped first implementation of per-component storage-type
   declaration; its successor is not a block in any document but the separate
   `sema.schema` document kind (see "Schema document kinds").
+- Nested type-namespaces. The lowercase colon-qualified sub-namespace — a
+  namespace entry whose value is another brace of declarations, keyed by a
+  lowercase segmented name — is retired as drift by psyche decision. It was an
+  aliasing form (a human-authored lowercase name introducing a sub-block), and
+  there are no aliases anywhere (see "No aliases anywhere"). No dotted sub-block
+  survives: the `types` block holds only dotted `TypeName.Definition` entries,
+  each keyed by a capitalized type name, and never a nested lowercase
+  sub-namespace. Removal from the source model and its fixtures is pending
+  implementation.
 
 The surviving declared object classes are types, generics, and impls, and the
 settled target root-slot layout is built from those alone (see "Per-kind
@@ -385,9 +433,14 @@ psyche has been given the ordering to veto, and it stands as the target. The
 target schema document is six per-kind blocks, in order: imports, input, output,
 types, generics, impls. Every slot is always present — optionality is an empty
 typed slot, never a changed root count. The `types` block holds only dotted
-`TypeName.Definition` entries; generics and impls each live in their own
-dedicated block. There is no relations slot, no streams block, and no families
-block, because those constructs are retired.
+`TypeName.Definition` entries, each keyed by a capitalized type name and never a
+nested lowercase sub-namespace (see "Retired constructs"); generics and impls
+each live in their own dedicated block. The `generics` block holds dotted
+`GenericName.((Params …) Body)` entries — each a capitalized generic name
+carrying its binder group and body — and the `impls` block holds dotted
+`TypeName.[ … ]` entries — each a capitalized type name carrying a
+square-bracket catalog of impl entries. There is no relations slot, no streams
+block, and no families block, because those constructs are retired.
 
 ## Schema document kinds
 
