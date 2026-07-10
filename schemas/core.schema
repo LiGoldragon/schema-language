@@ -2,7 +2,7 @@
 []
 []
 {
-  CoreSchema { BuiltinMacroPositions BuiltinMacroShapes BuiltinMacroOutputs BuiltinMacroDefinitions }
+  BuiltinMacroLibrary { BuiltinMacroPositions BuiltinMacroShapes BuiltinMacroOutputs BuiltinMacroDefinitions }
   BuiltinMacroPositions Vector.MacroPosition
   BuiltinMacroShapes Vector.MacroShape
   BuiltinMacroOutputs Vector.MacroOutputKind

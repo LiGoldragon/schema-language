@@ -254,6 +254,11 @@ pub enum SchemaError {
     /// position is a typed error, not a silently-accepted trait.
     #[error("impl block trait `{found}` is not a PascalCase type name")]
     NonTypeNameTrait { found: String },
+    /// A rename through the `NameTable` named an identifier the table does not
+    /// hold. Renaming preserves an existing identifier, so the identifier must
+    /// already be bound before it can be renamed.
+    #[error("name table has no identifier {identifier} to rename")]
+    NameTableIdentifierAbsent { identifier: String },
 }
 
 impl From<nota::MacroError> for SchemaError {

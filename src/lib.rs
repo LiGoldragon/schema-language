@@ -2,6 +2,7 @@ mod declarative;
 mod engine;
 mod environment;
 mod expansion;
+mod identifier;
 mod identity;
 mod instance;
 mod macros;
@@ -25,6 +26,7 @@ pub use environment::{
     SchemaNodeType, SchemaNodeTypeLabel, SchemaRootBlockKind, SchemaRootBlockSummary,
     SchemaSourcePosition, SchemaSourceRange, SchemaSourceSummary,
 };
+pub use identifier::{DeclarationKind, NameEntry, NameTable, NominalIdentifier};
 pub use identity::{ContentHash, FamilyClosure};
 pub use macros::{
     MacroContext, MacroDispatch, MacroNodeDefinition, MacroObject, MacroOutput, MacroPair,

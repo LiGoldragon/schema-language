@@ -507,14 +507,14 @@ fn core_schema_describes_default_builtin_macro_positions() {
         .lower_source(source, SchemaIdentity::new("schema-core", "0.1.0"))
         .expect("core schema lowers");
 
-    let TypeDeclaration::Struct(core_schema) = schema
-        .type_named("CoreSchema")
-        .expect("core schema declaration")
+    let TypeDeclaration::Struct(macro_library) = schema
+        .type_named("BuiltinMacroLibrary")
+        .expect("builtin macro library declaration")
     else {
-        panic!("CoreSchema should be a struct");
+        panic!("BuiltinMacroLibrary should be a struct");
     };
     assert_eq!(
-        core_schema
+        macro_library
             .fields
             .iter()
             .map(|field| field.reference.plain_name().expect("plain field").as_str())
