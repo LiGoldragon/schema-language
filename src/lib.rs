@@ -62,13 +62,14 @@ pub use schema::{
     TypeReference, ValueReferenceProjection, Visibility,
 };
 pub use source::{
-    SchemaSource, SchemaSourceArtifact, SourceDeclaration, SourceDeclarationValue,
-    SourceDeclarations, SourceEnumBody, SourceFamilyBody, SourceField, SourceFieldIdentity,
-    SourceFieldValue, SourceImplCatalog, SourceImplEntry, SourceImport, SourceImports,
-    SourceMethodParameter, SourceMethodSignature, SourceNamespace, SourceNamespaceEntry,
-    SourceReference, SourceRelation, SourceRelationValue, SourceRelations, SourceRootBody,
-    SourceRootEnum, SourceStreamBody, SourceStructBody, SourceVariantName, SourceVariantPayload,
-    SourceVariantSignature, StreamRelationKeyword,
+    FactoredEncoding, HelpRendering, IndirectionLink, IndirectionProjection,
+    LinkedStructureExpansion, MainStructureDepthCap, SchemaSource, SchemaSourceArtifact,
+    SourceDeclaration, SourceDeclarationValue, SourceDeclarations, SourceEnumBody,
+    SourceFamilyBody, SourceField, SourceFieldIdentity, SourceFieldValue, SourceImplCatalog,
+    SourceImplEntry, SourceImport, SourceImports, SourceMethodParameter, SourceMethodSignature,
+    SourceNamespace, SourceNamespaceEntry, SourceReference, SourceRelation, SourceRelationValue,
+    SourceRelations, SourceRootBody, SourceRootEnum, SourceStreamBody, SourceStructBody,
+    SourceVariantName, SourceVariantPayload, SourceVariantSignature, StreamRelationKeyword,
 };
 pub use upgrade::{
     AddField, AddVariant, ChangeFieldType, DefaultValue, EditEffect, FieldMigration, MigrationSpec,

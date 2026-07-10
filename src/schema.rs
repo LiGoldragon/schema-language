@@ -63,6 +63,24 @@ impl Name {
         output
     }
 
+    /// The lowerCamel projection of this name's local part: the leading
+    /// character is lowercased and the remainder is left untouched, so a
+    /// PascalCase type name (`StoredRecord`) projects into the lowercase "name"
+    /// register (`storedRecord`) while a single-word head (`Map`) becomes `map`.
+    /// This is the derivation an indirection linkname is minted from — a hoisted
+    /// type's name projected into the lowercase indirection-name register.
+    pub fn lower_camel(&self) -> String {
+        let mut characters = self.local_part().chars();
+        match characters.next() {
+            Some(first) => {
+                let mut projection = first.to_ascii_lowercase().to_string();
+                projection.push_str(characters.as_str());
+                projection
+            }
+            None => String::new(),
+        }
+    }
+
     pub fn qualifies_as_symbol_name(&self) -> bool {
         // The structural symbol predicate retained from the NOTA reader
         // (`Atom::qualifies_as_symbol`): a non-empty atom whose every character

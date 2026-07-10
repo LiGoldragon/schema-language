@@ -3118,18 +3118,19 @@ impl StructuralMacroNode for SourceVariantSignature {
 
 impl SourceVariantSignature {
     fn from_atom_text(text: &str) -> Result<Self, SchemaError> {
-        let Some((name, payload)) = text.split_once('.') else {
-            return Ok(Self::Unit(SourceVariantName::from_text(text)?));
-        };
-        if name.is_empty() || payload.is_empty() {
-            return Err(SchemaError::ExpectedSyntaxEnumVariant {
-                found: text.to_owned(),
-            });
+        // A data variant is a CAPITALIZED variant head dotted onto its payload
+        // reference; the split is the shared string-level dotted reader's. No
+        // top-level dot is the unit-variant case, not an error.
+        match DottedExpectation::Capitalized.read_string_entry(text) {
+            Ok((name, payload)) => Ok(Self::Data(
+                SourceVariantName::from_text(name)?,
+                SourceVariantPayload::Reference(SourceReference::from_atom_text(payload)?),
+            )),
+            Err(NotaDecodeError::ExpectedDottedEntry { .. }) => {
+                Ok(Self::Unit(SourceVariantName::from_text(text)?))
+            }
+            Err(error) => Err(SchemaError::from(error)),
         }
-        Ok(Self::Data(
-            SourceVariantName::from_text(name)?,
-            SourceVariantPayload::Reference(SourceReference::from_atom_text(payload)?),
-        ))
     }
 
     fn from_parenthesis(objects: &[Block]) -> Result<Self, SchemaError> {
@@ -4113,16 +4114,17 @@ impl SourceReference {
     }
 
     fn from_atom_text(text: &str) -> Result<Self, SchemaError> {
-        let Some((head, payload)) = text.split_once('.') else {
-            return Ok(Self::Plain(Name::new(text)));
-        };
-        if head.is_empty() || payload.is_empty() {
-            return Err(SchemaError::ExpectedSyntaxReference {
-                found: text.to_owned(),
-            });
+        // A dotted reference head is a CAPITALIZED type application; the split is
+        // the shared string-level dotted reader's, so this reader only declares
+        // the expectation. No top-level dot is the plain-leaf case, not an error.
+        match DottedExpectation::Capitalized.read_string_entry(text) {
+            Ok((head, payload)) => {
+                let argument = Self::from_atom_text(payload)?;
+                Self::from_application_parts(Name::new(head), vec![argument])
+            }
+            Err(NotaDecodeError::ExpectedDottedEntry { .. }) => Ok(Self::Plain(Name::new(text))),
+            Err(error) => Err(SchemaError::from(error)),
         }
-        let argument = Self::from_atom_text(payload)?;
-        Self::from_application_parts(Name::new(head), vec![argument])
     }
 
     fn from_application_parts(head: Name, arguments: Vec<Self>) -> Result<Self, SchemaError> {
@@ -4280,6 +4282,377 @@ impl SourceReference {
                 head: crate::ApplicationHead::Local(head.clone()),
                 arguments: arguments.iter().map(Self::to_type_reference).collect(),
             },
+        }
+    }
+}
+
+use std::collections::{HashMap, HashSet, VecDeque};
+
+/// A depth-capped indirection projection over a [`SourceReference`].
+///
+/// An indirection name is one construct with two authors: the lowercase alias a
+/// human writes in the namespace section to avoid writing a deeply nested
+/// datatype, and the linkname this projection synthesizes when it decomposes a
+/// deep structure. Both name a hoisted subtree, both stay in the lowercase
+/// "name" register of the capitalization semantics, and both inline at lowering.
+///
+/// The projection carries two independent depths. The main-structure depth cap
+/// is the nesting depth beyond which a composite subtree is replaced by a
+/// lowercase linkname and hoisted. The linked-structure expansion is how many of
+/// those hoisted structures print after the main structure — [`Complete`] for an
+/// encoding (every hoisted structure retained, so the value is complete and only
+/// the factoring is lost) or [`Truncated`] for a help projection that drops the
+/// hoisted structures past a visible count.
+///
+/// [`Complete`]: LinkedStructureExpansion::Complete
+/// [`Truncated`]: LinkedStructureExpansion::Truncated
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndirectionProjection {
+    main_structure_depth_cap: MainStructureDepthCap,
+    linked_structure_expansion: LinkedStructureExpansion,
+}
+
+impl IndirectionProjection {
+    pub fn new(
+        main_structure_depth_cap: MainStructureDepthCap,
+        linked_structure_expansion: LinkedStructureExpansion,
+    ) -> Self {
+        Self {
+            main_structure_depth_cap,
+            linked_structure_expansion,
+        }
+    }
+
+    /// Encode `reference` as a complete, value-exact factored encoding — every
+    /// beyond-cap composite subtree hoisted behind a lowercase linkname, every
+    /// hoisted structure retained. `None` when the expansion is truncating: a
+    /// truncated projection drops hoisted structures, so it can never stand in
+    /// for an encoding whose only permitted loss is the factoring itself. The
+    /// returned [`FactoredEncoding`] is the only shape that lowers back to a
+    /// value; a [`HelpRendering`] never does.
+    pub fn encode(&self, reference: &SourceReference) -> Option<FactoredEncoding> {
+        match self.linked_structure_expansion {
+            LinkedStructureExpansion::Complete => Some(FactoredEncoding::factor(
+                reference,
+                self.main_structure_depth_cap,
+            )),
+            LinkedStructureExpansion::Truncated { .. } => None,
+        }
+    }
+
+    /// Render `reference` as help text. Help printing is one configuration of
+    /// this same record and MAY truncate: a truncating expansion drops the
+    /// hoisted structures past its visible count. The result is a
+    /// [`HelpRendering`] — a text projection with no path back to a value, so a
+    /// truncating print is structurally unusable where an encoding is expected.
+    pub fn help(&self, reference: &SourceReference) -> HelpRendering {
+        let encoding = FactoredEncoding::factor(reference, self.main_structure_depth_cap);
+        HelpRendering::new(encoding.render(self.linked_structure_expansion))
+    }
+}
+
+/// The nesting depth beyond which a composite subtree is decomposed behind a
+/// lowercase linkname. A subtree at depth `<= cap` prints inline; a composite
+/// subtree deeper than the cap is hoisted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MainStructureDepthCap(usize);
+
+impl MainStructureDepthCap {
+    pub fn new(depth: usize) -> Self {
+        Self(depth)
+    }
+
+    fn depth(self) -> usize {
+        self.0
+    }
+}
+
+/// How many hoisted structures a projection prints after the main structure.
+/// The two variants are the round-trip contract in the type system: `Complete`
+/// keeps every hoisted structure, so the value survives exactly and only the
+/// factoring is lost; `Truncated` drops the hoisted structures past its visible
+/// count, so the rendering is lossy and cannot be an encoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LinkedStructureExpansion {
+    Complete,
+    Truncated { visible_links: usize },
+}
+
+impl LinkedStructureExpansion {
+    fn visible_link_count(self, total: usize) -> usize {
+        match self {
+            Self::Complete => total,
+            Self::Truncated { visible_links } => visible_links.min(total),
+        }
+    }
+}
+
+/// A complete, value-exact factoring of a reference: the main structure with its
+/// beyond-cap subtrees replaced by lowercase linknames, plus the hoisted
+/// structures each named by its linkname. Only the factoring — which subtrees
+/// are hoisted and what the linknames are — is a projection choice; the value
+/// [`lower`](Self::lower)s back exactly.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FactoredEncoding {
+    main: SourceReference,
+    links: Vec<IndirectionLink>,
+}
+
+impl FactoredEncoding {
+    fn factor(reference: &SourceReference, cap: MainStructureDepthCap) -> Self {
+        let cap = cap.depth();
+        let mut allocator = LinknameAllocator::new();
+        let mut queue: VecDeque<(Name, SourceReference)> = VecDeque::new();
+        let main = reference.factor_capped(0, cap, &mut allocator, &mut queue);
+        let mut links = Vec::new();
+        // Each hoisted structure is re-capped at a fresh depth so its own
+        // beyond-cap subtrees hoist in turn; the head sits at depth 0 and never
+        // re-hoists itself, so the worklist terminates.
+        while let Some((name, structure)) = queue.pop_front() {
+            let structure = structure.factor_capped(0, cap, &mut allocator, &mut queue);
+            links.push(IndirectionLink { name, structure });
+        }
+        Self { main, links }
+    }
+
+    /// The original reference, reconstructed by inlining every linkname back
+    /// into its hoisted structure. The factoring is discarded; the value is
+    /// exact.
+    pub fn lower(&self) -> SourceReference {
+        let links: HashMap<&Name, &SourceReference> = self
+            .links
+            .iter()
+            .map(|link| (&link.name, &link.structure))
+            .collect();
+        self.main.inline_links(&links)
+    }
+
+    /// The lowered value as a semantic [`TypeReference`]. This is the round-trip
+    /// target: `from_type_reference` then `encode` then `to_type_reference` is
+    /// the identity on the value.
+    pub fn to_type_reference(&self) -> TypeReference {
+        self.lower().to_type_reference()
+    }
+
+    /// The complete factored text: the main structure, then every hoisted
+    /// structure on its own line introduced by its linkname.
+    pub fn to_schema_text(&self) -> String {
+        self.render(LinkedStructureExpansion::Complete)
+    }
+
+    fn render(&self, expansion: LinkedStructureExpansion) -> String {
+        let visible = expansion.visible_link_count(self.links.len());
+        let mut lines = Vec::with_capacity(visible + 1);
+        lines.push(self.main.to_schema_text());
+        for link in self.links.iter().take(visible) {
+            lines.push(link.to_schema_text());
+        }
+        lines.join("\n")
+    }
+
+    pub fn main_text(&self) -> String {
+        self.main.to_schema_text()
+    }
+
+    pub fn links(&self) -> &[IndirectionLink] {
+        &self.links
+    }
+}
+
+/// One hoisted subtree named by its linkname — the lowercase indirection name
+/// standing in for the subtree in the main structure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IndirectionLink {
+    name: Name,
+    structure: SourceReference,
+}
+
+impl IndirectionLink {
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn structure_text(&self) -> String {
+        self.structure.to_schema_text()
+    }
+
+    fn to_schema_text(&self) -> String {
+        format!(
+            "{} {}",
+            self.name.to_nota(),
+            self.structure.to_schema_text()
+        )
+    }
+}
+
+/// A help rendering: text only, with no path back to a value. Its distinctness
+/// from [`FactoredEncoding`] is the structural guard that a truncating print
+/// cannot be fed where an encoding is expected.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HelpRendering {
+    text: String,
+}
+
+impl HelpRendering {
+    fn new(text: String) -> Self {
+        Self { text }
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+impl std::fmt::Display for HelpRendering {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.text)
+    }
+}
+
+/// Mints a fresh lowercase linkname from a hoisted type's name, applying the
+/// duplicate-disambiguation rule when two hoisted types would collide: the
+/// first `Map` is `map`, the next `map2`, and so on.
+struct LinknameAllocator {
+    used: HashSet<String>,
+}
+
+impl LinknameAllocator {
+    fn new() -> Self {
+        Self {
+            used: HashSet::new(),
+        }
+    }
+
+    fn allocate(&mut self, head: &Name) -> Name {
+        let base = head.lower_camel();
+        if self.used.insert(base.clone()) {
+            return Name::new(base);
+        }
+        let mut ordinal = 2usize;
+        loop {
+            let candidate = format!("{base}{ordinal}");
+            if self.used.insert(candidate.clone()) {
+                return Name::new(candidate);
+            }
+            ordinal += 1;
+        }
+    }
+}
+
+impl SourceReference {
+    /// The head type name a hoist would derive its linkname from, or `None` for
+    /// a leaf that carries no nested datatype to hoist (a plain name or a value
+    /// application).
+    fn hoistable_head(&self) -> Option<&Name> {
+        match self {
+            Self::SingleTypeApplication(application) => Some(&application.head),
+            Self::MultiTypeApplication(application) => Some(&application.head),
+            Self::Application { head, .. } => Some(head),
+            Self::Plain(_) | Self::ValueApplication(_) => None,
+        }
+    }
+
+    /// Rewrite this reference under the depth cap: a composite subtree deeper
+    /// than the cap is replaced by a fresh lowercase linkname and enqueued for
+    /// hoisting; everything at or within the cap is rebuilt with its children
+    /// rewritten one level deeper. Leaves are copied unchanged.
+    fn factor_capped(
+        &self,
+        depth: usize,
+        cap: usize,
+        allocator: &mut LinknameAllocator,
+        queue: &mut VecDeque<(Name, SourceReference)>,
+    ) -> SourceReference {
+        if depth > cap {
+            if let Some(head) = self.hoistable_head() {
+                let linkname = allocator.allocate(head);
+                queue.push_back((linkname.clone(), self.clone()));
+                return Self::Plain(linkname);
+            }
+            return self.clone();
+        }
+        match self {
+            Self::Plain(_) | Self::ValueApplication(_) => self.clone(),
+            Self::SingleTypeApplication(application) => {
+                let argument = application
+                    .argument
+                    .factor_capped(depth + 1, cap, allocator, queue);
+                Self::SingleTypeApplication(Box::new(SourceSingleTypeApplication::new(
+                    application.head.clone(),
+                    application.projection,
+                    application.field_name_pattern.clone(),
+                    argument,
+                )))
+            }
+            Self::MultiTypeApplication(application) => {
+                let arguments = application
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.factor_capped(depth + 1, cap, allocator, queue))
+                    .collect();
+                Self::MultiTypeApplication(Box::new(SourceMultiTypeApplication::new(
+                    application.head.clone(),
+                    application.projection,
+                    application.field_name_pattern.clone(),
+                    arguments,
+                )))
+            }
+            Self::Application { head, arguments } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| argument.factor_capped(depth + 1, cap, allocator, queue))
+                    .collect();
+                Self::Application {
+                    head: head.clone(),
+                    arguments,
+                }
+            }
+        }
+    }
+
+    /// Inline every linkname in this reference back into its hoisted structure,
+    /// recursively, reproducing the pre-factoring reference exactly. A lowercase
+    /// plain leaf that matches a linkname is an indirection name; every other
+    /// leaf is genuine and copied unchanged.
+    fn inline_links(&self, links: &HashMap<&Name, &SourceReference>) -> SourceReference {
+        match self {
+            Self::Plain(name) => match links.get(name) {
+                Some(structure) => structure.inline_links(links),
+                None => Self::Plain(name.clone()),
+            },
+            Self::ValueApplication(_) => self.clone(),
+            Self::SingleTypeApplication(application) => {
+                let argument = application.argument.inline_links(links);
+                Self::SingleTypeApplication(Box::new(SourceSingleTypeApplication::new(
+                    application.head.clone(),
+                    application.projection,
+                    application.field_name_pattern.clone(),
+                    argument,
+                )))
+            }
+            Self::MultiTypeApplication(application) => {
+                let arguments = application
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.inline_links(links))
+                    .collect();
+                Self::MultiTypeApplication(Box::new(SourceMultiTypeApplication::new(
+                    application.head.clone(),
+                    application.projection,
+                    application.field_name_pattern.clone(),
+                    arguments,
+                )))
+            }
+            Self::Application { head, arguments } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| argument.inline_links(links))
+                    .collect();
+                Self::Application {
+                    head: head.clone(),
+                    arguments,
+                }
+            }
         }
     }
 }
