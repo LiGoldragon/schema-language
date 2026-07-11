@@ -861,6 +861,58 @@ impl SchemaTree {
         Ok(())
     }
 
+    /// Every position in the loaded whole that introduces a top-level
+    /// declaration, paired with the site label the duplicate error reports it
+    /// by. A loaded schema is ONE namespace: the input and output roots, every
+    /// namespace declaration, and every resolved import each name one
+    /// declaration in that single space. Brace imports are the source form of
+    /// the resolved imports and enter the whole through them, so counting both
+    /// would double-count one imported declaration; the resolved import is the
+    /// declaration in the whole and is what is walked here.
+    fn declaration_heads(&self) -> Vec<(&Name, &'static str)> {
+        let mut heads: Vec<(&Name, &'static str)> = Vec::new();
+        heads.push((self.input.name(), "the input root"));
+        heads.push((self.output.name(), "the output root"));
+        for declaration in &self.namespace {
+            heads.push((declaration.name(), "a namespace declaration"));
+        }
+        for import in &self.resolved_imports {
+            heads.push((import.local_name(), "a resolved import"));
+        }
+        heads
+    }
+
+    /// Verify the loaded whole is one namespace: no two top-level declarations
+    /// share a name. The source reader (`push_declaration`) already rejects a
+    /// namespace block that repeats a name as it lowers text, but that guard
+    /// sits on the text path alone and sees only the namespace block, not the
+    /// roots or the resolved imports. This is the same one-namespace rule
+    /// enforced at the SEMANTIC boundary — the construction/decode surface every
+    /// schema value passes through ([`crate::TrueSchema::from_tree`], reached by
+    /// the programmatic tree constructor, binary decode, and NOTA decode) — so a
+    /// schema value that never touched the source reader still cannot carry two
+    /// declarations of one name. Decomposition mints every top-level declaration
+    /// through the same `NameHarvest::declare` path keyed on (kind, name), so two
+    /// heads of one name — an imported `Input` and a local `Input` root, or any
+    /// other pair across the whole — would otherwise mint one colliding
+    /// identifier and silently merge two declarations into one. The author
+    /// resolves a real collision by renaming the more appropriate side: the local
+    /// declaration, or the imported one at its source.
+    pub(crate) fn declaration_names_unique(&self) -> Result<(), SchemaError> {
+        let mut seen: Vec<(&Name, &'static str)> = Vec::new();
+        for (name, site) in self.declaration_heads() {
+            if let Some((_, first_site)) = seen.iter().find(|(prior, _)| *prior == name) {
+                return Err(SchemaError::DuplicateDeclaration {
+                    name: name.as_str().to_owned(),
+                    first_site,
+                    second_site: site,
+                });
+            }
+            seen.push((name, site));
+        }
+        Ok(())
+    }
+
     /// Verify the impl manifest: every standalone (body-optional) impl block
     /// targets a type declared elsewhere in this schema, and no target carries
     /// a true-duplicate entry. Distinct entries on one target compose; an
@@ -3021,6 +3073,54 @@ mod scalar_vocabulary_guard {
     }
 }
 
+/// Shared witness for the semantic construction/decode boundary. A schema VALUE
+/// reaching [`TrueSchema::from_tree`] — tampered after lowering into a shape the
+/// source reader would never emit — must be rejected identically at every
+/// surface that funnels through `from_tree`: the programmatic tree constructor,
+/// binary (rkyv) decode, and structured NOTA decode. Both the duplicate-binder
+/// guard and the duplicate-declaration guard are witnessed through this one
+/// helper, so the "reject at every surface" scaffold lives here once.
+#[cfg(test)]
+mod semantic_boundary_rejection {
+    use super::*;
+    use crate::{NameTable, TrueSchema};
+
+    /// Assert a tampered tree is rejected with `expected` at every surface that
+    /// funnels through [`TrueSchema::from_tree`].
+    pub(super) fn assert_tree_rejected_across_surfaces(tree: &SchemaTree, expected: &SchemaError) {
+        // Programmatic construction surface.
+        assert_eq!(
+            &TrueSchema::from_tree(tree, &NameTable::empty())
+                .expect_err("from_tree must reject the tampered value"),
+            expected,
+        );
+
+        // Binary (rkyv) decode surface.
+        let bytes = tree
+            .to_binary_bytes()
+            .expect("tampered tree encodes to binary");
+        assert_eq!(
+            &TrueSchema::from_binary_bytes(&bytes)
+                .expect_err("binary decode must reject the tampered value"),
+            expected,
+        );
+
+        // Structured NOTA decode surface. The view's `NotaDecode` wraps the
+        // schema error as `InvalidValue`, so the typed error surfaces through
+        // its rendered reason.
+        let nota = tree.to_nota();
+        let document = nota::Document::parse(&nota).expect("tampered tree NOTA parses");
+        match TrueSchema::from_nota_block(&document.root_objects()[0])
+            .expect_err("NOTA decode must reject the tampered value")
+        {
+            NotaDecodeError::InvalidValue { reason, .. } => {
+                assert_eq!(reason, expected.to_string());
+            }
+            other => panic!("expected an InvalidValue wrapping the schema error, got {other:?}"),
+        }
+    }
+}
+
 /// The source reader rejects a duplicate generic or frame binder as it parses
 /// the `generics` block (`SourceGenerics::read_parameters`), witnessed by the
 /// document-form tests in `tests/generics.rs`. These tests witness the OTHER
@@ -3035,10 +3135,9 @@ mod scalar_vocabulary_guard {
 /// `Declaration::parameters` list.
 #[cfg(test)]
 mod semantic_duplicate_parameter_rejection {
+    use super::semantic_boundary_rejection::assert_tree_rejected_across_surfaces;
     use super::*;
-    use crate::{
-        ImportSource, NameTable, ResolvedImport, SchemaEngine, SchemaIdentity, TrueSchema,
-    };
+    use crate::{ImportSource, ResolvedImport, SchemaEngine, SchemaIdentity};
 
     /// Lower a valid single-block `generics` document and hand back the
     /// crate-internal sidecar tree the codec surfaces project through.
@@ -3088,43 +3187,6 @@ mod semantic_duplicate_parameter_rejection {
         assert_tree_rejected_across_surfaces(&tree, &expected);
     }
 
-    /// Assert a tampered tree — one carrying a duplicate binder the source
-    /// reader would never emit — is rejected with `expected` at every surface
-    /// that funnels through [`TrueSchema::from_tree`]: the programmatic tree
-    /// constructor, binary (rkyv) decode, and structured NOTA decode.
-    fn assert_tree_rejected_across_surfaces(tree: &SchemaTree, expected: &SchemaError) {
-        // Programmatic construction surface.
-        assert_eq!(
-            &TrueSchema::from_tree(tree, &NameTable::empty())
-                .expect_err("from_tree must reject a duplicate binder"),
-            expected,
-        );
-
-        // Binary (rkyv) decode surface.
-        let bytes = tree
-            .to_binary_bytes()
-            .expect("tampered tree encodes to binary");
-        assert_eq!(
-            &TrueSchema::from_binary_bytes(&bytes)
-                .expect_err("binary decode must reject a duplicate binder"),
-            expected,
-        );
-
-        // Structured NOTA decode surface. The view's `NotaDecode` wraps the
-        // schema error as `InvalidValue`, so the typed error surfaces through
-        // its rendered reason.
-        let nota = tree.to_nota();
-        let document = nota::Document::parse(&nota).expect("tampered tree NOTA parses");
-        match TrueSchema::from_nota_block(&document.root_objects()[0])
-            .expect_err("NOTA decode must reject a duplicate binder")
-        {
-            NotaDecodeError::InvalidValue { reason, .. } => {
-                assert_eq!(reason, expected.to_string());
-            }
-            other => panic!("expected an InvalidValue wrapping the schema error, got {other:?}"),
-        }
-    }
-
     #[test]
     fn duplicate_generic_parameters_are_rejected_at_the_semantic_boundary() {
         assert_rejected_across_surfaces("Plane.((Wing) { Wing })", "Plane", "Wing");
@@ -3166,5 +3228,119 @@ mod semantic_duplicate_parameter_rejection {
             parameter: binder.as_str().to_owned(),
         };
         assert_tree_rejected_across_surfaces(&tree, &expected);
+    }
+}
+
+/// The one-namespace rule at the semantic boundary. A loaded schema is one
+/// namespace: no two top-level declarations — across the input and output
+/// roots, the namespace, and the resolved imports — may share a name. The
+/// source reader's `push_declaration` guard already refuses a namespace block
+/// that repeats a name as it lowers text, but it sees only the namespace block
+/// and only the text path. These tests witness the OTHER boundary: a schema
+/// VALUE reaching `from_tree` carrying a collision the source reader would never
+/// emit. Decomposition mints every top-level declaration through the same
+/// `(kind, name)` `NameHarvest::declare` path, so an unguarded collision would
+/// mint one identifier and silently merge two declarations into one — the fault
+/// that produced self-referencing emitted Rust when an imported `Input` met a
+/// local `Input` root.
+#[cfg(test)]
+mod semantic_duplicate_declaration_rejection {
+    use super::semantic_boundary_rejection::assert_tree_rejected_across_surfaces;
+    use super::*;
+    use crate::{
+        ImportSource, NameTable, ResolvedImport, SchemaEngine, SchemaIdentity, TrueSchema,
+    };
+
+    /// Lower a valid schema whose declarations all carry distinct names, and
+    /// hand back the crate-internal sidecar tree the codec surfaces project
+    /// through. The roots are `Input`/`Output`; the namespace declares
+    /// `Command`, `Report`, and `Topic`; nothing collides.
+    fn distinct_named_tree() -> SchemaTree {
+        let source = "{}\n[Start.Command]\n[Finish.Report]\n{\n  Command.{ Topic }\n  Report.{ Topic }\n  Topic.String\n}\n{}\n{}";
+        SchemaEngine::default()
+            .lower_source(
+                source,
+                SchemaIdentity::new("distinct-declarations:lib", "0.1.0"),
+            )
+            .expect("a schema of distinct names lowers")
+            .tree()
+    }
+
+    /// A plain (non-frame) resolved import bearing `local_name` — the tamper the
+    /// resolver would never emit into an otherwise-valid tree. It carries no
+    /// binders, so it passes the binder guard and reaches the declaration guard.
+    fn plain_import(local_name: &str) -> ResolvedImport {
+        let source = ImportSource::try_from(&Name::new("plane-crate:signal:Wrapped"))
+            .expect("well-formed import source parses");
+        ResolvedImport::from_projected_parts(
+            Name::new(local_name),
+            source,
+            Some(0),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    /// The guard rejects only genuine collisions: a whole of all-distinct names
+    /// passes the semantic boundary untouched.
+    #[test]
+    fn distinct_declaration_names_pass_the_semantic_boundary() {
+        let tree = distinct_named_tree();
+        TrueSchema::from_tree(&tree, &NameTable::empty())
+            .expect("a schema whose declarations are all distinct is accepted");
+    }
+
+    /// local/local: two namespace declarations of one name. The source reader's
+    /// `push_declaration` guard refuses this in text, so inject the second after
+    /// lowering and assert every decode surface rejects the merged whole.
+    #[test]
+    fn duplicate_namespace_declarations_are_rejected_at_the_semantic_boundary() {
+        let mut tree = distinct_named_tree();
+        let duplicated = tree.namespace[0].clone();
+        let name = duplicated.name().as_str().to_owned();
+        tree.namespace.push(duplicated);
+        let expected = SchemaError::DuplicateDeclaration {
+            name,
+            first_site: "a namespace declaration",
+            second_site: "a namespace declaration",
+        };
+        assert_tree_rejected_across_surfaces(&tree, &expected);
+    }
+
+    /// local/imported: an imported declaration sharing the local input root's
+    /// name — the exact collision (imported `Input` vs a local `Input` root)
+    /// that silently merged into self-referencing emitted Rust. Inject the
+    /// colliding resolved import and assert every decode surface rejects it.
+    #[test]
+    fn imported_declaration_colliding_with_a_root_is_rejected_at_the_semantic_boundary() {
+        let mut tree = distinct_named_tree();
+        tree.resolved_imports.push(plain_import("Input"));
+        let expected = SchemaError::DuplicateDeclaration {
+            name: "Input".to_owned(),
+            first_site: "the input root",
+            second_site: "a resolved import",
+        };
+        assert_tree_rejected_across_surfaces(&tree, &expected);
+    }
+
+    /// The realistic source path: a schema whose namespace declares a type named
+    /// `Input` never touches a tamper, yet its namespace `Input` collides with
+    /// the always-present input root. `push_declaration` does not look across the
+    /// namespace/root boundary, so the collision reaches `from_tree` through
+    /// ordinary lowering and is rejected there.
+    #[test]
+    fn a_namespace_type_named_for_a_root_is_rejected_at_lowering() {
+        let source = "{}\n[Start.Command]\n[Finish.Report]\n{\n  Command.{ Topic }\n  Report.{ Topic }\n  Topic.String\n  Input.Integer\n}\n{}\n{}";
+        let error = SchemaEngine::default()
+            .lower_source(source, SchemaIdentity::new("root-collision:lib", "0.1.0"))
+            .expect_err("a namespace type named Input collides with the input root");
+        assert_eq!(
+            error,
+            SchemaError::DuplicateDeclaration {
+                name: "Input".to_owned(),
+                first_site: "the input root",
+                second_site: "a namespace declaration",
+            },
+        );
     }
 }

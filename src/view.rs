@@ -70,6 +70,14 @@ impl TrueSchema {
         // Decomposition would otherwise mint two binders with the same name into
         // one colliding identifier, silently swallowing the duplicate.
         tree.parameters_verified()?;
+        // The same boundary enforces the one-namespace rule over the whole: two
+        // top-level declarations of one name — a local root and an imported
+        // declaration, two namespace declarations, any pair across roots,
+        // namespace, and resolved imports — mint one colliding identifier and
+        // would silently merge into one declaration. Reject the duplicate here so
+        // no decode surface can smuggle a collision the source reader would never
+        // emit.
+        tree.declaration_names_unique()?;
         let (core, names) = tree.decompose(prior)?;
         Ok(Self {
             identity: tree.identity().clone(),

@@ -188,6 +188,16 @@ pub enum SchemaError {
     UngroupedVariantPayloadApplication { variant: String, head: String },
     #[error("duplicate source declaration {name}")]
     DuplicateSourceDeclaration { name: String },
+    #[error(
+        "duplicate declaration {name} in the loaded whole: a schema is one namespace, but {name} \
+         is declared as both {first_site} and {second_site} — rename one, the local declaration or \
+         the imported one at its source"
+    )]
+    DuplicateDeclaration {
+        name: String,
+        first_site: &'static str,
+        second_site: &'static str,
+    },
     #[error("schema edit target {type_name} not found")]
     SchemaEditTargetNotFound { type_name: String },
     #[error("schema edit expected {type_name} to be a struct")]

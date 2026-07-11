@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use schema_language::{
-    ImportResolver, ImportSource, MacroContext, Name, SchemaEngine, SchemaError, SchemaIdentity,
+    ImportDeclaration, ImportResolver, ImportSource, MacroContext, Name, SchemaEngine, SchemaError,
+    SchemaIdentity, TypeReference,
 };
 
 fn fixture_schema_dir(crate_dir: &str) -> PathBuf {
@@ -102,21 +103,45 @@ fn resolver_resolves_import_of_dependency_root_enum() {
         "0.1.0",
     );
     let engine = SchemaEngine::default();
-    let consumer_source = "{ plane-crate.signal.Input }\n[Observe.Input]\n[]\n{}\n{}\n{}";
 
-    let schema = engine
+    // The resolver resolves an import of a dependency ROOT enum (signal's
+    // `Input`): a root reports no arity (`parameter_count` is None, since roots
+    // are not parameterizable) and re-exports under its own no-alias name.
+    let declaration = ImportDeclaration {
+        local_name: Name::new("Input"),
+        source: TypeReference::Plain(Name::new("plane-crate:signal:Input")),
+    };
+    let resolved = resolver
+        .resolve(&declaration, &engine)
+        .expect("resolver resolves the dependency root enum");
+    assert_eq!(resolved.parameter_count(), None);
+    assert_eq!(
+        resolved.use_item(),
+        "pub use plane_crate::schema::signal::Input as Input;"
+    );
+
+    // But a consumer cannot BUILD a whole that imports that root under the name
+    // `Input` while it already declares its own `Input` root: a loaded schema is
+    // one namespace, so the imported `Input` and the local `Input` root are two
+    // declarations of one name. Emitting both would place `pub use …::Input as
+    // Input;` beside a local `pub enum Input`, the self-referencing name clash
+    // the semantic boundary now rejects.
+    let consumer_source = "{ plane-crate.signal.Input }\n[Observe.Input]\n[]\n{}\n{}\n{}";
+    let error = engine
         .lower_source_with_resolver(
             consumer_source,
             SchemaIdentity::new("root-import-consumer", "0.1.0"),
             &mut MacroContext::default(),
             &resolver,
         )
-        .expect("consumer schema resolves dependency root imports");
-
-    assert_eq!(schema.resolved_imports().len(), 1);
+        .expect_err("importing a dependency root into a same-named local root collides");
     assert_eq!(
-        schema.resolved_imports()[0].use_item(),
-        "pub use plane_crate::schema::signal::Input as Input;"
+        error,
+        SchemaError::DuplicateDeclaration {
+            name: "Input".to_owned(),
+            first_site: "the input root",
+            second_site: "a resolved import",
+        },
     );
 }
 

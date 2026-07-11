@@ -412,8 +412,8 @@ fn package_loader_reads_all_schema_modules_in_crate() {
             .map(|import| import.source().rust_path())
             .collect::<Vec<_>>(),
         vec![
-            "plane_crate::schema::signal::Input",
-            "plane_crate::schema::signal::Output",
+            "plane_crate::schema::signal::Message",
+            "plane_crate::schema::signal::Receipt",
         ]
     );
     assert_eq!(
@@ -425,8 +425,12 @@ fn package_loader_reads_all_schema_modules_in_crate() {
             .expect("plain nexus input payload")
             .as_str(),
         // No-alias imports keep the producer's own name: the nexus imports
-        // signal's `Input` under its own name, not a `SignalInput` alias.
-        "Input"
+        // signal's `Message` under its own name, not a `SignalMessage` alias.
+        // The nexus cannot import signal's `Input`/`Output` roots, because a
+        // loaded schema is one namespace and the nexus already declares its own
+        // `Input`/`Output` roots — importing a same-named declaration is the
+        // duplicate the semantic boundary now rejects.
+        "Message"
     );
 
     let sema = schemas
