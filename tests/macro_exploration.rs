@@ -1000,12 +1000,12 @@ fn expansion_template_enum_decodes_each_template_kind() {
         "(Variants Decision Correction)"
     );
 
-    let reference_template = MacroTemplate::from_structural_nota("(Reference Vector. $Type)")
+    let reference_template = MacroTemplate::from_structural_nota("(Reference Vector.$Type)")
         .expect("Reference template decodes");
     assert!(matches!(reference_template, MacroTemplate::Reference(_)));
     assert_eq!(
         reference_template.to_structural_nota(),
-        "(Reference Vector. $Type)"
+        "(Reference Vector.$Type)"
     );
 }
 

@@ -544,47 +544,49 @@ impl SourceImport {
         &self.targets
     }
 
-    /// Read one import entry. The leading atom is a lowercase dotted path: when
-    /// it ends in a capitalized segment that segment is the single target and
-    /// one block is consumed; when it ends in a trailing dot the following
-    /// `[X Y Z]` bracket carries the targets and two blocks are consumed. The
-    /// per-segment split is the shared NOTA primitive; this reader only walks
-    /// the segments and enforces the path/target casing.
+    /// Read one import entry from the right-associated application tree. A
+    /// dotted atom chain carries one target (`path.to.Object`); an application
+    /// whose payload is a target vector carries several (`path.to.[X Y Z]`).
+    /// This consumes one structural block because the raw parser owns the dot.
     fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
-        let head = blocks.get(*index).and_then(Block::atom).ok_or_else(|| {
-            SchemaError::MalformedImportSource {
-                found: blocks
-                    .get(*index)
-                    .map(Block::reemit_fallback)
-                    .unwrap_or_default(),
-            }
-        })?;
-        let ends_with_dot = head.text().ends_with('.');
-        let mut segments = Vec::new();
-        let mut remainder = Some(head.clone());
-        while let Some(current) = remainder {
-            match current.split_at_first_dot() {
-                Some((prefix, rest)) => {
-                    segments.push(Name::new(prefix.text()));
-                    remainder = rest;
+        let block = blocks
+            .get(*index)
+            .ok_or_else(|| SchemaError::MalformedImportSource {
+                found: String::new(),
+            })?;
+        let mut path = Vec::new();
+        let mut current = block;
+        loop {
+            let Some((head, payload)) = current.as_application() else {
+                if current.as_delimited(Delimiter::SquareBracket).is_some() {
+                    let mut target_index = 0;
+                    let targets =
+                        Self::target_vector(std::slice::from_ref(current), &mut target_index)?;
+                    *index += 1;
+                    return Self::new(path, targets);
                 }
-                None => {
-                    segments.push(Name::new(current.text()));
-                    remainder = None;
-                }
-            }
-        }
-        *index += 1;
-        if ends_with_dot {
-            let targets = Self::target_vector(blocks, index)?;
-            Self::new(segments, targets)
-        } else {
-            let target = segments
-                .pop()
-                .ok_or_else(|| SchemaError::MalformedImportSource {
-                    found: head.text().to_owned(),
-                })?;
-            Self::new(segments, vec![target])
+                let terminal =
+                    current
+                        .dotted_text()
+                        .ok_or_else(|| SchemaError::MalformedImportSource {
+                            found: block.reemit_fallback(),
+                        })?;
+                path.extend(terminal.split('.').map(Name::new));
+                let target = path
+                    .pop()
+                    .ok_or_else(|| SchemaError::MalformedImportSource {
+                        found: block.reemit_fallback(),
+                    })?;
+                *index += 1;
+                return Self::new(path, vec![target]);
+            };
+            let head_text =
+                head.dotted_text()
+                    .ok_or_else(|| SchemaError::MalformedImportSource {
+                        found: block.reemit_fallback(),
+                    })?;
+            path.extend(head_text.split('.').map(Name::new));
+            current = payload;
         }
     }
 
@@ -608,6 +610,13 @@ impl SourceImport {
         };
         let mut targets = Vec::new();
         for object in root_objects {
+            if object.is_application() {
+                return Err(SchemaError::MalformedImportTarget {
+                    target: object
+                        .dotted_text()
+                        .unwrap_or_else(|| object.reemit_fallback()),
+                });
+            }
             let atom = object
                 .atom()
                 .ok_or_else(|| SchemaError::MalformedImportSource {
@@ -1203,17 +1212,13 @@ impl SourceKindEntry {
             .ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
                 found: "missing per-kind declaration entry".to_owned(),
             })?;
-        let atom = block
-            .atom()
-            .ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
-                found: format!("non-atom declaration key {}", block.reemit_fallback()),
-            })?;
-        let (prefix, remainder) =
-            atom.split_at_first_dot()
+        let (head, payload) =
+            block
+                .as_application()
                 .ok_or_else(|| SchemaError::ExpectedSyntaxDeclaration {
-                    found: format!("undotted declaration key {}", atom.text()),
+                    found: format!("undotted declaration key {}", block.reemit_fallback()),
                 })?;
-        let key = Name::new(prefix.text());
+        let key = head.schema_name()?;
         // The key names a type/generic: its local part must be PascalCase. A
         // colon-qualified name (`schema:spirit:Topic`) is judged by its final
         // segment, so a namespaced type key is accepted while the retired
@@ -1223,11 +1228,8 @@ impl SourceKindEntry {
                 found: format!("uncapitalized declaration key {}", key.to_nota()),
             });
         }
-        let inline_remainder = remainder.is_some();
-        let mut value_blocks = Vec::new();
-        if let Some(rest) = remainder {
-            value_blocks.push(Block::Atom(rest));
-        }
+        let inline_remainder = true;
+        let mut value_blocks = vec![payload.clone()];
         value_blocks.extend(objects[cursor + 1..].iter().cloned());
         Ok(Self {
             key,
@@ -1714,7 +1716,9 @@ impl SourceDeclarationValue {
     /// re-headed help declaration round-trips through, with no parallel codec.
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
         match block {
-            Block::Atom(_) => Self::from_reference(SourceReference::from_block(block)?),
+            Block::Atom(_) | Block::Application { .. } => {
+                Self::from_reference(SourceReference::from_block(block)?)
+            }
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 ..
@@ -2059,6 +2063,24 @@ impl SourceField {
     }
 
     fn from_positional_block(block: &Block) -> Result<Self, SchemaError> {
+        if let Some((head, payload)) = block.as_application() {
+            let field_name = head.schema_name()?;
+            if SourceGenericDefinitions::default()
+                .definition(&field_name)
+                .is_some()
+            {
+                let reference = SourceReference::from_block(block)?;
+                return Ok(Self {
+                    name: reference.derived_field_name(),
+                    value: SourceFieldValue::Reference(reference),
+                    identity: SourceFieldIdentity::Implicit,
+                });
+            }
+            return Self::from_explicit_reference(
+                field_name,
+                SourceReference::from_block(payload)?,
+            );
+        }
         if block.is_parenthesis() {
             if Self::is_retired_explicit_structural_field(block)? {
                 return Err(SchemaError::RetiredStructFieldSyntax {
@@ -2110,7 +2132,7 @@ impl SourceField {
         let body =
             NotaBody::from_delimited(block, Delimiter::Parenthesis, "explicit structural field")?;
         let objects = body.root_objects();
-        if objects.len() != 2 || matches!(objects[1], Block::Atom(_)) {
+        if objects.len() != 2 || matches!(objects[1], Block::Atom(_) | Block::Application { .. }) {
             return Ok(false);
         }
         let name = SourceAtom::from_block(&objects[0])?.into_name()?;
@@ -2626,6 +2648,13 @@ impl SourceVariantSignature {
     fn from_blocks_at(blocks: &[Block], index: &mut usize) -> Result<Self, SchemaError> {
         let block = blocks.get(*index).ok_or(SchemaError::ExpectedEnumVariant)?;
         match block {
+            Block::Application { .. } => {
+                let entry = DottedExpectation::Capitalized.read_entry(&blocks[*index..])?;
+                let name = SourceVariantName::from_text(SourceReference::dotted_key_text(&entry))?;
+                let payload = SourceReference::from_variant_payload(name.name(), entry.value())?;
+                *index += entry.consumed();
+                Ok(Self::Data(name, SourceVariantPayload::Reference(payload)))
+            }
             Block::Atom(atom) => match DottedExpectation::Capitalized.read_entry(&blocks[*index..])
             {
                 Ok(entry) => {
@@ -3494,6 +3523,13 @@ impl SourceReference {
             });
         };
         match block {
+            Block::Application { .. } => {
+                let entry = DottedExpectation::Capitalized.read_entry(&blocks[*index..])?;
+                *index += entry.consumed();
+                let head = Name::new(Self::dotted_key_text(&entry));
+                let arguments = Self::arguments_from_dotted_value(entry.value())?;
+                Self::from_application_parts(head, arguments)
+            }
             Block::Atom(atom) => {
                 // A type application carries a CAPITALIZED dotted prefix. The
                 // low-level split is the shared NOTA reader's; this reader only
@@ -3551,20 +3587,14 @@ impl SourceReference {
         blocks: &[Block],
         index: usize,
     ) -> Result<usize, SchemaError> {
-        let Some(Block::Atom(atom)) = blocks.get(index) else {
-            return Ok(1);
-        };
-        if atom.text().strip_suffix('.').is_none() {
-            return Ok(1);
-        }
-        if blocks.get(index + 1).is_none() {
-            return Err(SchemaError::ExpectedSyntaxReferenceArity {
+        match blocks.get(index) {
+            Some(_) => Ok(1),
+            None => Err(SchemaError::ExpectedSyntaxReferenceArity {
                 form: "dotted reference",
                 expected: "a head and payload",
-                found: 1,
-            });
+                found: 0,
+            }),
         }
-        Ok(2)
     }
 
     /// The atom text of a dotted entry's key. The shared reader guarantees the
@@ -3625,6 +3655,18 @@ impl SourceReference {
                         found: value.reemit_fallback(),
                     })
                 }
+            }
+            Block::Application { head, .. }
+                if head
+                    .schema_name()
+                    .ok()
+                    .and_then(|name| SourceGenericDefinitions::default().definition(&name))
+                    .is_some_and(|definition| definition.kind.argument_count() > 1) =>
+            {
+                Err(SchemaError::UngroupedVariantPayloadApplication {
+                    variant: variant.to_nota(),
+                    head: head.dotted_text().unwrap_or_else(|| head.reemit_fallback()),
+                })
             }
             Block::Atom(atom) if atom.text().ends_with('.') => {
                 Err(SchemaError::UngroupedVariantPayloadApplication {
@@ -4675,6 +4717,12 @@ impl<'source> SourceBlockNotation<'source> {
                 format!("{} block", delimiter.description())
             }
             Block::PipeText(_) => "pipe text".to_owned(),
+            Block::Application { .. } => format!(
+                "application {}",
+                self.0
+                    .dotted_text()
+                    .unwrap_or_else(|| self.0.reemit_fallback())
+            ),
             Block::Atom(atom) => format!("atom {}", atom.text()),
         }
     }

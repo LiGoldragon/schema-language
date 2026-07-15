@@ -41,35 +41,17 @@ impl RawDatatypeMap {
     /// case gate that the two semantic dotted expectations apply.
     pub fn from_blocks(objects: &[Block]) -> Result<Self, SchemaError> {
         let mut entries = Vec::new();
-        let mut index = 0;
-        while index < objects.len() {
-            let atom = objects[index].atom().ok_or_else(|| {
+        for object in objects {
+            let (head, payload) = object.as_application().ok_or_else(|| {
                 SchemaError::from(NotaDecodeError::ExpectedDottedEntry {
                     expectation: Self::ENTRY_EXPECTATION,
                 })
             })?;
-            let (prefix, remainder) = atom.split_at_first_dot().ok_or_else(|| {
-                SchemaError::from(NotaDecodeError::ExpectedDottedEntry {
-                    expectation: Self::ENTRY_EXPECTATION,
-                })
-            })?;
-            let name = Block::Atom(prefix).schema_name()?;
-            let (value, consumed) = match remainder {
-                Some(value_atom) => (Block::Atom(value_atom), 1),
-                None => {
-                    let value = objects.get(index + 1).cloned().ok_or_else(|| {
-                        SchemaError::from(NotaDecodeError::DottedEntryMissingValue {
-                            expectation: Self::ENTRY_EXPECTATION,
-                        })
-                    })?;
-                    (value, 2)
-                }
-            };
+            let name = head.schema_name()?;
             entries.push(RawDatatypeEntry {
                 name,
-                datatype: RawNotaDatatype::from_block(&value)?,
+                datatype: RawNotaDatatype::from_block(payload)?,
             });
-            index += consumed;
         }
         Ok(Self { entries })
     }
@@ -118,6 +100,11 @@ impl RawNotaDatatype {
         match block {
             Block::Atom(atom) => Ok(Self::Atom(atom.text().to_owned())),
             Block::PipeText(text) => Ok(Self::Text(text.text.clone())),
+            Block::Application { .. } => Ok(Self::Atom(
+                block
+                    .dotted_text()
+                    .expect("an application spine has dotted atom text"),
+            )),
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 root_objects,
