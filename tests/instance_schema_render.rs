@@ -168,7 +168,7 @@ fn enum_value_renders_the_enum_name() {
 
 #[test]
 fn entry_renders_its_field_type_names() {
-    let source = "([(Technology (Software (Programming CodeGeneration)))] Decision [a description] High Medium Zero [spirit])";
+    let source = "{ [Technology.Software.Programming.CodeGeneration] Decision (a description) High Medium Zero [spirit] }";
     let schema = schema_of::<Entry>(source);
     let rendered = InstanceSchemaText::new(&schema).aligned();
     assert_eq!(
@@ -179,9 +179,8 @@ fn entry_renders_its_field_type_names() {
 
 #[test]
 fn domain_match_partial_renders_enum_name_with_payload_reference() {
-    let schema = schema_of::<DomainMatch>(
-        "(Partial [(Technology (Software (Programming CodeGeneration)))])",
-    );
+    let schema =
+        schema_of::<DomainMatch>("Partial.[Technology.Software.Programming.CodeGeneration]");
     // The aligned enum payload collapses the transparent `Partial` wrapper to
     // its inner `DomainScopes` newtype name.
     let rendered = InstanceSchemaText::new(&schema).aligned();
@@ -204,7 +203,7 @@ fn empty_domains_still_names_its_element_type() {
 
 #[test]
 fn root_input_record_renders_the_endorsed_root_form() {
-    let source = "(Record (([(Technology (Software (Programming CodeGeneration)))] Decision [a description] Medium Medium Zero [the spirit]) ([([a quote] None)] [the reasoning])))";
+    let source = "Record.{ { [Technology.Software.Programming.CodeGeneration] Decision (a description) Medium Medium Zero [(the spirit)] } { [ { (a quote) None } ] (the reasoning) } }";
     let schema = schema_of::<Input>(source);
     // The endorsed one-to-one positional root form: enum name, the transparent
     // Record/RecordRequest wrappers collapsed, the payload a paren group of the

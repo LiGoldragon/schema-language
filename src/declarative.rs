@@ -35,7 +35,10 @@ impl MacroLibrary {
     }
 
     pub fn builtin() -> Result<Self, SchemaError> {
-        Self::from_nota_source(include_str!("../schemas/builtin-macros.macro-library"))
+        // The checked-in archive was encoded with the pre-application NOTA
+        // codec. Bootstrap from the authored source until the generated
+        // artifact is regenerated through the next-generation structural form.
+        Self::builtin_source()
     }
 
     pub fn builtin_source() -> Result<Self, SchemaError> {
@@ -437,7 +440,9 @@ impl MacroPatternObject {
                     children,
                 ))))
             }
-            Block::PipeText(_) => Ok(Self::Atom(NotationBlock::new(object).compact_notation())),
+            Block::PipeText(_) | Block::Application { .. } => {
+                Ok(Self::Atom(NotationBlock::new(object).compact_notation()))
+            }
             Block::Atom(_) => unreachable!("atoms are handled by demote_to_string"),
         }
     }
@@ -811,6 +816,10 @@ pub enum MacroTemplateObject {
     RestCapture(String),
     Atom(String),
     Delimited(#[rkyv(omit_bounds)] Box<MacroTemplateDelimited>),
+    Application(
+        #[rkyv(omit_bounds)] Box<MacroTemplateObject>,
+        #[rkyv(omit_bounds)] Box<MacroTemplateObject>,
+    ),
 }
 
 impl MacroTemplateObject {
@@ -839,6 +848,10 @@ impl MacroTemplateObject {
                     children,
                 ))))
             }
+            Block::Application { head, payload, .. } => Ok(Self::Application(
+                Box::new(Self::from_block(head)?),
+                Box::new(Self::from_block(payload)?),
+            )),
             Block::PipeText(_) => Ok(Self::Atom(NotationBlock::new(object).compact_notation())),
             Block::Atom(_) => unreachable!("atoms are handled by demote_to_string"),
         }
@@ -856,6 +869,10 @@ impl MacroTemplateObject {
                 .map(ExpandedObject::Captured)
                 .collect()),
             Self::Atom(text) => Ok(vec![ExpandedObject::Atom(text.clone())]),
+            Self::Application(head, payload) => Ok(vec![ExpandedObject::Application {
+                head: Box::new(head.expand_single(bindings, "application head")?),
+                payload: Box::new(payload.expand_single(bindings, "application payload")?),
+            }]),
             Self::Delimited(data) => {
                 let mut expanded_children = Vec::new();
                 for child in data.children() {
@@ -898,6 +915,11 @@ impl MacroTemplateObject {
             Self::Capture(name) => format!("${name}"),
             Self::RestCapture(name) => format!("$*{name}"),
             Self::Atom(text) => text.clone(),
+            Self::Application(head, payload) => format!(
+                "{}.{}",
+                head.to_source_notation(),
+                payload.to_source_notation()
+            ),
             Self::Delimited(data) => DelimitedNotation::new(data.delimiter().into_nota())
                 .wrap_children(
                     &data
@@ -1393,6 +1415,10 @@ enum ExpandedObject {
         delimiter: Delimiter,
         children: Vec<ExpandedObject>,
     },
+    Application {
+        head: Box<ExpandedObject>,
+        payload: Box<ExpandedObject>,
+    },
 }
 
 impl ExpandedObject {
@@ -1409,6 +1435,9 @@ impl ExpandedObject {
                     .map(Self::compact_notation)
                     .collect::<Vec<_>>(),
             ),
+            Self::Application { head, payload } => {
+                format!("{}.{}", head.compact_notation(), payload.compact_notation())
+            }
         }
     }
 
@@ -1416,7 +1445,7 @@ impl ExpandedObject {
         match self {
             Self::Captured(block) => block.demote_to_string(),
             Self::Atom(text) => Some(text.as_str()),
-            Self::Delimited { .. } => None,
+            Self::Delimited { .. } | Self::Application { .. } => None,
         }
     }
 
@@ -1433,7 +1462,7 @@ impl ExpandedObject {
                     })
                 }
             }
-            Self::Delimited { .. } => Err(SchemaError::ExpectedSymbol {
+            Self::Delimited { .. } | Self::Application { .. } => Err(SchemaError::ExpectedSymbol {
                 found: self.compact_notation(),
             }),
         }
@@ -1443,21 +1472,21 @@ impl ExpandedObject {
         match self {
             Self::Captured(block) => block.holds_root_objects(),
             Self::Delimited { children, .. } => children.len(),
-            Self::Atom(_) => 0,
+            Self::Atom(_) | Self::Application { .. } => 0,
         }
     }
 
     fn root_object_at(&self, index: usize) -> Option<&ExpandedObject> {
         match self {
             Self::Delimited { children, .. } => children.get(index),
-            Self::Captured(_) | Self::Atom(_) => None,
+            Self::Captured(_) | Self::Atom(_) | Self::Application { .. } => None,
         }
     }
 
     fn root_objects(&self) -> &[ExpandedObject] {
         match self {
             Self::Delimited { children, .. } => children,
-            Self::Captured(_) | Self::Atom(_) => &[],
+            Self::Captured(_) | Self::Atom(_) | Self::Application { .. } => &[],
         }
     }
 
@@ -1472,7 +1501,7 @@ impl ExpandedObject {
                         .is_some_and(|character| character.is_ascii_uppercase())
                     && !text.contains('-')
             }
-            Self::Delimited { .. } => false,
+            Self::Delimited { .. } | Self::Application { .. } => false,
         }
     }
 
@@ -1480,6 +1509,15 @@ impl ExpandedObject {
         match self {
             Self::Captured(block) => TypeReference::from_block(block),
             Self::Atom(_) => ExpandedReference::new(std::slice::from_ref(self)).type_reference(),
+            Self::Application { .. } => {
+                let document = Document::parse(self.compact_notation())?;
+                TypeReference::from_block(
+                    document
+                        .root_objects()
+                        .first()
+                        .expect("an application notation parses to one root"),
+                )
+            }
             Self::Delimited {
                 delimiter: Delimiter::Parenthesis,
                 children,
@@ -1956,6 +1994,11 @@ impl<'block> NotationBlock<'block> {
                     .collect::<Vec<_>>(),
             ),
             Block::PipeText(pipe_text) => format!("[|{}|]", pipe_text.text),
+            Block::Application { head, payload, .. } => format!(
+                "{}.{}",
+                NotationBlock::new(head).compact_notation(),
+                NotationBlock::new(payload).compact_notation()
+            ),
             Block::Atom(atom) => atom.text().to_owned(),
         }
     }

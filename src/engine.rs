@@ -973,26 +973,16 @@ impl<'schema> NamespaceEntryWalk<'schema> {
     }
 
     fn next_entry(&mut self) -> Result<Option<NamespaceEntry<'schema>>, SchemaError> {
-        let Some(head) = self.objects.get(self.cursor) else {
+        let Some(entry) = self.objects.get(self.cursor) else {
             return Ok(None);
         };
+        let (name, definition) = entry
+            .as_application()
+            .ok_or(SchemaError::ExpectedDelimiter {
+                expected: "a dotted declaration application",
+            })?;
         self.cursor += 1;
-        let ends_at_dot = matches!(head, Block::Atom(atom) if atom.text().ends_with('.'));
-        let definition = if ends_at_dot {
-            let Some(next) = self.objects.get(self.cursor) else {
-                return Err(SchemaError::ExpectedDelimiter {
-                    expected: "a declaration value after a trailing-dot key",
-                });
-            };
-            self.cursor += 1;
-            next
-        } else {
-            head
-        };
-        Ok(Some(NamespaceEntry {
-            name: head,
-            definition,
-        }))
+        Ok(Some(NamespaceEntry { name, definition }))
     }
 }
 

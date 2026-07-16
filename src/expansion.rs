@@ -177,6 +177,11 @@ impl<'registry> MacroExpansionPass<'registry> {
                 Ok(DelimiterText::new(*delimiter).wrap(&children))
             }
             Block::PipeText(pipe_text) => Ok(format!("[|{}|]", pipe_text.text)),
+            Block::Application { head, payload, .. } => Ok(format!(
+                "{}.{}",
+                self.expand_block(head, context)?,
+                self.expand_block(payload, context)?
+            )),
             Block::Atom(atom) => Ok(atom.text().to_owned()),
         }
     }
@@ -225,24 +230,10 @@ impl<'schema> NamespacePairWalk<'schema> {
     }
 
     fn next_pair(&mut self) -> Option<MacroPair<'schema>> {
-        let head = self.objects.get(self.cursor)?;
+        let entry = self.objects.get(self.cursor)?;
+        let (name, definition) = entry.as_application()?;
         self.cursor += 1;
-        let ends_at_dot = matches!(head, Block::Atom(atom) if atom.text().ends_with('.'));
-        let definition = if ends_at_dot {
-            match self.objects.get(self.cursor) {
-                Some(next) => {
-                    self.cursor += 1;
-                    next
-                }
-                None => head,
-            }
-        } else {
-            head
-        };
-        Some(MacroPair {
-            name: head,
-            definition,
-        })
+        Some(MacroPair { name, definition })
     }
 }
 

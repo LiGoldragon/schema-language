@@ -10,7 +10,7 @@
   ModulePath.[Vector.ModuleName]
   CrateName.[Name]
   Description.[String]
-  Documentation.[|Core schema raw NOTA fixture with apostrophe's text, a closing bracket ], and no double quotes.|]
+  Documentation.(|Core schema raw NOTA fixture with apostrophe's text, a closing bracket ], and no double quotes.|)
   Topic.[Text]
   Topics.[Vector.Topic]
   Magnitude.(Trace Low Medium High Maximum)

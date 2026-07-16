@@ -233,8 +233,8 @@ fn spirit_min_input_enum_body_has_explicit_payload_variants() {
         .iter()
         .map(|variant| {
             variant
-                .demote_to_string()
-                .and_then(|text| text.split_once('.').map(|(name, _)| name))
+                .as_application()
+                .and_then(|(head, _)| head.demote_to_string())
                 .expect("spirit-min input variant is dotted with an explicit payload type")
         })
         .collect::<Vec<_>>();

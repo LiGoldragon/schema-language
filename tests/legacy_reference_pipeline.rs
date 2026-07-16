@@ -90,7 +90,7 @@ fn macro_reference_templates_use_dotted_reader_and_reject_old_builtin_body() {
 #[test]
 fn macro_reference_templates_accept_dotted_builtin_body() {
     let user_macros = MacroLibrary::from_source(
-        "(SchemaMacro Bag TypeReference (Bag $Type) (Reference Vector. $Type))",
+        "(SchemaMacro Bag TypeReference (Bag $Type) (Reference Vector.$Type))",
     )
     .expect("dotted macro definition parses");
     let mut registry = MacroRegistry::with_schema_defaults();

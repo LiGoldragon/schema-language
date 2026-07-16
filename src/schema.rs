@@ -2870,6 +2870,13 @@ impl SchemaNodeValue {
     pub fn from_block(block: &Block) -> Result<Self, SchemaError> {
         match block {
             Block::Atom(_) => block.schema_name().map(Self::Symbol),
+            Block::Application { .. } => block
+                .dotted_text()
+                .map(Name::new)
+                .map(Self::Symbol)
+                .ok_or_else(|| SchemaError::ExpectedSyntaxReference {
+                    found: block.reemit_fallback(),
+                }),
             Block::PipeText(text) => Ok(Self::Text(text.text.clone())),
             Block::Delimited {
                 delimiter: Delimiter::Parenthesis,
@@ -2977,6 +2984,11 @@ impl<'schema> SchemaNodeNotation<'schema> {
                 SchemaNodeDelimitedNotation::new(*delimiter).wrap(&children)
             }
             Block::PipeText(text) => format!("[|{}|]", text.text),
+            Block::Application { head, payload, .. } => format!(
+                "{}.{}",
+                Self::new(head).compact(),
+                Self::new(payload).compact()
+            ),
             Block::Atom(atom) => atom.text().to_owned(),
         }
     }
