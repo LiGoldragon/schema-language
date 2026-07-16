@@ -50,7 +50,10 @@ pub use nota::{
     MacroObjectCount, Pattern, PatternElement, PositionPredicate, SigilPosition, SigilSpec,
 };
 pub use raw::{RawDatatypeEntry, RawDatatypeMap, RawNotaDatatype, RawNotaSequence, RawSchemaFile};
-pub use resolution::{ImportResolver, ImportSource, ResolvedImport};
+pub use resolution::{
+    ExternalRootReference, ImportResolver, ImportSource, PackageIdentity, ResolvedExternalRoot,
+    ResolvedImport,
+};
 pub use schema::{
     ApplicationHead, Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FieldDeclaration,
     ImplBlock, ImplCatalog, ImplCompositionKey, ImplFact, ImplReference, ImportDeclaration,

@@ -196,6 +196,10 @@ provisional minting mechanism is the bridge until the daemon exists. This
 direction does not close the item — the bridge remains provisional and the
 daemon is unbuilt — so the section stays OPEN.
 
+## Qualified external contract roots
+
+External contract roots are terminal dependency boundaries, not declarations in a consumer's loaded whole. A source imports them by package with the existing positional form, for example `{ signal-lojix.[Input Output] }`, and references them as `signal-lojix.Input` or `signal-lojix.Output`. The source AST carries only the package path and root name. Resolution validates the dependency package and its exported `lib.schema` root, attaches the exact package version supplied by build metadata, and rejects Rust crate-name normalization ambiguity. The generated Rust projection is direct (`signal_lojix::Input`), so two dependencies may both export `Input`/`Output` without aliases or local-name collisions. The local schema always owns its fixed `Input` and `Output` roots. Ordinary non-root imports remain declarations in the loaded whole and preserve their existing source behavior.
+
 ## Generics
 
 There are no builtin generics; `Vector` is not magic. The builtin mechanism is a

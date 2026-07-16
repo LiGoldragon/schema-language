@@ -35,6 +35,10 @@ impl SchemaPackage {
         &self.crate_name
     }
 
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
     pub fn schema_directory(&self) -> PathBuf {
         self.root.join("schema")
     }

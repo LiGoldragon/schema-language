@@ -33,7 +33,7 @@ use crate::{
         CoreRootApplication, CoreSchema, CoreStruct, CoreType, CoreVariant,
     },
     identifier::{DeclarationKind, NameTable, NominalIdentifier},
-    resolution::ResolvedImport,
+    resolution::{ResolvedExternalRoot, ResolvedImport},
     schema::{
         Declaration, EnumDeclaration, EnumVariant, FieldDeclaration, ImplBlock, ImplCatalog,
         ImplReference, ImportDeclaration, Name, NewtypeDeclaration, Root, RootApplication,
@@ -160,6 +160,10 @@ impl TrueSchema {
     /// structure; projection rebuilds the name-bearing sidecar form.
     pub fn resolved_imports(&self) -> Vec<ResolvedImport> {
         self.tree().resolved_imports().to_vec()
+    }
+
+    pub fn external_roots(&self) -> Vec<ResolvedExternalRoot> {
+        self.tree().external_roots().to_vec()
     }
 
     pub fn input_view(&self) -> RootView<'_> {

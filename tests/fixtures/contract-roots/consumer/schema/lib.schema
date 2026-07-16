@@ -1,0 +1,11 @@
+{
+  signal-lojix.[Input Output]
+  meta-signal-lojix.[Input Output]
+}
+[Observe.Bridge]
+[Observed.Bridge]
+{
+  Bridge.{ signal-lojix.Input meta-signal-lojix.Output }
+}
+{}
+{}

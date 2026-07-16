@@ -64,6 +64,135 @@ impl ImportSource {
     }
 }
 
+/// A package-qualified contract root as authored in source (`signal-lojix.Input`).
+///
+/// Unlike ordinary imports, contract roots remain outside the consuming
+/// schema's declaration namespace. The package segment is therefore part of
+/// the reference rather than a spelling that is flattened into a local name.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub struct ExternalRootReference {
+    package: Name,
+    root: Name,
+}
+
+impl ExternalRootReference {
+    pub fn new(package: Name, root: Name) -> Result<Self, SchemaError> {
+        if package.has_namespace()
+            || !package.qualifies_as_symbol_name()
+            || package
+                .as_str()
+                .chars()
+                .next()
+                .is_none_or(|character| !character.is_ascii_lowercase())
+            || !matches!(root.as_str(), "Input" | "Output")
+        {
+            return Err(SchemaError::MalformedExternalRootReference {
+                found: format!("{}.{}", package.as_str(), root.as_str()),
+            });
+        }
+        Ok(Self { package, root })
+    }
+
+    pub fn package(&self) -> &Name {
+        &self.package
+    }
+
+    pub fn root(&self) -> &Name {
+        &self.root
+    }
+
+    pub fn to_schema_text(&self) -> String {
+        format!("{}.{}", self.package.as_str(), self.root.as_str())
+    }
+}
+
+/// Exact dependency identity attached during external-root resolution.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub struct PackageIdentity {
+    name: Name,
+    version: String,
+}
+
+impl PackageIdentity {
+    pub fn new(name: Name, version: impl Into<String>) -> Self {
+        Self {
+            name,
+            version: version.into(),
+        }
+    }
+
+    pub fn name(&self) -> &Name {
+        &self.name
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn rust_crate_name(&self) -> String {
+        self.name.as_str().replace('-', "_")
+    }
+}
+
+/// A package-qualified contract root after dependency metadata resolution.
+#[derive(
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    nota::NotaDecode,
+    nota::NotaEncode,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+)]
+pub struct ResolvedExternalRoot {
+    reference: ExternalRootReference,
+    package: PackageIdentity,
+}
+
+impl ResolvedExternalRoot {
+    pub fn new(reference: ExternalRootReference, package: PackageIdentity) -> Self {
+        Self { reference, package }
+    }
+
+    pub fn reference(&self) -> &ExternalRootReference {
+        &self.reference
+    }
+
+    pub fn package(&self) -> &PackageIdentity {
+        &self.package
+    }
+
+    pub fn rust_path(&self) -> String {
+        format!(
+            "{}::{}",
+            self.package.rust_crate_name(),
+            self.reference.root().local_part()
+        )
+    }
+}
+
 impl TryFrom<&Name> for ImportSource {
     type Error = SchemaError;
 
@@ -359,6 +488,52 @@ impl ImportResolver {
         declarations
             .iter()
             .map(|declaration| self.resolve(declaration, engine))
+            .collect()
+    }
+
+    /// Resolve a terminal contract root against its direct dependency package.
+    /// Roots are validated in the dependency's `lib.schema`, but never become
+    /// declarations in the consumer's loaded whole.
+    pub fn resolve_external_root(
+        &self,
+        reference: &ExternalRootReference,
+        engine: &SchemaEngine,
+    ) -> Result<ResolvedExternalRoot, SchemaError> {
+        let package = self.package_for(reference.package())?;
+        let normalized = package.crate_name().as_str().replace('-', "_");
+        if self
+            .packages
+            .iter()
+            .filter(|candidate| candidate.crate_name().as_str().replace('-', "_") == normalized)
+            .count()
+            != 1
+        {
+            return Err(SchemaError::AmbiguousExternalRootPackage {
+                package: reference.package().as_str().to_owned(),
+            });
+        }
+        let module = package.load_lib()?;
+        let schema = module.lower_with_resolver(engine, self)?;
+        if schema.root_enum_named(reference.root().as_str()).is_none() {
+            return Err(SchemaError::ExternalRootNotExported {
+                package: reference.package().as_str().to_owned(),
+                root: reference.root().as_str().to_owned(),
+            });
+        }
+        Ok(ResolvedExternalRoot::new(
+            reference.clone(),
+            PackageIdentity::new(package.crate_name().clone(), package.version()),
+        ))
+    }
+
+    pub fn resolve_external_roots(
+        &self,
+        references: &[ExternalRootReference],
+        engine: &SchemaEngine,
+    ) -> Result<Vec<ResolvedExternalRoot>, SchemaError> {
+        references
+            .iter()
+            .map(|reference| self.resolve_external_root(reference, engine))
             .collect()
     }
 }

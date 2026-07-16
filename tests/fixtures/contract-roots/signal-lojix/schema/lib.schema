@@ -1,0 +1,9 @@
+{}
+[Send.SignalRequest]
+[Sent.SignalReply]
+{
+  SignalRequest.String
+  SignalReply.String
+}
+{}
+{}

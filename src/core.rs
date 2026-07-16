@@ -102,6 +102,7 @@ impl SchemaTree {
         let core = CoreSchema {
             imports,
             resolved_imports,
+            external_roots: self.external_roots().to_vec(),
             input,
             output,
             namespace,
@@ -119,6 +120,10 @@ impl SchemaTree {
 pub struct CoreSchema {
     pub(crate) imports: Vec<CoreImportDeclaration>,
     pub(crate) resolved_imports: Vec<CoreResolvedImport>,
+    /// Exact dependency identities for terminal contract roots. Unlike ordinary
+    /// resolved imports these are not local declarations and carry no nominal
+    /// identifier or NameTable row.
+    pub(crate) external_roots: Vec<crate::ResolvedExternalRoot>,
     pub(crate) input: CoreRoot,
     pub(crate) output: CoreRoot,
     pub(crate) namespace: Vec<CoreDeclaration>,
@@ -144,6 +149,7 @@ impl CoreSchema {
                 .iter()
                 .map(|import| import.project(names))
                 .collect::<Result<Vec<_>, _>>()?,
+            self.external_roots.clone(),
             self.input.project(names)?,
             self.output.project(names)?,
             self.namespace
@@ -722,6 +728,7 @@ pub enum CoreReference {
     Path,
     Bytes,
     Plain(NominalIdentifier),
+    ExternalRoot(crate::ResolvedExternalRoot),
     SingleTypeApplication {
         projection: SingleTypeReferenceProjection,
         #[rkyv(omit_bounds)]
@@ -752,6 +759,7 @@ impl CoreReference {
             TypeReference::Path => Self::Path,
             TypeReference::Bytes => Self::Bytes,
             TypeReference::Plain(name) => Self::Plain(harvest.declare(DeclarationKind::Type, name)),
+            TypeReference::ExternalRoot(root) => Self::ExternalRoot(root.clone()),
             TypeReference::SingleTypeApplication {
                 projection,
                 argument,
@@ -793,6 +801,7 @@ impl CoreReference {
             Self::Plain(identifier) => {
                 TypeReference::Plain(names.projected_name(identifier)?.clone())
             }
+            Self::ExternalRoot(root) => TypeReference::ExternalRoot(root.clone()),
             Self::SingleTypeApplication {
                 projection,
                 argument,

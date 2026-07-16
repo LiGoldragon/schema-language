@@ -10,11 +10,12 @@ use nota::{
 };
 
 use crate::{
-    Declaration, DeclarationHead, EnumDeclaration, EnumVariant, FieldDeclaration, ImplBlock,
-    ImplCatalog, ImplReference, ImportDeclaration, MethodParameter, MethodSignature,
-    MultiTypeReferenceProjection, Name, NewtypeDeclaration, ResolvedImport, Root, RootApplication,
-    SchemaEngine, SchemaError, SchemaIdentity, SingleTypeReferenceProjection, StructDeclaration,
-    TypeDeclaration, TypeReference, ValueReferenceProjection,
+    Declaration, DeclarationHead, EnumDeclaration, EnumVariant, ExternalRootReference,
+    FieldDeclaration, ImplBlock, ImplCatalog, ImplReference, ImportDeclaration, MethodParameter,
+    MethodSignature, MultiTypeReferenceProjection, Name, NewtypeDeclaration, ResolvedExternalRoot,
+    ResolvedImport, Root, RootApplication, SchemaEngine, SchemaError, SchemaIdentity,
+    SingleTypeReferenceProjection, StructDeclaration, TypeDeclaration, TypeReference,
+    ValueReferenceProjection,
     macros::{BlockDebug, SchemaBlockExt},
     schema::SchemaTree,
 };
@@ -113,8 +114,9 @@ impl SchemaSource {
         identity: SchemaIdentity,
         imports: Vec<ImportDeclaration>,
         resolved_imports: Vec<ResolvedImport>,
+        external_roots: Vec<ResolvedExternalRoot>,
     ) -> Result<crate::TrueSchema, SchemaError> {
-        let resolver = SourceTypeResolver::from_source(self);
+        let resolver = SourceTypeResolver::from_source(self, external_roots.clone());
         let mut namespace = SourceLoweredNamespace::from_source(
             &self.types,
             &self.generics,
@@ -123,8 +125,8 @@ impl SchemaSource {
         )?;
         namespace.push_public_declarations(self.input.public_inline_declarations(&resolver)?)?;
         namespace.push_public_declarations(self.output.public_inline_declarations(&resolver)?)?;
-        let input = self.input.to_root(&namespace)?;
-        let output = self.output.to_root(&namespace)?;
+        let input = self.input.to_root(&resolver)?;
+        let output = self.output.to_root(&resolver)?;
         let impl_blocks = namespace.impl_blocks().to_vec();
         // The name-bearing tree exists only transiently: it is validated and
         // immediately decomposed into the split (CoreSchema, NameTable) model
@@ -133,6 +135,7 @@ impl SchemaSource {
             identity,
             imports,
             resolved_imports,
+            external_roots,
             input,
             output,
             namespace.into_declarations(),
@@ -482,6 +485,22 @@ pub struct SourceImports {
     entries: Vec<SourceImport>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SourceImportSet {
+    declarations: Vec<ImportDeclaration>,
+    external_roots: Vec<ExternalRootReference>,
+}
+
+impl SourceImportSet {
+    pub(crate) fn declarations(&self) -> &[ImportDeclaration] {
+        &self.declarations
+    }
+
+    pub(crate) fn external_roots(&self) -> &[ExternalRootReference] {
+        &self.external_roots
+    }
+}
+
 impl SourceImports {
     pub fn empty() -> Self {
         Self {
@@ -493,11 +512,20 @@ impl SourceImports {
         &self.entries
     }
 
-    pub(crate) fn to_schema_imports(&self) -> Result<Vec<ImportDeclaration>, SchemaError> {
-        self.entries
-            .iter()
-            .flat_map(SourceImport::to_schema_imports)
-            .collect()
+    pub(crate) fn to_schema_imports(&self) -> Result<SourceImportSet, SchemaError> {
+        let mut declarations = Vec::new();
+        let mut external_roots = Vec::new();
+        for entry in &self.entries {
+            if entry.is_external_contract_root_import() {
+                external_roots.extend(entry.external_roots()?);
+            } else {
+                declarations.extend(entry.to_schema_imports());
+            }
+        }
+        Ok(SourceImportSet {
+            declarations,
+            external_roots,
+        })
     }
 
     fn from_block(block: &Block) -> Result<Self, SchemaError> {
@@ -670,14 +698,31 @@ impl SourceImport {
         Self::joined_path(&self.path, &self.targets)
     }
 
-    fn to_schema_imports(&self) -> Vec<Result<ImportDeclaration, SchemaError>> {
+    /// A one-segment package importing only `Input`/`Output` is a terminal
+    /// contract-root import. Its targets are not local declarations: source
+    /// references retain the package qualification and resolution attaches the
+    /// exact dependency version from build metadata.
+    fn is_external_contract_root_import(&self) -> bool {
+        self.path.len() == 1
+            && self
+                .targets
+                .iter()
+                .all(|target| matches!(target.as_str(), "Input" | "Output"))
+    }
+
+    fn external_roots(&self) -> Result<Vec<ExternalRootReference>, SchemaError> {
         self.targets
             .iter()
-            .map(|target| {
-                Ok(ImportDeclaration {
-                    local_name: target.clone(),
-                    source: TypeReference::from_name(self.colon_source(target)),
-                })
+            .map(|target| ExternalRootReference::new(self.path[0].clone(), target.clone()))
+            .collect()
+    }
+
+    fn to_schema_imports(&self) -> Vec<ImportDeclaration> {
+        self.targets
+            .iter()
+            .map(|target| ImportDeclaration {
+                local_name: target.clone(),
+                source: TypeReference::from_name(self.colon_source(target)),
             })
             .collect()
     }
@@ -717,8 +762,8 @@ impl SourceRootEnum {
         self.body.public_inline_declarations(resolver)
     }
 
-    fn to_root(&self, namespace: &SourceLoweredNamespace) -> Result<Root, SchemaError> {
-        self.body.to_root(self.name.clone(), namespace)
+    fn to_root(&self, resolver: &SourceTypeResolver) -> Result<Root, SchemaError> {
+        self.body.to_root(self.name.clone(), resolver)
     }
 }
 
@@ -824,11 +869,12 @@ impl SourceRootBody {
         }
     }
 
-    fn to_root(&self, name: Name, namespace: &SourceLoweredNamespace) -> Result<Root, SchemaError> {
+    fn to_root(&self, name: Name, resolver: &SourceTypeResolver) -> Result<Root, SchemaError> {
         match self {
-            Self::Enum(body) => body.to_schema_enum(name, namespace, None).map(Root::Enum),
+            Self::Enum(body) => body.to_schema_enum(name, resolver, None).map(Root::Enum),
             Self::Application(reference) => {
-                let TypeReference::Application { head, arguments } = reference.to_type_reference()
+                let TypeReference::Application { head, arguments } =
+                    resolver.resolve_reference(None, reference)
                 else {
                     return Err(SchemaError::ExpectedRootApplication {
                         position: "root",
@@ -2078,6 +2124,23 @@ impl SourceField {
                 found: atom.0.to_owned(),
             });
         }
+        if let Some((package, root)) = atom.0.split_once('.')
+            && matches!(root, "Input" | "Output")
+            && package
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_lowercase())
+        {
+            let reference = SourceReference::ExternalRoot(ExternalRootReference::new(
+                Name::new(package),
+                Name::new(root),
+            )?);
+            return Ok(Self {
+                name: reference.derived_field_name(),
+                value: SourceFieldValue::Reference(reference),
+                identity: SourceFieldIdentity::Implicit,
+            });
+        }
         if let Some((head, payload)) = atom.0.split_once('.') {
             let head_name = Name::new(head);
             if SourceGenericDefinitions::default()
@@ -2348,7 +2411,7 @@ impl SourceEnumBody {
             private,
             TypeDeclaration::Enum(self.to_schema_enum(
                 name,
-                &SourceVariantPayloadResolution::explicit_only(),
+                &SourceVariantPayloadResolution::explicit_only(resolver.external_roots.clone()),
                 namespace,
             )?),
         ))
@@ -2373,7 +2436,7 @@ impl SourceEnumBody {
             Vec::new(),
             TypeDeclaration::Enum(self.to_schema_enum(
                 name,
-                &SourceVariantPayloadResolution::explicit_only(),
+                &SourceVariantPayloadResolution::explicit_only(resolver.external_roots.clone()),
                 namespace,
             )?),
         ))
@@ -2850,6 +2913,7 @@ impl StructuralMacroNode for SourceVariantPayload {
 )]
 pub enum SourceReference {
     Plain(Name),
+    ExternalRoot(ExternalRootReference),
     ValueApplication(#[rkyv(omit_bounds)] Box<SourceValueApplication>),
     SingleTypeApplication(#[rkyv(omit_bounds)] Box<SourceSingleTypeApplication>),
     MultiTypeApplication(#[rkyv(omit_bounds)] Box<SourceMultiTypeApplication>),
@@ -3495,6 +3559,19 @@ impl SourceReference {
         };
         match block {
             Block::Atom(atom) => {
+                if let Ok(entry) = DottedExpectation::Uncapitalized.read_entry(&blocks[*index..]) {
+                    let package = Name::new(Self::dotted_key_text(&entry));
+                    let root = entry
+                        .value()
+                        .atom()
+                        .map(|value| Name::new(value.text()))
+                        .ok_or_else(|| SchemaError::MalformedExternalRootReference {
+                            found: blocks[*index].reemit_fallback(),
+                        })?;
+                    let reference = ExternalRootReference::new(package, root)?;
+                    *index += entry.consumed();
+                    return Ok(Self::ExternalRoot(reference));
+                }
                 // A type application carries a CAPITALIZED dotted prefix. The
                 // low-level split is the shared NOTA reader's; this reader only
                 // chooses the expectation and dispatches on the value shape.
@@ -3675,6 +3752,7 @@ impl SourceReference {
                     .expect("a scalar reference exposes its canonical name"),
             )),
             TypeReference::Plain(name) => Self::Plain(name.clone()),
+            TypeReference::ExternalRoot(root) => Self::ExternalRoot(root.reference().clone()),
             TypeReference::SingleTypeApplication {
                 projection,
                 argument,
@@ -3708,7 +3786,8 @@ impl SourceReference {
     pub fn plain_name(&self) -> Option<&Name> {
         match self {
             Self::Plain(name) => Some(name),
-            Self::ValueApplication(_)
+            Self::ExternalRoot(_)
+            | Self::ValueApplication(_)
             | Self::SingleTypeApplication(_)
             | Self::MultiTypeApplication(_)
             | Self::Application { .. } => None,
@@ -3756,7 +3835,8 @@ impl SourceReference {
     fn unsigned_integer_argument(&self) -> Option<u64> {
         match self {
             Self::Plain(name) => name.as_str().parse::<u64>().ok(),
-            Self::ValueApplication(_)
+            Self::ExternalRoot(_)
+            | Self::ValueApplication(_)
             | Self::SingleTypeApplication(_)
             | Self::MultiTypeApplication(_)
             | Self::Application { .. } => None,
@@ -3766,6 +3846,7 @@ impl SourceReference {
     pub fn to_schema_text(&self) -> String {
         match self {
             Self::Plain(name) => name.to_nota(),
+            Self::ExternalRoot(reference) => reference.to_schema_text(),
             Self::ValueApplication(application) => application.to_schema_text(),
             Self::SingleTypeApplication(application) => application.to_schema_text(),
             Self::MultiTypeApplication(application) => application.to_schema_text(),
@@ -3781,6 +3862,7 @@ impl SourceReference {
     pub(crate) fn derived_field_name(&self) -> Name {
         match self {
             Self::Plain(name) => Name::new(name.field_name()),
+            Self::ExternalRoot(reference) => Name::new(reference.root().field_name()),
             Self::ValueApplication(application) => application.derived_field_name(),
             Self::SingleTypeApplication(application) => application.derived_field_name(),
             Self::MultiTypeApplication(application) => application.derived_field_name(),
@@ -3798,6 +3880,10 @@ impl SourceReference {
     pub(crate) fn to_type_reference(&self) -> TypeReference {
         match self {
             Self::Plain(name) => TypeReference::from_name(name.clone()),
+            Self::ExternalRoot(reference) => panic!(
+                "external root {} requires dependency resolution before semantic lowering",
+                reference.to_schema_text()
+            ),
             Self::ValueApplication(application) => application.to_type_reference(),
             Self::SingleTypeApplication(application) => application.to_type_reference(),
             Self::MultiTypeApplication(application) => application.to_type_reference(),
@@ -4070,7 +4156,7 @@ impl SourceReference {
             Self::SingleTypeApplication(application) => Some(&application.head),
             Self::MultiTypeApplication(application) => Some(&application.head),
             Self::Application { head, .. } => Some(head),
-            Self::Plain(_) | Self::ValueApplication(_) => None,
+            Self::Plain(_) | Self::ExternalRoot(_) | Self::ValueApplication(_) => None,
         }
     }
 
@@ -4094,7 +4180,7 @@ impl SourceReference {
             return self.clone();
         }
         match self {
-            Self::Plain(_) | Self::ValueApplication(_) => self.clone(),
+            Self::Plain(_) | Self::ExternalRoot(_) | Self::ValueApplication(_) => self.clone(),
             Self::SingleTypeApplication(application) => {
                 let argument = application
                     .argument
@@ -4142,6 +4228,7 @@ impl SourceReference {
                 Some(structure) => structure.inline_links(links),
                 None => Self::Plain(name.clone()),
             },
+            Self::ExternalRoot(reference) => Self::ExternalRoot(reference.clone()),
             Self::ValueApplication(_) => self.clone(),
             Self::SingleTypeApplication(application) => {
                 let argument = application.argument.inline_links(links);
@@ -4225,6 +4312,8 @@ trait SourceVariantResolver {
 
     fn resolves_type_name(&self, name: &Name) -> bool;
 
+    fn resolve_external_root(&self, reference: &ExternalRootReference) -> TypeReference;
+
     fn resolve_name(&self, namespace: Option<&Name>, name: &Name) -> TypeReference {
         TypeReference::from_name(self.visible_name(namespace, name))
     }
@@ -4236,6 +4325,7 @@ trait SourceVariantResolver {
     ) -> TypeReference {
         match reference {
             SourceReference::Plain(name) => self.resolve_name(namespace, name),
+            SourceReference::ExternalRoot(reference) => self.resolve_external_root(reference),
             SourceReference::ValueApplication(application) => application.to_type_reference(),
             SourceReference::SingleTypeApplication(application) => {
                 application.resolve_reference_with(self, namespace)
@@ -4281,15 +4371,17 @@ trait SourceVariantResolver {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct SourceVariantPayloadResolution {
     resolves_bare_names: bool,
+    external_roots: Vec<ResolvedExternalRoot>,
 }
 
 impl SourceVariantPayloadResolution {
-    fn explicit_only() -> Self {
+    fn explicit_only(external_roots: Vec<ResolvedExternalRoot>) -> Self {
         Self {
             resolves_bare_names: false,
+            external_roots,
         }
     }
 }
@@ -4302,15 +4394,26 @@ impl SourceVariantResolver for SourceVariantPayloadResolution {
     fn resolves_type_name(&self, _name: &Name) -> bool {
         false
     }
+
+    fn resolve_external_root(&self, reference: &ExternalRootReference) -> TypeReference {
+        TypeReference::ExternalRoot(
+            self.external_roots
+                .iter()
+                .find(|candidate| candidate.reference() == reference)
+                .cloned()
+                .expect("external root references are validated against declared imports"),
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SourceTypeResolver {
     names: Vec<Name>,
+    external_roots: Vec<ResolvedExternalRoot>,
 }
 
 impl SourceTypeResolver {
-    fn from_source(source: &SchemaSource) -> Self {
+    fn from_source(source: &SchemaSource, external_roots: Vec<ResolvedExternalRoot>) -> Self {
         let mut names = source.types().type_declaration_names();
         names.extend(source.generics().type_declaration_names());
         names.extend(source.input().body().inline_declaration_names());
@@ -4327,11 +4430,20 @@ impl SourceTypeResolver {
                 .body()
                 .public_inline_field_declaration_names(),
         );
-        Self { names }
+        Self {
+            names,
+            external_roots,
+        }
     }
 
     fn contains(&self, name: &Name) -> bool {
         self.names.iter().any(|candidate| candidate == name)
+    }
+
+    fn external_root(&self, reference: &ExternalRootReference) -> Option<&ResolvedExternalRoot> {
+        self.external_roots
+            .iter()
+            .find(|candidate| candidate.reference() == reference)
     }
 }
 
@@ -4343,11 +4455,20 @@ impl SourceVariantResolver for SourceTypeResolver {
     fn resolves_type_name(&self, name: &Name) -> bool {
         self.contains(name)
     }
+
+    fn resolve_external_root(&self, reference: &ExternalRootReference) -> TypeReference {
+        TypeReference::ExternalRoot(
+            self.external_root(reference)
+                .cloned()
+                .expect("external roots are validated before source lowering"),
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SourceLoweredNamespace {
     declarations: Vec<Declaration>,
+    external_roots: Vec<ResolvedExternalRoot>,
     /// Standalone impl blocks lowered from `impls` block entries
     /// `TypeName.[ … ]`. They mint no type declaration; they attach a catalog
     /// to a type declared in the `types` (or `generics`) block, surfaced
@@ -4364,6 +4485,7 @@ impl SourceLoweredNamespace {
     ) -> Result<Self, SchemaError> {
         let mut namespace = Self {
             declarations: Vec::new(),
+            external_roots: resolver.external_roots.clone(),
             impl_blocks: Vec::new(),
         };
         for entry in types.entries() {
@@ -4442,6 +4564,16 @@ impl SourceVariantResolver for SourceLoweredNamespace {
         self.declarations
             .iter()
             .any(|declaration| declaration.name() == name)
+    }
+
+    fn resolve_external_root(&self, reference: &ExternalRootReference) -> TypeReference {
+        TypeReference::ExternalRoot(
+            self.external_roots
+                .iter()
+                .find(|candidate| candidate.reference() == reference)
+                .cloned()
+                .expect("external root references are validated against declared imports"),
+        )
     }
 }
 

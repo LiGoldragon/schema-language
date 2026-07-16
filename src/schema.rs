@@ -492,6 +492,7 @@ pub struct SchemaTree {
     identity: super::SchemaIdentity,
     imports: Vec<ImportDeclaration>,
     resolved_imports: Vec<super::ResolvedImport>,
+    external_roots: Vec<super::ResolvedExternalRoot>,
     input: Root,
     output: Root,
     namespace: Vec<Declaration>,
@@ -560,6 +561,7 @@ impl SchemaTree {
         identity: super::SchemaIdentity,
         imports: Vec<ImportDeclaration>,
         resolved_imports: Vec<super::ResolvedImport>,
+        external_roots: Vec<super::ResolvedExternalRoot>,
         input: Root,
         output: Root,
         namespace: Vec<Declaration>,
@@ -568,6 +570,7 @@ impl SchemaTree {
             identity,
             imports,
             resolved_imports,
+            external_roots,
             input,
             output,
             namespace,
@@ -597,6 +600,12 @@ impl SchemaTree {
     /// reference dependency-emitted types instead of re-declaring them.
     pub fn resolved_imports(&self) -> &[super::ResolvedImport] {
         &self.resolved_imports
+    }
+
+    /// Resolved terminal contract roots. They are dependency identities, not
+    /// local declarations, and therefore never participate in name harvesting.
+    pub fn external_roots(&self) -> &[super::ResolvedExternalRoot] {
+        &self.external_roots
     }
 
     pub fn input(&self) -> &Root {
@@ -1017,7 +1026,8 @@ impl SchemaTree {
             | TypeReference::Path
             | TypeReference::Bytes
             | TypeReference::ValueApplication { .. }
-            | TypeReference::Plain(_) => Ok(()),
+            | TypeReference::Plain(_)
+            | TypeReference::ExternalRoot(_) => Ok(()),
             TypeReference::SingleTypeApplication { argument, .. } => {
                 self.verify_reference_arities(argument)
             }
@@ -1144,12 +1154,31 @@ impl SchemaTree {
     }
 
     fn imports_schema_text(&self) -> String {
-        Self::brace_block_text(
-            self.imports
+        let mut entries = self
+            .imports
+            .iter()
+            .map(|import| import.to_schema_text())
+            .collect::<Vec<_>>();
+        let mut packages: Vec<(&Name, Vec<&Name>)> = Vec::new();
+        for root in &self.external_roots {
+            if let Some((_, roots)) = packages
+                .iter_mut()
+                .find(|(package, _)| *package == root.package().name())
+            {
+                roots.push(root.reference().root());
+            } else {
+                packages.push((root.package().name(), vec![root.reference().root()]));
+            }
+        }
+        entries.extend(packages.into_iter().map(|(package, roots)| {
+            let targets = roots
                 .iter()
-                .map(|import| import.to_schema_text())
-                .collect(),
-        )
+                .map(|root| root.to_nota())
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{}.[{}]", package.to_nota(), targets)
+        }));
+        Self::brace_block_text(entries)
     }
 
     /// The `types` block: every non-parameterized declaration, projected as a
@@ -2394,6 +2423,9 @@ pub enum TypeReference {
     Path,
     Bytes,
     Plain(Name),
+    /// A terminal contract root addressed by exact dependency package identity,
+    /// never by the consumer's local declaration namespace.
+    ExternalRoot(super::ResolvedExternalRoot),
     SingleTypeApplication {
         projection: SingleTypeReferenceProjection,
         #[rkyv(omit_bounds)]
@@ -2457,6 +2489,7 @@ impl NotaDecode for TypeReference {
             })?;
         match variant {
             "Plain" => Ok(Self::Plain(Name::from_nota_block(&children[1])?)),
+            "ExternalRoot" => Self::from_nota_external_root(children),
             "Application" => Self::from_nota_application_payload(&children[1]),
             other => Self::from_nota_generic_payload(other, children),
         }
@@ -2472,6 +2505,12 @@ impl NotaEncode for TypeReference {
             Self::Path => "Path".to_owned(),
             Self::Bytes => "Bytes".to_owned(),
             Self::Plain(name) => format!("(Plain {})", name.to_nota()),
+            Self::ExternalRoot(root) => format!(
+                "(ExternalRoot ({} {}) {})",
+                root.package().name().to_nota(),
+                nota::NotaString::new(root.package().version()).format(),
+                root.reference().root().to_nota()
+            ),
             Self::SingleTypeApplication {
                 projection,
                 argument,
@@ -2608,6 +2647,7 @@ impl TypeReference {
             Self::Path => Some("Path"),
             Self::Bytes => Some("Bytes"),
             Self::Plain(_)
+            | Self::ExternalRoot(_)
             | Self::SingleTypeApplication { .. }
             | Self::MultiTypeApplication { .. }
             | Self::ValueApplication { .. }
@@ -2625,6 +2665,7 @@ impl TypeReference {
     pub fn plain_name(&self) -> Option<&Name> {
         match self {
             Self::Plain(name) => Some(name),
+            Self::ExternalRoot(_) => None,
             Self::String
             | Self::Integer
             | Self::Boolean
@@ -2696,6 +2737,35 @@ impl TypeReference {
     /// bytes scalar is the separate [`Self::Bytes`] leaf.
     pub fn fixed_width_bytes(width: u64) -> Self {
         Self::value_application(ValueReferenceProjection::Bytes, width)
+    }
+
+    fn from_nota_external_root(children: &[Block]) -> Result<Self, NotaDecodeError> {
+        if children.len() != 3 {
+            return Err(NotaDecodeError::ExpectedRootCount {
+                type_name: "TypeReference::ExternalRoot",
+                expected: 3,
+                found: children.len(),
+            });
+        }
+        let package_children = NotaBlock::new(&children[1]).expect_children(
+            Delimiter::Parenthesis,
+            "TypeReference::ExternalRoot package identity",
+            2,
+        )?;
+        let package = Name::from_nota_block(&package_children[0])?;
+        let version = NotaBlock::new(&package_children[1]).parse_string()?;
+        let root = Name::from_nota_block(&children[2])?;
+        let reference =
+            super::ExternalRootReference::new(package.clone(), root).map_err(|error| {
+                NotaDecodeError::UnknownVariant {
+                    enum_name: "TypeReference::ExternalRoot",
+                    variant: error.to_string(),
+                }
+            })?;
+        Ok(Self::ExternalRoot(super::ResolvedExternalRoot::new(
+            reference,
+            super::PackageIdentity::new(package, version),
+        )))
     }
 
     /// Decode a parenthesized generic payload whose head is a projection

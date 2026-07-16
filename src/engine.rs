@@ -150,6 +150,16 @@ pub enum SchemaError {
     MalformedImportTarget { target: String },
     #[error("unresolved import crate {crate_name}")]
     UnresolvedImportCrate { crate_name: String },
+    #[error(
+        "malformed package-qualified external root reference {found}; expected package.Input or package.Output"
+    )]
+    MalformedExternalRootReference { found: String },
+    #[error("external root package {package} is ambiguous after Rust crate-name normalization")]
+    AmbiguousExternalRootPackage { package: String },
+    #[error("external contract root {root} is not exported by dependency package {package}")]
+    ExternalRootNotExported { package: String, root: String },
+    #[error("external contract root {package}.{root} was not declared in this schema's imports")]
+    UndeclaredExternalRoot { package: String, root: String },
     #[error("imported type {type_name} not found in {crate_name}:{module}")]
     ImportedTypeNotFound {
         crate_name: String,
@@ -485,8 +495,14 @@ impl SchemaEngine {
         resolver: &ImportResolver,
     ) -> Result<TrueSchema, SchemaError> {
         let imports = source.imports().to_schema_imports()?;
-        let resolved_imports = resolver.resolve_all(&imports, self)?;
-        source.to_true_schema(identity, imports, resolved_imports)
+        let resolved_imports = resolver.resolve_all(imports.declarations(), self)?;
+        let external_roots = resolver.resolve_external_roots(imports.external_roots(), self)?;
+        source.to_true_schema(
+            identity,
+            imports.declarations().to_vec(),
+            resolved_imports,
+            external_roots,
+        )
     }
 
     pub fn lower_source_with_context(
