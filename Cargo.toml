@@ -17,7 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 blake3 = "1"
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
+nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", rev = "f8de7a516b769fc544c7f8c0030e258833c1cf9b" }
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 thiserror = "2"
 
