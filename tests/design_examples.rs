@@ -11,7 +11,7 @@
 
 use nota::{Document, StructureShape};
 use schema_language::{
-    EnumDeclaration, MacroContext, MacroDispatch, MacroLibrary, MacroObject, MacroPair,
+    EnumDeclaration, MacroContext, MacroDispatch, MacroObject, MacroPair,
     MacroPosition, MacroRegistry, Name, Root, SchemaEngine, SchemaError, SchemaIdentity,
     SchemaNode, SchemaNodeData, SchemaNodeValue, TypeDeclaration, TypeReference,
 };
@@ -101,49 +101,6 @@ fn design_example_namespace_brace_contains_key_value_declarations() {
 /// and reference mechanism for assigned symbols; a sigil such as
 /// dollar sign is the candidate. This test pins the dollar-sigil
 /// shape in working code.
-#[test]
-fn design_example_type_reference_macro_captures_use_dollar_sigils() {
-    let library = MacroLibrary::builtin().expect("builtin macros parse");
-    let definitions = library.definitions();
-
-    let struct_definition = definitions
-        .iter()
-        .find(|definition| definition.name().as_str() == "SchemaStructDefinition")
-        .expect("struct macro definition");
-    assert_eq!(struct_definition.capture_names(), vec!["$Name", "$*Fields"]);
-
-    let user_macros = MacroLibrary::from_source(
-        "
-        (SchemaMacro Bag TypeReference
-          (Bag $Type)
-          (Reference Vector.$Type))
-        ",
-    )
-    .expect("user macro definitions parse");
-    let user_macro_definitions = user_macros.definitions();
-    assert_eq!(user_macro_definitions[0].capture_names(), vec!["$Type"]);
-
-    let mut registry = MacroRegistry::with_schema_defaults();
-    for schema_macro in user_macros.into_macros() {
-        registry.register_box(schema_macro);
-    }
-    let engine = SchemaEngine::with_registry(registry);
-    let source = "{} [] [] { Topic.String Topics.(Bag Topic) } {} {}";
-    let mut context = MacroContext::default();
-    engine
-        .lower_source_with_context(
-            source,
-            SchemaIdentity::new("example", "0.1.0"),
-            &mut context,
-        )
-        .expect("schema lowers");
-
-    let bindings = context.bindings_seen();
-    assert!(
-        bindings.iter().any(|binding| binding == "Bag::Type"),
-        "single capture $Type binds as Type",
-    );
-}
 
 /// Illustrates: a colon-qualified name like `schema:spirit:Entry`
 /// decomposes into ordered segments by single-colon, and `local_part`
@@ -182,82 +139,6 @@ fn design_example_colon_qualified_name_decomposes_into_segments() {
 /// Intent record 864 (Maximum): real macro registry / macro-dispatch
 /// design. This test asserts the layered shape from outside the
 /// engine — no Spirit fixture needed.
-#[test]
-fn design_example_default_engine_uses_strict_structural_macros() {
-    let library = MacroLibrary::builtin().expect("builtin macros parse");
-    let definitions = library.definitions();
-    let declarative_names: Vec<&str> = definitions
-        .iter()
-        .map(|definition| definition.name().as_str())
-        .collect();
-    assert_eq!(
-        declarative_names,
-        vec![
-            "SchemaStructDefinition",
-            "SchemaEnumDefinition",
-            "SchemaNewtypeDefinition",
-            "SchemaStructFields",
-            "SchemaEnumVariants",
-        ],
-        "declarative structural macros loaded from builtin-macros.schema",
-    );
-
-    let positions: Vec<MacroPosition> = definitions
-        .iter()
-        .map(|definition| definition.position())
-        .collect();
-    assert_eq!(
-        positions,
-        vec![
-            MacroPosition::NamespaceDeclaration,
-            MacroPosition::NamespaceDeclaration,
-            MacroPosition::NamespaceDeclaration,
-            MacroPosition::StructFields,
-            MacroPosition::EnumVariants,
-        ],
-        "declarative macros target the structural inner positions",
-    );
-
-    let default_macro_names = MacroRegistry::with_schema_defaults().macro_names();
-    assert!(
-        default_macro_names.contains(&"KeyValueDeclaration".to_owned()),
-        "strict namespace key/value macro is in the default path"
-    );
-    assert!(
-        !default_macro_names.contains(&"SchemaStructDefinition".to_owned()),
-        "legacy pipe declaration macro is loadable data, not default syntax"
-    );
-
-    let source = "{} [] [] { Topic.String } {} {}";
-    let mut context = MacroContext::default();
-    SchemaEngine::default()
-        .lower_source_with_context(
-            source,
-            SchemaIdentity::new("example", "0.1.0"),
-            &mut context,
-        )
-        .expect("schema lowers");
-    let applied: Vec<&str> = context
-        .macros_applied()
-        .iter()
-        .map(String::as_str)
-        .collect();
-    for root_macro in [
-        "RootInput",
-        "RootOutput",
-        "RootNamespace",
-        "KeyValueDeclaration",
-    ] {
-        assert!(
-            applied.contains(&root_macro),
-            "strict macro {root_macro} fires on a minimal schema; applied = {applied:?}",
-        );
-    }
-    assert!(
-        !applied.contains(&"SchemaStructDefinition"),
-        "legacy declaration macros do not fire on the default path"
-    );
-}
 
 /// Illustrates: the schema engine consumes the NOTA first-pass
 /// structure header. The header is recorded before semantic macro
@@ -463,40 +344,6 @@ fn design_example_same_name_payload_variant_is_rejected() {
 /// macros are both real registry entries. Neither uses `@`: the node
 /// position says whether the object is a structural definition or a
 /// tagged macro call.
-#[test]
-fn design_example_user_declared_macros_extend_structural_and_named_slots() {
-    let user_macros = MacroLibrary::from_source(
-        "
-        (SchemaMacro Bag TypeReference
-          (Bag $Type)
-          (Reference Vector.$Type))
-        ",
-    )
-    .expect("user macro definitions parse");
-    let mut registry = MacroRegistry::with_schema_defaults();
-    for schema_macro in user_macros.into_macros() {
-        registry.register_box(schema_macro);
-    }
-    let engine = SchemaEngine::with_registry(registry);
-    let schema = engine
-        .lower_source(
-            "{} [] [] { Topic.String Topics.(Bag Topic) } {} {}",
-            SchemaIdentity::new("example", "0.1.0"),
-        )
-        .expect("schema lowers through user macros");
-
-    let TypeDeclaration::Newtype(topic) = schema.type_named("Topic").expect("topic type") else {
-        panic!("bare Topic binding should create a newtype");
-    };
-    assert_eq!(topic.reference, TypeReference::String);
-    let TypeDeclaration::Newtype(topics) = schema.type_named("Topics").expect("topics type") else {
-        panic!("bare Topics binding should create a newtype");
-    };
-    assert_eq!(
-        topics.reference,
-        TypeReference::vector(TypeReference::new("Topic")),
-    );
-}
 
 /// Illustrates: the same schema language names the three runtime
 /// planes. Signal roots remain the schema's Input/Output, while

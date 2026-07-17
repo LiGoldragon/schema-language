@@ -3,7 +3,6 @@ use nota::{Block, Delimiter, Document, DottedExpectation, NotaBody, NotaEncode};
 use crate::{
     ImportResolver, SchemaSource, TrueSchema,
     declarative::{MacroExpansionStructBody, MacroExpansionVariants},
-    expansion::MacroExpansionPass,
     macros::{
         MacroContext, MacroNodeDefinition, MacroObject, MacroOutput, MacroPair, MacroPosition,
         MacroRegistry, SchemaBlockExt, SchemaMacroHandler,
@@ -553,16 +552,11 @@ impl SchemaEngine {
             });
         }
 
-        // The c2dc seam: run the macro-registry dispatch as a pre-expansion
-        // pass over the parsed document BEFORE the typed source archive is
-        // built. The pass records every structural-macro firing and capture
-        // binding into the context and rewrites user type-reference macro
-        // invocations into their expanded built-in bodies, so the archive the
-        // single source path lowers is already macro-expanded. The source path
-        // stays the sole lowering semantics — the registry is the front-end,
-        // not a rival lowerer.
-        let expanded = MacroExpansionPass::new(&self.registry).expand(document, context)?;
-        let source = SchemaSource::from_document(&expanded)?;
+        // The typed source archive is the sole lowering semantics: the parsed
+        // next-gen document builds a `SchemaSource` directly. Native kind
+        // dispatch (Vector/Optional/Map as core-schema kinds) supersedes the
+        // retired macro-node expansion pass, which no longer runs on this path.
+        let source = SchemaSource::from_document(document)?;
         self.lower_schema_source_with_resolver(&source, identity, resolver)
     }
 

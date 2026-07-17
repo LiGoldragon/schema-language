@@ -2,7 +2,6 @@ mod core;
 mod declarative;
 mod engine;
 mod environment;
-mod expansion;
 mod identifier;
 mod identity;
 mod instance;

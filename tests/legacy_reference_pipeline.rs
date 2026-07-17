@@ -1,7 +1,7 @@
 use nota::StructuralMacroNode;
 use schema_language::{
     MacroContext, MacroLibrary, MacroRegistry, SchemaEngine, SchemaError, SchemaIdentity,
-    TypeDeclaration, TypeReference,
+    TypeReference,
 };
 
 fn schema_roots(namespace: &str) -> String {
@@ -84,35 +84,6 @@ fn macro_reference_templates_use_dotted_reader_and_reject_old_builtin_body() {
     assert!(
         matches!(error, SchemaError::UnknownTypeReferenceForm { .. }),
         "old macro template body should be rejected by the dotted reader, got {error:?}"
-    );
-}
-
-#[test]
-fn macro_reference_templates_accept_dotted_builtin_body() {
-    let user_macros = MacroLibrary::from_source(
-        "(SchemaMacro Bag TypeReference (Bag $Type) (Reference Vector.$Type))",
-    )
-    .expect("dotted macro definition parses");
-    let mut registry = MacroRegistry::with_schema_defaults();
-    for schema_macro in user_macros.into_macros() {
-        registry.register_box(schema_macro);
-    }
-    let engine = SchemaEngine::with_registry(registry);
-    let schema = engine
-        .lower_source_with_context(
-            &schema_roots("Topic.String Topics.(Bag Topic)"),
-            SchemaIdentity::new("legacy-reference-pipeline:test", "0.1.0"),
-            &mut MacroContext::default(),
-        )
-        .expect("dotted macro template lowers");
-
-    let TypeDeclaration::Newtype(declaration) = schema.type_named("Topics").expect("Topics type")
-    else {
-        panic!("Topics should be a newtype");
-    };
-    assert_eq!(
-        declaration.reference,
-        TypeReference::vector(TypeReference::new("Topic"))
     );
 }
 
