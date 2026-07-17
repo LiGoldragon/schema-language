@@ -36,8 +36,8 @@ pub use macros::MacroContext;
 pub use module::{SchemaModuleSource, SchemaPackage};
 pub use nota::{
     AtomCase, AtomShape, CaptureName, DelimitedShape, MacroCandidate,
-    MacroDelimiter as NotaMacroDelimiter, MacroNodeDefinition as NotaMacroNodeDefinition,
-    MacroObjectCount, Pattern, PatternElement, PositionPredicate, SigilPosition, SigilSpec,
+    MacroDelimiter as NotaMacroDelimiter, MacroObjectCount, Pattern, PatternElement,
+    PositionPredicate, SigilPosition, SigilSpec,
 };
 pub use raw::{RawDatatypeEntry, RawDatatypeMap, RawNotaDatatype, RawNotaSequence, RawSchemaFile};
 pub use resolution::{ImportResolver, ImportSource, ResolvedImport};
