@@ -1,5 +1,4 @@
 mod core;
-mod declarative;
 mod engine;
 mod environment;
 mod identifier;
@@ -22,11 +21,6 @@ pub use crate::core::{
     CoreReference, CoreResolvedImport, CoreRoot, CoreRootApplication, CoreSchema, CoreStruct,
     CoreType, CoreVariant,
 };
-pub use declarative::{
-    MacroDelimiter, MacroLibrary, MacroLibraryArtifact, MacroLibrarySourceEntry, MacroPattern,
-    MacroPatternDelimited, MacroPatternObject, MacroTemplate, MacroTemplateDelimited,
-    MacroTemplateObject, SchemaMacro, TypeTemplate,
-};
 pub use engine::{SchemaEngine, SchemaError, SchemaIdentity};
 pub use environment::{
     SchemaEnvironment, SchemaEnvironmentManifest, SchemaEnvironmentModule, SchemaEnvironmentResult,
@@ -38,10 +32,7 @@ pub use identifier::{
 };
 pub use identity::ContentHash;
 pub use lineage::LineageGraph;
-pub use macros::{
-    MacroContext, MacroDispatch, MacroNodeDefinition, MacroObject, MacroOutput, MacroPair,
-    MacroPosition, MacroRegistry, SchemaMacroHandler,
-};
+pub use macros::MacroContext;
 pub use module::{SchemaModuleSource, SchemaPackage};
 pub use nota::{
     AtomCase, AtomShape, CaptureName, DelimitedShape, MacroCandidate,

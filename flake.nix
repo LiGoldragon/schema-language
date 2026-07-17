@@ -20,7 +20,6 @@
           type == "regular" && (
             pkgs.lib.hasSuffix ".schema" path
             || pkgs.lib.hasSuffix ".asschema" path
-            || pkgs.lib.hasSuffix ".macro-library" path
           );
         src = rust.cleanSource {
           root = ./.;
@@ -41,14 +40,9 @@
           design-examples = pkgs.runCommand "schema-design-examples" { } ''
             grep -R "design_example_schema_document_has_six_strict_roots" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_namespace_brace_contains_key_value_declarations" ${src}/tests/design_examples.rs >/dev/null
-            grep -R "design_example_type_reference_macro_captures_use_dollar_sigils" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_colon_qualified_name_decomposes_into_segments" ${src}/tests/design_examples.rs >/dev/null
-            grep -R "design_example_default_engine_uses_strict_structural_macros" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_schema_lowering_records_source_structure_header" ${src}/tests/design_examples.rs >/dev/null
-            grep -R "design_example_macro_node_definitions_separate_structural_from_tagged_invocation" ${src}/tests/design_examples.rs >/dev/null
-            grep -R "design_example_macro_node_definition_lists_structural_cases" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_schema_node_macro_call_is_tagged_data" ${src}/tests/design_examples.rs >/dev/null
-            grep -R "design_example_user_declared_macros_extend_structural_and_named_slots" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_root_enum_uses_direct_variant_shapes" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_same_name_payload_variant_is_rejected" ${src}/tests/design_examples.rs >/dev/null
             grep -R "design_example_signal_nexus_and_sema_are_schema_declared_planes" ${src}/tests/design_examples.rs >/dev/null
@@ -116,45 +110,19 @@
             fi
             touch $out
           '';
-          macro-registry-used = pkgs.runCommand "schema-macro-registry-used" { } ''
-            grep -R "pub struct MacroRegistry" ${src}/src/macros.rs >/dev/null
-            grep -R "SchemaEngine::with_registry" ${src}/tests/lowering.rs >/dev/null
-            grep -R "default_engine_lowers_through_registered_structural_forms" ${src}/tests/lowering.rs >/dev/null
-            grep -R "root_enum_named(\"Input\")" ${src}/tests/lowering.rs >/dev/null
-            grep -R "root_enum_named(\"Output\")" ${src}/tests/lowering.rs >/dev/null
-            ! grep -R "type_declaration_macro:" ${src}/src/engine.rs
-            ! grep -R "surface_macro:" ${src}/src/engine.rs
-            ! grep -R "matches_pair" ${src}/src/engine.rs
-            touch $out
-          '';
-          declarative-schema-macros = pkgs.runCommand "schema-declarative-schema-macros" { } ''
-            # Per operator 271 claim 1 — schema 99078b20 collapsed
-            # the macro library source/artifact split. The previous check
-            # asserted presence of `DeclarativeMacroLibrary::builtin` and
-            # `pub struct MacroLibraryData`; both were retired in the
-            # collapse, so the assertions are inverted (must NOT contain)
-            # and the present canonical nouns are asserted positively.
-            grep -R "pub fn builtin_source" ${src}/src/declarative.rs >/dev/null
-            grep -R "pub struct MacroLibrary {" ${src}/src/declarative.rs >/dev/null
-            grep -R "pub struct MacroLibraryArtifact {" ${src}/src/declarative.rs >/dev/null
-            grep -R "pub enum MacroLibrarySourceEntry {" ${src}/src/declarative.rs >/dev/null
-            grep -R "builtin_macro_library_round_trips_as_typed_data_and_still_executes" ${src}/tests/macro_exploration.rs >/dev/null
-            grep -R "SchemaStructDefinition" ${src}/schemas/builtin-macros.schema >/dev/null
-            grep -R '\$Name' ${src}/schemas/builtin-macros.schema >/dev/null
-            grep -R '\$\*Fields' ${src}/schemas/builtin-macros.schema >/dev/null
-            grep -R "builtin_macro_file_defines_visible_dollar_captures" ${src}/tests/lowering.rs >/dev/null
-            ! grep -R "expanded_templates" ${src}/tests/lowering.rs
-            ! grep -R "struct TypeDeclarationMacro" ${src}/src
-            ! grep -R "struct StructFieldsMacro" ${src}/src
-            ! grep -R "struct EnumVariantsMacro" ${src}/src
-            # The collapsed-mirrors regression guard — present-shape
-            # negative witness covers the retired-data names.
-            ! grep -R "pub struct MacroLibraryData" ${src}/src
-            ! grep -R "pub struct DeclarativeMacroLibrary" ${src}/src
-            ! grep -R "MacroLibrarySourceEntryData" ${src}/src
-            ! grep -R "MacroDefinitionData" ${src}/src
-            ! grep -R "MacroPatternData" ${src}/src
-            ! grep -R "MacroTemplateData" ${src}/src
+          legacy-macro-system-retired = pkgs.runCommand "schema-legacy-macro-system-retired" { } ''
+            # The legacy macro registry, its schema-macro handlers, and the
+            # declarative macro library are retired. Native next-gen kind
+            # dispatch through the typed-source archive is the sole lowering
+            # path. The future Nomos macro system comes through the
+            # structuretree door, never through this legacy hook — so this
+            # guard fails if any of the retired nouns return to the source.
+            ! grep -R -n -E 'struct MacroRegistry|struct MacroNodeDefinition|trait SchemaMacroHandler|struct MacroLibrary|struct MacroLibraryArtifact|enum MacroLibrarySourceEntry|struct SchemaMacro|with_schema_defaults|SchemaEngine::with_registry' ${src}/src
+            ! test -e ${src}/src/declarative.rs
+            ! test -e ${src}/schemas/builtin-macros.schema
+            ! test -e ${src}/schemas/builtin-macros.macro-library
+            # The one lowering path stays native and macro-registry-free.
+            grep -R "Native kind" ${src}/src/engine.rs >/dev/null
             touch $out
           '';
           operator-271-closed-claims = pkgs.runCommand "schema-operator-271-closed-claims" { } ''
@@ -164,10 +132,6 @@
             # this Nix check verifies each named witness function is present
             # so future drift is caught by the flake before reaching cargo.
             test -f ${src}/tests/operator_271_closed_claims.rs
-            # Claim 1 — macro library source/artifact datatype split CLOSED.
-            grep -R "macro_library_source_entries_are_one_type" ${src}/tests/operator_271_closed_claims.rs >/dev/null
-            grep -R "macro_library_artifact_wraps_the_one_library_type" ${src}/tests/operator_271_closed_claims.rs >/dev/null
-            grep -R "macro_library_split_does_not_return_through_public_surface" ${src}/tests/operator_271_closed_claims.rs >/dev/null
             # Claim 4 — honest enum bodies CLOSED.
             grep -R "production_schema_sources_use_honest_enum_bodies" ${src}/tests/operator_271_closed_claims.rs >/dev/null
             grep -R "spirit_min_input_enum_body_has_explicit_payload_variants" ${src}/tests/operator_271_closed_claims.rs >/dev/null

@@ -1,7 +1,6 @@
 use schema_language::{
-    EnumDeclaration, MacroContext, MacroLibrary, MacroObject, MacroOutput, MacroPosition,
-    MacroRegistry, Name, Root, SchemaEngine, SchemaIdentity, SchemaMacroHandler, SchemaPackage,
-    SchemaSourceArtifact, TypeDeclaration, TypeReference, Visibility,
+    EnumDeclaration, Name, Root, SchemaEngine, SchemaIdentity, SchemaPackage, SchemaSourceArtifact,
+    TypeDeclaration, TypeReference, Visibility,
 };
 
 /// The enum body of a root known to be the enum-body form, for the fixtures
@@ -300,7 +299,6 @@ fn brace_namespace_rejects_parenthesized_named_objects() {
             | schema_language::SchemaError::ExpectedSymbol { .. }
             | schema_language::SchemaError::NotaDecode(_)
             | schema_language::SchemaError::ExpectedDelimiter { .. }
-            | schema_language::SchemaError::MacroDidNotMatch { .. }
             | schema_language::SchemaError::UnsupportedMacroNodeStructure { .. }
     ));
 }
@@ -516,214 +514,6 @@ fn root_schema_describes_the_schema_root_type() {
 }
 
 #[test]
-fn core_schema_describes_default_builtin_macro_positions() {
-    let source = include_str!("../schemas/core.schema");
-    let schema = SchemaEngine::default()
-        .lower_source(source, SchemaIdentity::new("schema-core", "0.1.0"))
-        .expect("core schema lowers");
-
-    let TypeDeclaration::Struct(macro_library) = schema
-        .type_named("BuiltinMacroLibrary")
-        .expect("builtin macro library declaration")
-    else {
-        panic!("BuiltinMacroLibrary should be a struct");
-    };
-    assert_eq!(
-        macro_library
-            .fields
-            .iter()
-            .map(|field| field.reference.plain_name().expect("plain field").as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "BuiltinMacroPositions",
-            "BuiltinMacroShapes",
-            "BuiltinMacroOutputs",
-            "BuiltinMacroDefinitions",
-        ]
-    );
-
-    let TypeDeclaration::Enum(macro_position) = schema
-        .type_named("MacroPosition")
-        .expect("macro position enum")
-    else {
-        panic!("MacroPosition should be an enum");
-    };
-    assert_eq!(
-        macro_position
-            .variants
-            .iter()
-            .map(|variant| variant.name.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "RootImports",
-            "RootInput",
-            "RootOutput",
-            "RootNamespace",
-            "NamespaceDeclaration",
-            "StructFields",
-            "EnumVariants",
-            "TypeReference",
-        ]
-    );
-
-    let TypeDeclaration::Newtype(macro_pattern) = schema
-        .type_named("MacroPattern")
-        .expect("macro pattern alias")
-    else {
-        panic!("MacroPattern should be an alias");
-    };
-    assert_eq!(
-        macro_pattern
-            .reference
-            .plain_name()
-            .expect("macro pattern object reference")
-            .as_str(),
-        "MacroPatternObject"
-    );
-
-    let TypeDeclaration::Enum(macro_pattern_object) = schema
-        .type_named("MacroPatternObject")
-        .expect("macro pattern object enum")
-    else {
-        panic!("MacroPatternObject should be an enum");
-    };
-    assert_eq!(
-        macro_pattern_object
-            .variants
-            .iter()
-            .map(|variant| {
-                (
-                    variant.name.as_str(),
-                    variant
-                        .payload
-                        .as_ref()
-                        .and_then(|payload| payload.plain_name())
-                        .map(Name::as_str),
-                )
-            })
-            .collect::<Vec<_>>(),
-        vec![
-            ("Capture", Some("MacroCaptureName")),
-            ("RestCapture", Some("MacroCaptureName")),
-            ("Atom", Some("MacroAtom")),
-            ("Delimited", Some("MacroPatternDelimited")),
-        ]
-    );
-
-    let TypeDeclaration::Enum(macro_template_object) = schema
-        .type_named("MacroTemplateObject")
-        .expect("macro template object enum")
-    else {
-        panic!("MacroTemplateObject should be an enum");
-    };
-    assert_eq!(
-        macro_template_object
-            .variants
-            .iter()
-            .map(|variant| {
-                (
-                    variant.name.as_str(),
-                    variant
-                        .payload
-                        .as_ref()
-                        .and_then(|payload| payload.plain_name())
-                        .map(Name::as_str),
-                )
-            })
-            .collect::<Vec<_>>(),
-        vec![
-            ("Capture", Some("MacroCaptureName")),
-            ("RestCapture", Some("MacroCaptureName")),
-            ("Atom", Some("MacroAtom")),
-            ("Delimited", Some("MacroTemplateDelimited")),
-        ]
-    );
-}
-
-#[test]
-fn builtin_macro_file_defines_visible_dollar_captures() {
-    let library = MacroLibrary::builtin().expect("builtin macros parse");
-    let definitions = library.definitions();
-    let names = definitions
-        .iter()
-        .map(|definition| definition.name().as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        names,
-        vec![
-            "SchemaStructDefinition",
-            "SchemaEnumDefinition",
-            "SchemaNewtypeDefinition",
-            "SchemaStructFields",
-            "SchemaEnumVariants",
-        ]
-    );
-
-    let struct_definition = definitions
-        .iter()
-        .find(|definition| definition.name().as_str() == "SchemaStructDefinition")
-        .expect("struct macro definition");
-    assert_eq!(struct_definition.capture_names(), vec!["$Name", "$*Fields"]);
-
-    let enum_definition = definitions
-        .iter()
-        .find(|definition| definition.name().as_str() == "SchemaEnumDefinition")
-        .expect("enum macro definition");
-    assert_eq!(enum_definition.capture_names(), vec!["$Name", "$*Variants"]);
-}
-
-#[test]
-fn macro_lowering_receives_macro_position() {
-    struct ProbeMacro;
-
-    impl SchemaMacroHandler for ProbeMacro {
-        fn name(&self) -> &str {
-            "Probe"
-        }
-
-        fn matches(&self, object: MacroObject<'_>, position: MacroPosition) -> bool {
-            position == MacroPosition::RootInput && object.block().is_some()
-        }
-
-        fn lower(
-            &self,
-            _object: MacroObject<'_>,
-            position: MacroPosition,
-            context: &mut MacroContext,
-            _registry: &MacroRegistry,
-        ) -> Result<MacroOutput, schema_language::SchemaError> {
-            context.remember_macro(self.name());
-            context.remember_position(position);
-            Ok(MacroOutput::References(Vec::new()))
-        }
-    }
-
-    let document = nota::Document::parse("(Input)").expect("nota parses");
-    let mut context = MacroContext::default();
-    let object = document.root_object_at(0).expect("root object");
-    let probe = ProbeMacro;
-
-    assert!(probe.matches(MacroObject::Block(object), MacroPosition::RootInput));
-    probe
-        .lower(
-            MacroObject::Block(object),
-            MacroPosition::RootInput,
-            &mut context,
-            &MacroRegistry::new(),
-        )
-        .expect("probe lower");
-    assert_eq!(context.positions_seen(), &[MacroPosition::RootInput]);
-    assert_eq!(
-        context
-            .macros_applied()
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        vec!["Probe"]
-    );
-}
-
-#[test]
 fn field_names_are_derived_from_type_names() {
     let source = "{} [] [] { RecordIdentifier.Integer Description.String Entry.{ RecordIdentifier Description } } {} {}";
     let schema = SchemaEngine::default()
@@ -813,34 +603,6 @@ fn default_engine_lowers_through_registered_structural_forms() {
             "Clarification",
             "Constraint",
         ]
-    );
-}
-
-/// Report 702: there is one lowering engine — the typed-source path. The
-/// `MacroRegistry` is still the public type-reference vocabulary an engine is
-/// built from (`with_registry`), but it no longer drives the root/namespace
-/// lowering semantics: those come from the typed-source archive on every entry
-/// path. So an engine assembled from a custom registry lowers a valid document
-/// through the same single path the default engine uses. (The retired second
-/// engine let a registry handler reject at a root position; that mechanism is
-/// gone with the engine it belonged to.)
-#[test]
-fn schema_engine_can_be_built_from_a_macro_registry() {
-    let engine = SchemaEngine::with_registry(MacroRegistry::with_schema_defaults());
-    let schema = engine
-        .lower_source(
-            "{} [] [] { Topic.String } {} {}",
-            SchemaIdentity::new("example", "0.1.0"),
-        )
-        .expect("an engine built from a registry lowers through the single path");
-
-    assert_eq!(
-        schema
-            .namespace()
-            .iter()
-            .map(|declaration| declaration.name().as_str())
-            .collect::<Vec<_>>(),
-        vec!["Topic"],
     );
 }
 
@@ -1016,7 +778,6 @@ fn root_enum_positions_supply_input_and_output_names() {
     assert!(matches!(
         error,
         schema_language::SchemaError::UnsupportedMacroNodeStructure { .. }
-            | schema_language::SchemaError::MacroDidNotMatch { .. }
             | schema_language::SchemaError::ExpectedRootApplication { .. }
             | schema_language::SchemaError::NotaDecode(_)
     ));

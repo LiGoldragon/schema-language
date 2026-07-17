@@ -11,8 +11,7 @@
 
 use nota::{Document, StructureShape};
 use schema_language::{
-    EnumDeclaration, MacroContext, MacroDispatch, MacroObject, MacroPair,
-    MacroPosition, MacroRegistry, Name, Root, SchemaEngine, SchemaError, SchemaIdentity,
+    EnumDeclaration, MacroContext, Name, Root, SchemaEngine, SchemaError, SchemaIdentity,
     SchemaNode, SchemaNodeData, SchemaNodeValue, TypeDeclaration, TypeReference,
 };
 
@@ -93,15 +92,6 @@ fn design_example_namespace_brace_contains_key_value_declarations() {
     assert_eq!(variant_names, vec!["Decision", "Constraint"]);
 }
 
-/// Illustrates: a declarative `SchemaMacro` declaration uses `$Name`
-/// for single captures, and those names flow through to the macro
-/// context as `MacroName::Name` bindings when the macro fires.
-///
-/// Intent record 890 (Medium): macro bodies need an explicit binding
-/// and reference mechanism for assigned symbols; a sigil such as
-/// dollar sign is the candidate. This test pins the dollar-sigil
-/// shape in working code.
-
 /// Illustrates: a colon-qualified name like `schema:spirit:Entry`
 /// decomposes into ordered segments by single-colon, and `local_part`
 /// returns the final segment.
@@ -130,15 +120,6 @@ fn design_example_colon_qualified_name_decomposes_into_segments() {
     assert_eq!(bare.local_part(), "Topic");
     assert_eq!(bare.field_name(), "topic");
 }
-
-/// Illustrates: the default `SchemaEngine` registers the strict
-/// structural schema macros. The old declarative built-in library is
-/// still loadable as data, but it is not part of the default authored
-/// syntax path.
-///
-/// Intent record 864 (Maximum): real macro registry / macro-dispatch
-/// design. This test asserts the layered shape from outside the
-/// engine — no Spirit fixture needed.
 
 /// Illustrates: the schema engine consumes the NOTA first-pass
 /// structure header. The header is recorded before semantic macro
@@ -181,96 +162,6 @@ fn design_example_schema_lowering_records_source_structure_header() {
         ],
     );
     assert_ne!(header.packed_word(), 0, "header packs into a u64 word");
-}
-
-/// Illustrates: macro expectations live on node definitions. Structural
-/// macros are expected at namespace/fields/variants positions; native
-/// structure or tagged user macro invocations are expected at
-/// type-reference positions.
-#[test]
-fn design_example_macro_node_definitions_separate_structural_from_tagged_invocation() {
-    let registry = MacroRegistry::with_schema_defaults();
-    let dispatches: Vec<(MacroPosition, MacroDispatch)> = registry
-        .node_definitions()
-        .iter()
-        .map(|definition| (definition.position(), definition.dispatch()))
-        .collect();
-    assert_eq!(
-        dispatches,
-        vec![
-            (MacroPosition::RootImports, MacroDispatch::RootPositional),
-            (MacroPosition::RootInput, MacroDispatch::RootPositional),
-            (MacroPosition::RootOutput, MacroDispatch::RootPositional),
-            (MacroPosition::RootNamespace, MacroDispatch::RootPositional),
-            (
-                MacroPosition::NamespaceDeclaration,
-                MacroDispatch::Structural
-            ),
-            (MacroPosition::StructFields, MacroDispatch::Structural),
-            (MacroPosition::EnumVariants, MacroDispatch::Structural),
-            (
-                MacroPosition::TypeReference,
-                MacroDispatch::StructuralOrTaggedInvocation
-            ),
-        ],
-    );
-}
-
-/// Illustrates: a macro node definition is more than a position label.
-/// It carries the structural cases expected at that position. For
-/// namespace declarations the cases are key/value pair nodes: a symbol
-/// key with a brace value is a struct macro, a symbol key with a
-/// bracket value is an enum macro, and a symbol key with a reference
-/// value is a newtype macro. The retired parameterized declaration head
-/// `(| Name Param … |)` has no case — generic binders live in the
-/// dedicated generics block, not in a declaration key.
-#[test]
-fn design_example_macro_node_definition_lists_structural_cases() {
-    let registry = MacroRegistry::with_schema_defaults();
-    let namespace = registry
-        .node_definition(MacroPosition::NamespaceDeclaration)
-        .expect("namespace macro node definition");
-    let case_names: Vec<&str> = namespace.cases().iter().map(|case| case.name()).collect();
-    assert_eq!(
-        case_names,
-        vec![
-            "struct declaration",
-            "enum declaration",
-            "newtype declaration",
-        ]
-    );
-
-    let document =
-        Document::parse("Entry { Topic * } Kind [Decision] Topic String").expect("nota parses");
-    let struct_pair = MacroPair {
-        name: document.root_object_at(0).expect("struct name"),
-        definition: document.root_object_at(1).expect("struct value"),
-    };
-    let enum_pair = MacroPair {
-        name: document.root_object_at(2).expect("enum name"),
-        definition: document.root_object_at(3).expect("enum value"),
-    };
-    let newtype_pair = MacroPair {
-        name: document.root_object_at(4).expect("newtype name"),
-        definition: document.root_object_at(5).expect("newtype value"),
-    };
-
-    assert!(namespace.matches(MacroObject::Pair(struct_pair)));
-    assert!(namespace.matches(MacroObject::Pair(enum_pair)));
-    assert!(namespace.matches(MacroObject::Pair(newtype_pair)));
-
-    let malformed = Document::parse("(Entry String)").expect("nota parses");
-    let error = registry
-        .lower(
-            MacroObject::Block(malformed.root_object_at(0).expect("malformed declaration")),
-            MacroPosition::NamespaceDeclaration,
-            &mut MacroContext::default(),
-        )
-        .expect_err("unsupported namespace declaration shape should be explained");
-    assert!(matches!(
-        error,
-        SchemaError::UnsupportedMacroNodeStructure { .. }
-    ));
 }
 
 /// Illustrates: a schema-node macro call is data. `(Normalize [Topic])`
@@ -339,11 +230,6 @@ fn design_example_same_name_payload_variant_is_rejected() {
         }
     );
 }
-
-/// Illustrates: user-declared structural macros and tagged-invocation
-/// macros are both real registry entries. Neither uses `@`: the node
-/// position says whether the object is a structural definition or a
-/// tagged macro call.
 
 /// Illustrates: the same schema language names the three runtime
 /// planes. Signal roots remain the schema's Input/Output, while

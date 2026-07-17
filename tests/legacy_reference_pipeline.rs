@@ -1,8 +1,5 @@
 use nota::StructuralMacroNode;
-use schema_language::{
-    MacroContext, MacroLibrary, MacroRegistry, SchemaEngine, SchemaError, SchemaIdentity,
-    TypeReference,
-};
+use schema_language::{SchemaEngine, SchemaError, SchemaIdentity, TypeReference};
 
 fn schema_roots(namespace: &str) -> String {
     format!("{{}} [] [] {{ {namespace} }} {{}} {{}}")
@@ -59,31 +56,6 @@ fn schema_source_rejects_legacy_root_application_at_former_engine_call_site() {
     assert!(
         matches!(error, SchemaError::UnknownTypeReferenceForm { .. }),
         "old root reference should be rejected by the source reader, got {error:?}"
-    );
-}
-
-#[test]
-fn macro_reference_templates_use_dotted_reader_and_reject_old_builtin_body() {
-    let user_macros = MacroLibrary::from_source(
-        "(SchemaMacro Bag TypeReference (Bag $Type) (Reference (Vector $Type)))",
-    )
-    .expect("legacy-shaped macro definition still parses as macro data");
-    let mut registry = MacroRegistry::with_schema_defaults();
-    for schema_macro in user_macros.into_macros() {
-        registry.register_box(schema_macro);
-    }
-    let engine = SchemaEngine::with_registry(registry);
-    let error = engine
-        .lower_source_with_context(
-            &schema_roots("Topic.String Topics.(Bag Topic)"),
-            SchemaIdentity::new("legacy-reference-pipeline:test", "0.1.0"),
-            &mut MacroContext::default(),
-        )
-        .expect_err("macro templates must expand to dotted references");
-
-    assert!(
-        matches!(error, SchemaError::UnknownTypeReferenceForm { .. }),
-        "old macro template body should be rejected by the dotted reader, got {error:?}"
     );
 }
 

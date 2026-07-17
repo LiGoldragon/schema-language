@@ -667,13 +667,14 @@ daemon persists it later and this crate invents no persistence of its own.
   `flake.nix` lint depend on it. It describes the collapsed per-kind
   `TypeReference` partition (a `SingleType` / `MultiType` / `Value` application
   variant carrying a projection enum), not the retired per-name variants.
-- `schemas/core.schema` is the builtin-macro-library schema. Its `types` block
-  declares a type named `BuiltinMacroLibrary`, the macro library, which is
+- `schemas/core.schema` is a checked-in lowering fixture exercised by
+  `tests/operator_271_closed_claims.rs` (claims 4 and 5). Its `types` block
+  declares a type named `BuiltinMacroLibrary`, a plain fixture declaration
   unrelated to the stringless `CoreSchema` substrate; its `generics` and `impls`
-  blocks are present and empty. The earlier name
-  collision — the macro library was itself once named `CoreSchema` — has been
-  resolved: the macro-library type was renamed to `BuiltinMacroLibrary`, so the
-  substrate name is free.
+  blocks are present and empty. The Rust builtin-macro library the name once
+  described has been retired along with the legacy macro registry — native
+  next-gen kind dispatch is the sole lowering path — so the fixture now stands
+  only as general schema input, and the `CoreSchema` substrate name stays free.
 
 ## Boundaries
 

@@ -7,8 +7,6 @@
 //! agent reverts any of the closures, the test fails.
 //!
 //! Coverage:
-//! - Claim 1 — macro-library source/artifact datatype split CLOSED
-//!   (schema `99078b20`).
 //! - Claim 4 — strict schema syntax and honest enum bodies CLOSED.
 //! - Claim 5 — SchemaSource as typed source data plus TrueSchema as typed
 //!   semantic data CLOSED.
@@ -16,154 +14,11 @@
 //! Companion witnesses live in:
 //! - `tests/source_codec.rs` — source text and source rkyv round-trip
 //!   witnesses (claim 5 substrate).
-//! - `tests/macro_exploration.rs::retired_duplicate_macro_datatype_names_do_not_return`
-//!   — negative-witness guard for claim 1.
-//! - The flake's `library-mirrors-collapsed` check — Nix-side regression
-//!   guard for claim 1.
 
 use nota::{Block, Delimiter, Document};
 use schema_language::{
-    MacroLibrary, MacroLibraryArtifact, SchemaEngine, SchemaIdentity, SchemaMacro,
-    SchemaSourceArtifact, TrueSchema, TypeDeclaration,
+    SchemaEngine, SchemaIdentity, SchemaSourceArtifact, TrueSchema, TypeDeclaration,
 };
-
-/// Claim 1 — `MacroLibrary` is one type, not split between source and
-/// artifact mirrors. The library's source-entries field is named
-/// `source_entries: Vec<MacroLibrarySourceEntry>` (the rename happened in
-/// the `99078b20` collapse) and the only present variant is `SchemaMacro`.
-#[test]
-fn macro_library_source_entries_are_one_type() {
-    let source = include_str!("../schemas/builtin-macros.macro-library");
-    let library = MacroLibrary::from_nota_source(source)
-        .expect("checked-in builtin macro library decodes through one MacroLibrary type");
-
-    assert!(
-        !library.source_entries().is_empty(),
-        "builtin library carries source entries through MacroLibrary::source_entries"
-    );
-
-    for entry in library.source_entries() {
-        // The variant_name() method names which enum case the entry holds.
-        // After the collapse, only `SchemaMacro` is present — there is no
-        // sibling `MacroLibrarySourceEntryData` enum behind the scenes.
-        assert_eq!(
-            entry.variant_name(),
-            "SchemaMacro",
-            "the only source-entry variant after the collapse is SchemaMacro"
-        );
-        // The definition accessor returns `&SchemaMacro` directly, not a
-        // separate `MacroDefinitionData` mirror.
-        let _macro_definition: &SchemaMacro = entry.definition();
-    }
-}
-
-/// Claim 1 — `MacroLibraryArtifact` wraps `MacroLibrary` and is the only
-/// projection noun for the artifact concern. The previous split between
-/// `DeclarativeMacroLibrary` and `MacroLibraryData` no longer exists in the
-/// public surface.
-#[test]
-fn macro_library_artifact_wraps_the_one_library_type() {
-    let source = include_str!("../schemas/builtin-macros.macro-library");
-    let artifact = MacroLibraryArtifact::from_nota_source(source)
-        .expect("checked-in builtin library decodes as artifact");
-
-    // The artifact projects to and from NOTA + rkyv through the same one
-    // library type — no Data mirror is required to traverse the boundary.
-    let nota = artifact.to_nota_source();
-    let from_nota = MacroLibraryArtifact::from_nota_source(&nota)
-        .expect("artifact NOTA round-trips through one library type");
-    assert_eq!(artifact.library(), from_nota.library());
-
-    let bytes = artifact
-        .to_binary_bytes()
-        .expect("artifact archives through rkyv");
-    let from_binary =
-        MacroLibraryArtifact::from_binary_bytes(&bytes).expect("artifact decodes from rkyv bytes");
-    assert_eq!(artifact.library(), from_binary.library());
-
-    // `into_library()` consumes the artifact into the inner library noun.
-    // The conversion does not pass through any intermediate Data type.
-    let library: MacroLibrary = artifact.into_library();
-    assert!(!library.source_entries().is_empty());
-}
-
-/// Claim 1 — Source-AST witness that the legacy split names are absent from
-/// the public surface of the library code. This complements the existing
-/// guard in `tests/macro_exploration.rs::retired_duplicate_macro_datatype_names_do_not_return`
-/// by scanning the `pub use` re-export in `lib.rs` and the type declarations
-/// at the head of `declarative.rs`.
-#[test]
-fn macro_library_split_does_not_return_through_public_surface() {
-    let lib_rs = include_str!("../src/lib.rs");
-    let declarative_rs = include_str!("../src/declarative.rs");
-
-    // The collapse removed these as PUBLIC types; the regression guard at
-    // tests/macro_exploration.rs:400 covers the broader file, but the
-    // tightest signal is that the `pub use` line for declarative no longer
-    // contains the retired Data names.
-    let pub_use_block = lib_rs
-        .lines()
-        .skip_while(|line| !line.contains("pub use declarative::"))
-        .take_while(|line| !line.trim().ends_with("};"))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let retired_public_names = [
-        "DeclarativeMacroLibrary",
-        "MacroLibraryData",
-        "MacroLibrarySourceEntryData",
-        "MacroDefinitionData",
-        "MacroPatternData",
-        "MacroTemplateData",
-    ];
-    for retired in retired_public_names {
-        assert!(
-            !pub_use_block.contains(retired),
-            "schema lib.rs must not re-export retired split name {retired}"
-        );
-    }
-
-    // The current `pub use` line MUST carry the present shape's names.
-    assert!(
-        pub_use_block.contains("MacroLibrary,") || pub_use_block.contains("MacroLibrary\n"),
-        "schema lib.rs must re-export MacroLibrary as the one type"
-    );
-    assert!(
-        pub_use_block.contains("MacroLibraryArtifact"),
-        "schema lib.rs must re-export MacroLibraryArtifact"
-    );
-    assert!(
-        pub_use_block.contains("MacroLibrarySourceEntry,")
-            || pub_use_block.contains("MacroLibrarySourceEntry\n"),
-        "schema lib.rs must re-export MacroLibrarySourceEntry"
-    );
-
-    // The declarative source declares the present canonical shape.
-    assert!(
-        declarative_rs.contains("pub struct MacroLibrary {"),
-        "declarative.rs must declare pub struct MacroLibrary"
-    );
-    assert!(
-        declarative_rs.contains("pub struct MacroLibraryArtifact {"),
-        "declarative.rs must declare pub struct MacroLibraryArtifact"
-    );
-    assert!(
-        declarative_rs.contains("pub enum MacroLibrarySourceEntry {"),
-        "declarative.rs must declare pub enum MacroLibrarySourceEntry"
-    );
-    assert!(
-        declarative_rs.contains("source_entries: Vec<MacroLibrarySourceEntry>"),
-        "MacroLibrary must hold source_entries: Vec<MacroLibrarySourceEntry>"
-    );
-    assert!(
-        declarative_rs.contains("library: MacroLibrary"),
-        "MacroLibraryArtifact must hold library: MacroLibrary"
-    );
-    assert!(
-        declarative_rs.contains("SchemaMacro(SchemaMacro)"),
-        "MacroLibrarySourceEntry::SchemaMacro(SchemaMacro) is the canonical variant"
-    );
-}
 
 /// Claim 4 — Strict schema syntax: the production `core.schema` and
 /// `spirit-min.schema` carry legal NOTA enum bodies. Root headers use compact
@@ -174,13 +29,11 @@ fn production_schema_sources_use_honest_enum_bodies() {
     let core_schema = include_str!("../schemas/core.schema");
     let spirit_min_schema = include_str!("../schemas/spirit-min.schema");
     let root_schema = include_str!("../schemas/root.schema");
-    let builtin_macros_schema = include_str!("../schemas/builtin-macros.schema");
 
     for (name, source) in [
         ("core.schema", core_schema),
         ("spirit-min.schema", spirit_min_schema),
         ("root.schema", root_schema),
-        ("builtin-macros.schema", builtin_macros_schema),
     ] {
         // No retired `@` short-suffix variant sugar.
         // Allowed `@` use: none in schema files. The check is total.
