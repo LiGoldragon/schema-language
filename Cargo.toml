@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name         = "schema-language"
-version      = "0.2.0"
+version      = "0.2.1"
 edition      = "2024"
 rust-version = "1.85"
 license      = "MIT OR Apache-2.0"
@@ -19,7 +19,7 @@ path = "src/lib.rs"
 
 [dependencies]
 blake3 = "1"
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
+nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", rev = "ce7c564de0a0518eaa1938d55dccc460a67cadb4" }
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 thiserror = "2"
 
@@ -29,7 +29,7 @@ thiserror = "2"
 # as a workspace member, not a sibling repo.
 [build-dependencies]
 schema-language-cc = { path = "schema-language-cc" }
-nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", branch = "main" }
+nota = { package = "nota", git = "https://github.com/LiGoldragon/nota.git", rev = "ce7c564de0a0518eaa1938d55dccc460a67cadb4" }
 
 [lints.rust]
 unsafe_code = "forbid"
